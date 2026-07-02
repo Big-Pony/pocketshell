@@ -18,7 +18,7 @@
     fit.fit();
 
     // Render bytes for this session as they arrive.
-    const unsubscribeOutput = conn.onOutput((f) => {
+    let unsubscribeOutput: (() => void) | undefined = conn.onOutput((f) => {
       if (f.sessionId === sessionId) term.write(f.data);
     });
 
@@ -39,7 +39,7 @@
     window.addEventListener("resize", onResize);
     onDestroy(() => {
       window.removeEventListener("resize", onResize);
-      unsubscribeOutput();
+      unsubscribeOutput?.();
     });
   });
 
