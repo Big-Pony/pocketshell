@@ -29,9 +29,10 @@ export class Connection {
     const factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
     this.ws = factory(opts.url);
     this.ws.onopen = () => {
-      this.open = true;
-      for (const raw of this.queue) this.ws.send(raw);
+      const pending = this.queue;
       this.queue = [];
+      for (const raw of pending) this.ws.send(raw);
+      this.open = true;
     };
     this.ws.onmessage = (ev) => this.dispatch(ev.data);
     this.ws.onclose = () => {
@@ -40,7 +41,13 @@ export class Connection {
   }
 
   private dispatch(raw: string): void {
-    const msg = decodeServer(raw);
+    let msg;
+    try {
+      msg = decodeServer(raw);
+    } catch (e) {
+      console.error("[Connection] dropped malformed frame", e);
+      return;
+    }
     if (msg.type === "output") {
       const f = { sessionId: msg.sessionId, seq: msg.seq, data: fromB64(msg.data) };
       for (const cb of this.outputCbs) cb(f);
@@ -69,7 +76,10 @@ export class Connection {
   kill(sessionId: string): void {
     this.send({ type: "kill", sessionId });
   }
-  onOutput(cb: OutputCb): void {
+  onOutput(cb: OutputCb): () => void {
     this.outputCbs.push(cb);
+    return () => {
+      this.outputCbs = this.outputCbs.filter((c) => c !== cb);
+    };
   }
 }
