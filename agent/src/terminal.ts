@@ -51,7 +51,6 @@ export class TerminalService {
     let changed = false;
     for (const [name, live] of this.sessions) {
       const st = inferState({ hasSession: this.hasSession(name), lastOutputAt: live.lastOutputAt, now });
-      live.meta.state = st;
       if (this.lastStates.get(name) !== st) {
         this.lastStates.set(name, st);
         changed = true;

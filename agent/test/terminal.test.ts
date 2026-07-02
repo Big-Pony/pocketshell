@@ -1,6 +1,5 @@
 import { test, expect } from "bun:test";
 import { TerminalService } from "../src/terminal";
-import { inferState } from "../src/state"; // ensure state module is wired
 
 const hasTmux = Bun.spawnSync(["tmux", "-V"]).exitCode === 0;
 const NAME = "pocketshell_test";
