@@ -55,3 +55,16 @@ test.skipIf(!hasTmux)("onSessionsChange fires when a session's state changes", a
   await svc.kill(NAME);
   svc.dispose();
 });
+
+test.skipIf(!hasTmux)("rename changes the session name in the list", async () => {
+  const svc = new TerminalService();
+  const NEW = "pocketshell_test_renamed";
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(300);
+  svc.rename(NAME, NEW);
+  const names = svc.list().map((s) => s.name);
+  expect(names).toContain(NEW);
+  expect(names).not.toContain(NAME);
+  await svc.kill(NEW);
+  svc.dispose();
+});

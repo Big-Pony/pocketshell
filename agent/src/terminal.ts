@@ -148,6 +148,24 @@ export class TerminalService {
     this.emitSessionsChange();
   }
 
+  rename(name: string, newName: string): void {
+    const live = this.sessions.get(name);
+    if (!live) return;
+    const res = Bun.spawnSync(["tmux", "rename-session", "-t", name, newName]);
+    if (res.exitCode !== 0) {
+      throw new Error(
+        `tmux rename-session failed for "${name}": ${new TextDecoder().decode(res.stderr)}`,
+      );
+    }
+    live.meta.name = newName;
+    this.sessions.delete(name);
+    this.sessions.set(newName, live);
+    const st = this.lastStates.get(name);
+    this.lastStates.delete(name);
+    if (st) this.lastStates.set(newName, st);
+    this.emitSessionsChange();
+  }
+
   list(): SessionMeta[] {
     const now = Date.now();
     return [...this.sessions.values()].map((l) => ({
