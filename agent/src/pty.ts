@@ -21,6 +21,7 @@ export interface PtyHandle {
 }
 
 export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): PtyHandle {
+  let killed = false;
   const dataCbs: ((chunk: Uint8Array) => void)[] = [];
   const exitCbs: ((code: number) => void)[] = [];
 
@@ -47,14 +48,17 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
 
   return {
     write(data) {
-      terminal.write(data);
+      if (!killed) terminal.write(data);
     },
     resize(cols, rows) {
-      terminal.resize(cols, rows);
+      if (!killed) terminal.resize(cols, rows);
     },
     kill() {
+      killed = true;
       proc.kill();
       terminal.close();
+      dataCbs.length = 0;
+      exitCbs.length = 0;
     },
     onData(cb) {
       dataCbs.push(cb);
