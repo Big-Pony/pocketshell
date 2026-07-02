@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# Node / Bun
+node_modules/
+dist/
+.env
+.env.local
+bun.lockb
