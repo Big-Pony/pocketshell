@@ -25,9 +25,12 @@ test.skipIf(!hasTmux)("newSession + input round-trips output over WS", async () 
   ws.send(encode({ type: "input", sessionId: NAME, data: btoa("echo WS_OK\n") }));
   await Bun.sleep(700);
 
-  expect(outputs.join("")).toContain("WS_OK");
-
-  ws.send(encode({ type: "kill", sessionId: NAME }));
-  ws.close();
-  srv.stop();
+  try {
+    expect(outputs.join("")).toContain("WS_OK");
+  } finally {
+    ws.send(encode({ type: "kill", sessionId: NAME }));
+    await Bun.sleep(100); // let the kill flush before tearing down
+    ws.close();
+    srv.stop();
+  }
 });

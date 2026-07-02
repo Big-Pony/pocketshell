@@ -1,6 +1,7 @@
 // A3 (slice-1, plaintext): a Bun WebSocket server wiring the wire protocol to
 // TerminalService (A2) + ReplayService (A4). Noise handshake + pairing land in
 // a later slice; the message shapes here are the frozen contract from A3 §3.
+import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
@@ -21,9 +22,9 @@ export function startServer(deps: Deps = {}) {
 
   // All currently-open sockets (slice 1: broadcast output to every socket; a
   // later slice scopes delivery to the sockets that attached each session).
-  const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
+  const sockets = new Set<ServerWebSocket<unknown>>();
 
-  const send = (ws: import("bun").ServerWebSocket<unknown>, msg: ServerMsg) =>
+  const send = (ws: ServerWebSocket<unknown>, msg: ServerMsg) =>
     ws.send(encode(msg));
 
   // Number every output chunk, then fan out to attached clients.
@@ -64,6 +65,7 @@ export function startServer(deps: Deps = {}) {
             break;
           case "attach": {
             // Backfill anything the client missed (slice 1: usually nothing).
+            // gap flag ignored in slice 1; a later slice will send a re-sync marker when true.
             const { frames } = replay.since(msg.sessionId, msg.lastSeq ?? 0);
             for (const f of frames) {
               send(ws, { type: "output", sessionId: f.sessionId, seq: f.seq, data: toB64(f.data) });
@@ -78,6 +80,9 @@ export function startServer(deps: Deps = {}) {
             break;
           case "kill":
             void terminal.kill(msg.sessionId);
+            break;
+          default:
+            send(ws, { type: "error", code: "unknown_type", message: "unknown message type" });
             break;
         }
       },
