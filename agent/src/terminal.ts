@@ -35,7 +35,12 @@ export class TerminalService {
       const args = ["tmux", "new-session", "-d", "-s", name];
       if (opt.cwd) args.push("-c", opt.cwd);
       if (opt.cmd) args.push(opt.cmd);
-      Bun.spawnSync(args);
+      const res = Bun.spawnSync(args);
+      if (res.exitCode !== 0) {
+        throw new Error(
+          `tmux new-session failed for "${name}": ${new TextDecoder().decode(res.stderr)}`,
+        );
+      }
     }
 
     const pty = spawnPty({ cmd: ["tmux", "attach", "-t", name], cols, rows });
