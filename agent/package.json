@@ -1,0 +1,13 @@
+{
+  "name": "pocketshell-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.14"
+  }
+}
