@@ -34,3 +34,45 @@ test.skipIf(!hasTmux)("newSession + input round-trips output over WS", async () 
     srv.stop();
   }
 });
+
+test.skipIf(!hasTmux)("newSession broadcasts a sessions frame including the session", async () => {
+  const srv = startServer({ port: 0 });
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  const sessionsFrames: string[][] = [];
+  await new Promise<void>((res) => (ws.onopen = () => res()));
+  ws.onmessage = (ev) => {
+    const msg = decodeServer(ev.data as string);
+    if (msg.type === "sessions") sessionsFrames.push(msg.sessions.map((s) => s.name));
+  };
+  const NAME = "pocketshell_ws_sessions";
+  try {
+    ws.send(encode({ type: "newSession", name: NAME }));
+    await Bun.sleep(300);
+    ws.send(encode({ type: "renameSession", sessionId: NAME, name: NAME + "_r" }));
+    await Bun.sleep(300);
+    const flat = sessionsFrames.flat();
+    expect(flat).toContain(NAME);          // seen before rename
+    expect(flat).toContain(NAME + "_r");   // seen after rename
+  } finally {
+    ws.send(encode({ type: "kill", sessionId: NAME + "_r" }));
+    await Bun.sleep(100);
+    ws.close();
+    srv.stop();
+  }
+});
+
+test("listSessions on an empty agent returns an empty sessions frame", async () => {
+  const srv = startServer({ port: 0 });
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  let got: string[] | null = null;
+  await new Promise<void>((res) => (ws.onopen = () => res()));
+  ws.onmessage = (ev) => {
+    const msg = decodeServer(ev.data as string);
+    if (msg.type === "sessions") got = msg.sessions.map((s) => s.name);
+  };
+  ws.send(encode({ type: "listSessions" }));
+  await Bun.sleep(150);
+  expect(got).toEqual([]);
+  ws.close();
+  srv.stop();
+});
