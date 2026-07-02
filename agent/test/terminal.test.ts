@@ -69,6 +69,22 @@ test.skipIf(!hasTmux)("rename changes the session name in the list", async () =>
   svc.dispose();
 });
 
+test.skipIf(!hasTmux)("output is delivered under the new name after rename", async () => {
+  const svc = new TerminalService();
+  const NEW = "pocketshell_test_renamed_out";
+  const got: string[] = [];
+  svc.onOutput((name, chunk) => { if (name === NEW) got.push(new TextDecoder().decode(chunk)); });
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(400);
+  svc.rename(NAME, NEW);
+  await Bun.sleep(400);                 // let the re-attach settle
+  svc.write(NEW, new TextEncoder().encode("echo RENAMED_OUT\n"));
+  await Bun.sleep(700);
+  expect(got.join("")).toContain("RENAMED_OUT");  // must arrive tagged with NEW name
+  await svc.kill(NEW);
+  svc.dispose();
+});
+
 test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)", async () => {
   const svc = new TerminalService();
   const exited: string[] = [];

@@ -187,6 +187,11 @@ export class TerminalService {
     const st = this.lastStates.get(name);
     this.lastStates.delete(name);
     if (st) this.lastStates.set(newName, st);
+    // Re-wire the PTY so its onData/onExit closures capture the new name;
+    // otherwise output for this session keeps being emitted under the old name
+    // and the client (now keyed by the new name) receives nothing.
+    live.pty.kill();
+    live.pty = this.attach(newName, live.meta.cols, live.meta.rows);
     this.emitSessionsChange();
   }
 
