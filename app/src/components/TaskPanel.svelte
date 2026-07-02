@@ -19,12 +19,13 @@
   let menuFor = $state<string | null>(null);   // session name whose menu is open
   let confirmKill = $state<string | null>(null); // session name pending kill confirm
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let longPressed = false; // set when the 500ms timer fires; consumed in click handler
 
   function startPress(name: string) {
-    timer = setTimeout(() => { menuFor = name; }, 500);
+    timer = setTimeout(() => { longPressed = true; menuFor = name; }, 500);
   }
   function endPress() {
-    if (timer) clearTimeout(timer);
+    if (timer) { clearTimeout(timer); timer = undefined; }
   }
   function closeMenu() {
     menuFor = null;
@@ -46,7 +47,7 @@
     <li>
       <button
         class="row"
-        onclick={() => onSelect(s.name)}
+        onclick={() => { if (longPressed) { longPressed = false; return; } onSelect(s.name); }}
         onpointerdown={() => startPress(s.name)}
         onpointerup={endPress}
         onpointerleave={endPress}

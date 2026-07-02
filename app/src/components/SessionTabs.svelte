@@ -23,6 +23,10 @@
     draft = "";
     adding = false;
   }
+
+  function autoFocus(node: HTMLElement) {
+    node.focus();
+  }
 </script>
 
 <nav class="tabs">
@@ -39,6 +43,7 @@
   {#if adding}
     <input
       class="new-input"
+      use:autoFocus
       bind:value={draft}
       placeholder="session name"
       onkeydown={(e) => e.key === "Enter" && submit()}
@@ -52,7 +57,7 @@
 <style>
   .tabs { display: flex; gap: 4px; overflow-x: auto; background: #111; padding: 4px; }
   .tab { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 0;
-         background: #222; color: #ccc; font-size: 13px; white-space: nowrap; border-radius: 6px; }
+         background: #222; color: #ccc; font-size: 13px; white-space: nowrap; border-radius: 6px; cursor: pointer; }
   .tab.active { background: #2d4; color: #000; }
   .dot { width: 8px; height: 8px; border-radius: 50%; }
   .dot-run { background: #2d4; }
