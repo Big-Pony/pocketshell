@@ -9,6 +9,7 @@ interface Live {
   pty: PtyHandle;
   meta: SessionMeta;
   lastOutputAt: number;
+  lastReattachAt?: number;
 }
 
 const SCAN_INTERVAL_MS = 1000;
@@ -81,13 +82,36 @@ export class TerminalService {
       if (live) live.lastOutputAt = Date.now();
       for (const cb of this.outputCbs) cb(name, chunk);
     });
-    pty.onExit((code) => {
-      this.sessions.delete(name);
-      this.lastStates.delete(name);
-      for (const cb of this.exitCbs) cb(name, code);
-      this.emitSessionsChange();
-    });
+    pty.onExit((code) => this.onPtyExit(name, code));
     return pty;
+  }
+
+  // tmux session is the source of truth: a dead PTY may just be a detach.
+  private onPtyExit(name: string, code: number): void {
+    const live = this.sessions.get(name);
+    if (!live) return; // already killed locally
+
+    if (this.hasSession(name)) {
+      // Session still alive -> this was a detach. Guard against a hot loop if
+      // has-session flaps by demoting to "done" when re-attaches come too fast.
+      const now = Date.now();
+      if (now - (live.lastReattachAt ?? 0) < 500) {
+        this.sessions.delete(name);
+        this.lastStates.delete(name);
+        for (const cb of this.exitCbs) cb(name, code);
+        this.emitSessionsChange();
+        return;
+      }
+      live.lastReattachAt = now;
+      live.pty = this.attach(name, live.meta.cols, live.meta.rows);
+      return;
+    }
+
+    // Session is really gone -> done.
+    this.sessions.delete(name);
+    this.lastStates.delete(name);
+    for (const cb of this.exitCbs) cb(name, code);
+    this.emitSessionsChange();
   }
 
   ensure(

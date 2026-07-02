@@ -68,3 +68,24 @@ test.skipIf(!hasTmux)("rename changes the session name in the list", async () =>
   await svc.kill(NEW);
   svc.dispose();
 });
+
+test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)", async () => {
+  const svc = new TerminalService();
+  const exited: string[] = [];
+  svc.onExit((name) => exited.push(name));
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(400);
+  // Detach every client attached to the session; the tmux session must survive.
+  Bun.spawnSync(["tmux", "detach-client", "-s", NAME]);
+  await Bun.sleep(600);
+  expect(exited).not.toContain(NAME);          // no exit fired
+  expect(svc.list().some((s) => s.name === NAME)).toBe(true); // still listed
+  // And it still streams after re-attach:
+  const chunks: string[] = [];
+  svc.onOutput((_n, c) => chunks.push(new TextDecoder().decode(c)));
+  svc.write(NAME, new TextEncoder().encode("echo REATTACH_OK\n"));
+  await Bun.sleep(600);
+  expect(chunks.join("")).toContain("REATTACH_OK");
+  await svc.kill(NAME);
+  svc.dispose();
+});
