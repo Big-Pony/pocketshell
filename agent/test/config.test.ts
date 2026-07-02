@@ -3,7 +3,7 @@ import { loadConfig } from "../src/config";
 
 test("provides defaults with no env", () => {
   const c = loadConfig({});
-  expect(c.listen.host).toBe("0.0.0.0");
+  expect(c.listen.host).toBe("127.0.0.1");
   expect(c.listen.port).toBe(8722);
   expect(c.replayBufferBytes).toBe(256 * 1024);
 });

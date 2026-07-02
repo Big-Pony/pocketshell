@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount } from "svelte";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { Connection } from "../lib/connection";
@@ -37,13 +37,13 @@
       conn.resize(sessionId, term.cols, term.rows);
     };
     window.addEventListener("resize", onResize);
-    onDestroy(() => {
+
+    return () => {
       window.removeEventListener("resize", onResize);
       unsubscribeOutput?.();
-    });
+      term?.dispose();
+    };
   });
-
-  onDestroy(() => term?.dispose());
 </script>
 
 <div class="term" bind:this={host}></div>

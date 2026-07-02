@@ -9,7 +9,7 @@ export interface AgentConfig {
 export function loadConfig(env: Record<string, string | undefined> = process.env): AgentConfig {
   return {
     listen: {
-      host: env.POCKETSHELL_HOST ?? "0.0.0.0",
+      host: env.POCKETSHELL_HOST ?? "127.0.0.1", // loopback by default; set POCKETSHELL_HOST=0.0.0.0 to expose on LAN
       port: env.POCKETSHELL_PORT ? Number(env.POCKETSHELL_PORT) : 8722,
     },
     workspaceRoot: env.POCKETSHELL_WORKSPACE ?? process.cwd(),
