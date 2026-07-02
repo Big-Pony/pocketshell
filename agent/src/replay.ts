@@ -35,7 +35,9 @@ export class ReplayService {
     s.ring.push(frame);
     s.bytes += chunk.byteLength;
     if (s.ring.length === 1) s.oldestSeq = frame.seq;
-    // Evict oldest frames until within cap (always keep at least the newest).
+    // Evict oldest frames until within cap, but always keep at least the newest
+    // frame — a single chunk larger than the whole cap intentionally stays,
+    // leaving bytes over cap rather than dropping data.
     while (s.bytes > this.capacityBytes && s.ring.length > 1) {
       const dropped = s.ring.shift()!;
       s.bytes -= dropped.data.byteLength;
@@ -48,7 +50,7 @@ export class ReplayService {
     const s = this.sessions.get(sessionId);
     if (!s || s.ring.length === 0) return { frames: [], gap: false };
     // gap if the client's lastSeq predates what we still hold.
-    const gap = lastSeq < s.oldestSeq;
+    const gap = lastSeq + 1 < s.oldestSeq;
     const frames = s.ring.filter((f) => f.seq > lastSeq);
     return { frames, gap };
   }
