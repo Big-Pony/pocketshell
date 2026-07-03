@@ -134,3 +134,26 @@ test("setStatus does not re-notify on the same status", () => {
   expect(seen.filter((s) => s === "online").length).toBe(1);
   conn.dispose?.();
 });
+
+test("tracks max seq per session and attaches with it", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  ws.open();
+  ws.emit(encode({ type: "output", sessionId: "s1", seq: 5, data: toB64(new Uint8Array([65])) }));
+  ws.emit(encode({ type: "output", sessionId: "s1", seq: 4, data: toB64(new Uint8Array([66])) })); // out-of-order lower, ignored for max
+  ws.sent.length = 0;
+  conn.attach("s1");
+  expect(JSON.parse(ws.sent[0])).toEqual({ type: "attach", sessionId: "s1", lastSeq: 5 });
+});
+
+test("dispatches resync frames to onResync", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  ws.open();
+  const got: any[] = [];
+  conn.onResync((f) => got.push(f));
+  ws.emit(encode({ type: "resync", sessionId: "s1", from: 9 }));
+  expect(got).toEqual([{ sessionId: "s1", from: 9 }]);
+});

@@ -42,6 +42,7 @@ type OutputCb = (f: { sessionId: string; seq: number; data: Uint8Array }) => voi
 type SessionsCb = (sessions: SessionMeta[]) => void;
 type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
+type ResyncCb = (f: { sessionId: string; from: number }) => void;
 
 export class Connection {
   private ws: WebSocketLike;
@@ -51,6 +52,9 @@ export class Connection {
   private sessionsCbs: SessionsCb[] = [];
   private exitCbs: ExitCb[] = [];
   private errorCbs: ErrorCb[] = [];
+  private resyncCbs: ResyncCb[] = [];
+  private attached = new Set<string>();
+  private seen = new Map<string, number>();
 
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
@@ -98,8 +102,12 @@ export class Connection {
       return;
     }
     if (msg.type === "output") {
+      const prev = this.seen.get(msg.sessionId) ?? 0;
+      if (msg.seq > prev) this.seen.set(msg.sessionId, msg.seq);
       const f = { sessionId: msg.sessionId, seq: msg.seq, data: fromB64(msg.data) };
       for (const cb of this.outputCbs) cb(f);
+    } else if (msg.type === "resync") {
+      for (const cb of this.resyncCbs) cb({ sessionId: msg.sessionId, from: msg.from });
     } else if (msg.type === "sessions") {
       for (const cb of this.sessionsCbs) cb(msg.sessions);
     } else if (msg.type === "exit") {
@@ -119,7 +127,9 @@ export class Connection {
     this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd });
   }
   attach(sessionId: string, lastSeq?: number): void {
-    this.send({ type: "attach", sessionId, lastSeq });
+    this.attached.add(sessionId);
+    const seq = this.seen.get(sessionId) ?? lastSeq ?? 0;
+    this.send({ type: "attach", sessionId, lastSeq: seq });
   }
   sendInput(sessionId: string, data: Uint8Array): void {
     this.send({ type: "input", sessionId, data: toB64(data) });
@@ -153,5 +163,13 @@ export class Connection {
   onError(cb: ErrorCb): () => void {
     this.errorCbs.push(cb);
     return () => { this.errorCbs = this.errorCbs.filter((c) => c !== cb); };
+  }
+  onResync(cb: ResyncCb): () => void {
+    this.resyncCbs.push(cb);
+    return () => { this.resyncCbs = this.resyncCbs.filter((c) => c !== cb); };
+  }
+  detach(sessionId: string): void {
+    this.attached.delete(sessionId);
+    this.seen.delete(sessionId);
   }
 }
