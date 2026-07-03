@@ -96,6 +96,10 @@ test("attach with an evicted lastSeq sends a resync before backfill frames", asy
   expect(resync).toEqual({ type: "resync", sessionId: "x", from: 3 });
   const outSeqs = got.filter((m) => m.type === "output").map((m) => m.seq);
   expect(outSeqs).toEqual([3, 4]);
+  // Assert that resync precedes backfill frames
+  const resyncIdx = got.findIndex((m) => m.type === "resync");
+  const firstOutputIdx = got.findIndex((m) => m.type === "output");
+  expect(resyncIdx).toBeLessThan(firstOutputIdx);
   ws.close();
   srv.stop();
 });
