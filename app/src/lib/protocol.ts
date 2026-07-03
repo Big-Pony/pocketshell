@@ -10,6 +10,15 @@ export interface SessionMeta {
   createdAt: number;
 }
 
+export interface DeviceInfo {
+  pubKey: string;
+  name: string;
+  addedAt: string;
+  lastSeen: string | null;
+  source: "registry" | "env";
+  self: boolean;
+}
+
 export type ClientMsg =
   | { type: "attach"; sessionId: string; lastSeq?: number }
   | { type: "input"; sessionId: string; data: string }
@@ -18,7 +27,10 @@ export type ClientMsg =
   | { type: "kill"; sessionId: string }
   | { type: "listSessions" }
   | { type: "renameSession"; sessionId: string; name: string }
-  | { type: "ping" };
+  | { type: "ping" }
+  | { type: "pair"; code: string; deviceName: string }
+  | { type: "listDevices" }
+  | { type: "revokeDevice"; pubKey: string };
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }
@@ -26,7 +38,9 @@ export type ServerMsg =
   | { type: "exit"; sessionId: string; code: number }
   | { type: "error"; code: string; message: string }
   | { type: "pong" }
-  | { type: "resync"; sessionId: string; from: number };
+  | { type: "resync"; sessionId: string; from: number }
+  | { type: "paired"; ok: true }
+  | { type: "devices"; devices: DeviceInfo[] };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);
