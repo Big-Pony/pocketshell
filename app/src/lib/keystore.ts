@@ -5,6 +5,8 @@ import { toB64, fromB64 } from "./bytes";
 
 const ID_KEY = "pocketshell.identity";
 const AGENT_KEY = "pocketshell.agentPubKey";
+const ADDR_KEY = "pocketshell.agentAddr";
+const PENDING_KEY = "pocketshell.pendingPair";
 
 export function loadOrCreateIdentity(store: Storage = localStorage): { publicKey: Uint8Array; secretKey: Uint8Array } {
   const raw = store.getItem(ID_KEY);
@@ -24,4 +26,24 @@ export function loadOrCreateIdentity(store: Storage = localStorage): { publicKey
 export function getAgentPubKey(store: Storage = localStorage): Uint8Array | null {
   const b64 = store.getItem(AGENT_KEY) ?? (import.meta.env.VITE_AGENT_PUBKEY as string | undefined);
   return b64 ? fromB64(b64) : null;
+}
+
+export function getAgentAddr(store: Storage = localStorage): string | null {
+  return store.getItem(ADDR_KEY);
+}
+
+export function applyPairing(p: { pub: string; addr: string; code: string; deviceName: string }, store: Storage = localStorage): void {
+  store.setItem(AGENT_KEY, p.pub);
+  store.setItem(ADDR_KEY, p.addr);
+  store.setItem(PENDING_KEY, JSON.stringify({ code: p.code, deviceName: p.deviceName }));
+}
+
+export function getPendingPair(store: Storage = localStorage): { code: string; deviceName: string } | null {
+  const raw = store.getItem(PENDING_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+export function clearPendingPair(store: Storage = localStorage): void {
+  store.removeItem(PENDING_KEY);
 }
