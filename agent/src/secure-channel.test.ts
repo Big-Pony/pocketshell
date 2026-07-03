@@ -72,4 +72,5 @@ test("tampered transport frame -> fail", () => {
   const bad = new Uint8Array(Buffer.concat([Buffer.from(enc), Buffer.from([0])]));
   const dec = ch.receive(bad);
   expect(dec.status).toBe("fail");
+  expect(ch.state).toBe("failed");
 });
