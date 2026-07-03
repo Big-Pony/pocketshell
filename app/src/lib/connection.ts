@@ -103,13 +103,12 @@ export class Connection {
       const pending = this.queue;
       this.queue = [];
       for (const raw of pending) socket.send(raw);
-      // on reconnect: re-attach all attached sessions with their seen seq + send listSessions
-      if (this.attached.size > 0) {
-        for (const id of this.attached) {
-          socket.send(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 }));
-        }
-        socket.send(encode({ type: "listSessions" }));
+      // on reconnect: re-attach all attached sessions with their seen seq
+      for (const id of this.attached) {
+        socket.send(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 }));
       }
+      // always refresh session list on connect (regardless of attached sessions)
+      socket.send(encode({ type: "listSessions" }));
       this.setStatus("online");
     };
     socket.onmessage = (ev) => {

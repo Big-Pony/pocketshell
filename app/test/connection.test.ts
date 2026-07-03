@@ -66,7 +66,7 @@ test("queues nothing until open, then flushes newSession + input", () => {
   expect(ws.sent.length).toBe(0);          // not open yet -> buffered
   ws.open();
   const types = ws.sent.map((r) => JSON.parse(r).type);
-  expect(types).toEqual(["newSession", "input"]);
+  expect(types).toEqual(["newSession", "input", "listSessions"]);
 });
 
 test("decodes output frames and delivers decoded bytes", () => {
@@ -118,6 +118,7 @@ test("listSessions + renameSession are sent once open", () => {
   conn.renameSession("s1", "claude");
   const msgs = ws.sent.map((r) => JSON.parse(r));
   expect(msgs).toEqual([
+    { type: "listSessions" },
     { type: "listSessions" },
     { type: "renameSession", sessionId: "s1", name: "claude" },
   ]);
@@ -205,4 +206,14 @@ test("re-attaches all attached sessions with lastSeq on reconnect", () => {
   expect(msgs).toContainEqual({ type: "attach", sessionId: "s2", lastSeq: 0 });
   expect(msgs.some((m) => m.type === "listSessions")).toBe(true);
   conn.dispose();
+});
+
+test("sends listSessions on connect even with no attached sessions", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  ws.open();
+  const msgs = ws.sent.map((r) => JSON.parse(r));
+  expect(msgs.some((m) => m.type === "listSessions")).toBe(true);
+  conn.dispose?.();
 });
