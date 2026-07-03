@@ -3,12 +3,15 @@
 // storage, pairing, and rpc() are added in later slices.
 import { encode, decodeServer, type ClientMsg, type SessionMeta } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
+import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
+import { loadOrCreateIdentity, getAgentPubKey } from "./keystore";
 
 export interface WebSocketLike {
+  binaryType?: string;
   onopen: (() => void) | null;
-  onmessage: ((ev: { data: string }) => void) | null;
+  onmessage: ((ev: { data: ArrayBuffer }) => void) | null;
   onclose: (() => void) | null;
-  send(data: string): void;
+  send(data: Uint8Array): void;
   close(): void;
 }
 
@@ -36,6 +39,8 @@ export interface ConnectionOpts {
   scheduler?: Scheduler;
   heartbeatMs?: number;
   livenessMs?: number;
+  channelFactory?: () => SecureChannel;
+  handshakeTimeoutMs?: number;
 }
 
 type OutputCb = (f: { sessionId: string; seq: number; data: Uint8Array }) => void;
@@ -69,6 +74,11 @@ export class Connection {
   private hbTimer?: number;
   private lastRx = 0;
 
+  private channel!: SecureChannel;
+  private makeChannel: () => SecureChannel;
+  private handshakeTimeoutMs: number;
+  private hsTimer?: number;
+
   get status(): ConnStatus { return this._status; }
 
   onStatus(cb: (s: ConnStatus) => void): () => void {
@@ -91,7 +101,9 @@ export class Connection {
         this.ws.close(); // -> onclose guard passes (still current) -> handleDown
         return;
       }
-      if (this.open) this.ws.send(encode({ type: "ping" }));
+      if (this.open && this.channel.state === "transport") {
+        this.ws.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "ping" })))));
+      }
     }, this.heartbeatMs);
   }
 
@@ -102,18 +114,33 @@ export class Connection {
     }
   }
 
+  private clearHsTimer(): void {
+    if (this.hsTimer !== undefined) { this.sched.clearTimeout(this.hsTimer); this.hsTimer = undefined; }
+  }
+
   dispose(): void {
     this.stopHeartbeat();
+    this.clearHsTimer();
     if (this.reconnectTimer !== undefined) this.sched.clearTimeout(this.reconnectTimer);
     this.ws.close();
   }
 
   constructor(opts: ConnectionOpts) {
-    this.factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
+    this.factory = opts.wsFactory ?? ((u) => {
+      const ws = new WebSocket(u) as unknown as WebSocketLike;
+      ws.binaryType = "arraybuffer";
+      return ws;
+    });
     this.url = opts.url;
     this.sched = opts.scheduler ?? realScheduler;
-    this.heartbeatMs = opts.heartbeatMs ?? 10_000;  // reserved for Task 8
-    this.livenessMs = opts.livenessMs ?? 25_000;    // reserved for Task 8
+    this.heartbeatMs = opts.heartbeatMs ?? 10_000;
+    this.livenessMs = opts.livenessMs ?? 25_000;
+    this.makeChannel = opts.channelFactory ?? (() => {
+      const agentPub = getAgentPubKey();
+      if (!agentPub) throw new Error("agent public key not configured");
+      return createInitiatorChannel({ identity: loadOrCreateIdentity(), agentPublicKey: agentPub });
+    });
+    this.handshakeTimeoutMs = opts.handshakeTimeoutMs ?? 5000;
     this.connect();
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
@@ -133,24 +160,33 @@ export class Connection {
     this.setStatus("connecting");
     socket.onopen = () => {
       if (socket !== this.ws) return;
-      this.open = true;
-      this.backoffAttempt = 0;
-      const pending = this.queue;
-      this.queue = [];
-      for (const raw of pending) socket.send(raw);
-      // on reconnect: re-attach all attached sessions with their seen seq
-      for (const id of this.attached) {
-        socket.send(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 }));
+      try {
+        this.channel = this.makeChannel();
+        const m1 = this.channel.start();
+        if (m1) socket.send(m1);
+      } catch (e) {
+        console.warn("[Connection] channel init failed:", e);
+        this.handleDown();
+        return;
       }
-      // always refresh session list on connect (regardless of attached sessions)
-      socket.send(encode({ type: "listSessions" }));
-      this.startHeartbeat();
-      this.setStatus("online");
+      this.hsTimer = this.sched.setTimeout(() => {
+        // no msg2 in time -> treat as down
+        this.clearHsTimer();
+        this.ws.close(); // -> onclose -> handleDown (offline + backoff + notice via status)
+      }, this.handshakeTimeoutMs);
     };
     socket.onmessage = (ev) => {
       if (socket !== this.ws) return;
       this.lastRx = this.sched.now();
-      this.dispatch(ev.data);
+      const bytes = new Uint8Array(ev.data);
+      const r = this.channel.receive(bytes);
+      if (r.status === "fail") { this.clearHsTimer(); this.ws.close(); return; }
+      if (r.status === "handshake") {
+        if (r.reply) socket.send(r.reply);
+        if (r.established) { this.clearHsTimer(); this.onEstablished(socket); }
+        return;
+      }
+      this.dispatch(new TextDecoder().decode(r.plaintext));
     };
     socket.onclose = () => {
       if (socket !== this.ws) return;
@@ -158,7 +194,23 @@ export class Connection {
     };
   }
 
+  private onEstablished(socket: WebSocketLike): void {
+    this.open = true;
+    this.backoffAttempt = 0;
+    const pending = this.queue; this.queue = [];
+    for (const raw of pending) socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(raw))));
+    // on reconnect: re-attach all attached sessions with their seen seq
+    for (const id of this.attached) {
+      socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 })))));
+    }
+    // always refresh session list on connect (regardless of attached sessions)
+    socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "listSessions" })))));
+    this.startHeartbeat();
+    this.setStatus("online");
+  }
+
   private handleDown(): void {
+    this.clearHsTimer();
     this.stopHeartbeat();
     this.open = false;
     this.setStatus("offline");
@@ -193,8 +245,11 @@ export class Connection {
 
   private send(msg: ClientMsg): void {
     const raw = encode(msg);
-    if (this.open) this.ws.send(raw);
-    else this.queue.push(raw);
+    if (this.open && this.channel && this.channel.state === "transport") {
+      this.ws.send(this.channel.send(new Uint8Array(new TextEncoder().encode(raw))));
+    } else {
+      this.queue.push(raw);
+    }
   }
 
   newSession(name: string, opt: { cmd?: string; cwd?: string } = {}): void {
