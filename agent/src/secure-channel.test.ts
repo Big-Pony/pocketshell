@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import Noise from "noise-handshake";
 import Cipher from "noise-handshake/cipher";
-import { createResponderChannel } from "./secure-channel";
+import { createResponderChannel, type AuthDecision } from "./secure-channel";
 import { toB64 } from "./bytes";
 import DH from "noise-handshake/dh";
 
@@ -25,7 +25,7 @@ test("authorized handshake completes and transports both ways", () => {
   const id = serverIdentity();
   const client = rawClient(id.publicKey);
   const clientPubB64 = toB64(new Uint8Array(client.s.publicKey));
-  const ch = createResponderChannel({ identity: id, authorizedKeys: [clientPubB64] });
+  const ch = createResponderChannel({ identity: id, authorize: (p) => p === clientPubB64 ? "authorized" : "reject" });
 
   expect(ch.start()).toBe(null);
   const m1 = client.send();
@@ -33,6 +33,8 @@ test("authorized handshake completes and transports both ways", () => {
   expect(r.status).toBe("handshake");
   if (r.status !== "handshake") throw new Error();
   expect(r.established).toBe(true);
+  expect(r.pending).toBeFalsy();
+  expect(r.remoteStatic).toBe(clientPubB64);
   expect(r.reply).toBeDefined();
   client.recv(Buffer.from(r.reply!));
   expect(client.complete).toBe(true);
@@ -54,7 +56,7 @@ test("authorized handshake completes and transports both ways", () => {
 test("unauthorized client is rejected", () => {
   const id = serverIdentity();
   const client = rawClient(id.publicKey);
-  const ch = createResponderChannel({ identity: id, authorizedKeys: [] }); // empty allowlist
+  const ch = createResponderChannel({ identity: id, authorize: () => "reject" });
   const r = ch.receive(new Uint8Array(client.send()));
   expect(r.status).toBe("fail");
   expect(ch.state).toBe("failed");
@@ -63,7 +65,7 @@ test("unauthorized client is rejected", () => {
 test("tampered transport frame -> fail", () => {
   const id = serverIdentity();
   const client = rawClient(id.publicKey);
-  const ch = createResponderChannel({ identity: id, authorizedKeys: [toB64(new Uint8Array(client.s.publicKey))] });
+  const ch = createResponderChannel({ identity: id, authorize: () => "authorized" });
   const r = ch.receive(new Uint8Array(client.send()));
   if (r.status !== "handshake") throw new Error();
   client.recv(Buffer.from(r.reply!));
@@ -73,4 +75,18 @@ test("tampered transport frame -> fail", () => {
   const dec = ch.receive(bad);
   expect(dec.status).toBe("fail");
   expect(ch.state).toBe("failed");
+});
+
+test("pending decision completes handshake but flags pending + remoteStatic", () => {
+  const id = serverIdentity();
+  const client = rawClient(id.publicKey);
+  const clientPubB64 = toB64(new Uint8Array(client.s.publicKey));
+  const ch = createResponderChannel({ identity: id, authorize: () => "pending" });
+  const r = ch.receive(new Uint8Array(client.send()));
+  expect(r.status).toBe("handshake");
+  if (r.status !== "handshake") throw new Error();
+  expect(r.established).toBe(true);
+  expect(r.pending).toBe(true);
+  expect(r.remoteStatic).toBe(clientPubB64);
+  expect(ch.state).toBe("transport"); // encrypted channel usable, awaiting pair
 });

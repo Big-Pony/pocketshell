@@ -25,7 +25,7 @@ export function startServer(deps: Deps = {}) {
 
   const channelFactory =
     deps.channelFactory ??
-    (() => createResponderChannel({ identity: config.identity, authorizedKeys: config.authorizedKeys }));
+    (() => createResponderChannel({ identity: config.identity, authorize: (p) => config.authorizedKeys.includes(p) ? "authorized" : "reject" }));
 
   interface Conn { ws: ServerWebSocket<unknown>; channel: SecureChannel; ready: boolean; }
   const conns = new Map<ServerWebSocket<unknown>, Conn>();
