@@ -41,3 +41,18 @@ test("initiator drives IK against a raw responder and transports", () => {
   if (dec.status !== "message") throw new Error();
   expect(str(dec.plaintext)).toBe("pong");
 });
+
+test("receive after a failure returns bad_state", () => {
+  const serverId = kp();
+  const clientId = kp();
+  const ch = createInitiatorChannel({ identity: clientId, agentPublicKey: serverId.publicKey });
+  ch.start();
+  // feed a garbage msg2 so hs.recv throws -> state becomes "failed"
+  const bad = ch.receive(new Uint8Array([9, 9, 9, 9]));
+  expect(bad.status).toBe("fail");
+  expect(ch.state).toBe("failed");
+  // any further receive hits the bad_state guard
+  const again = ch.receive(new Uint8Array([1, 2, 3]));
+  expect(again.status).toBe("fail");
+  if (again.status === "fail") expect(again.reason).toBe("bad_state");
+});
