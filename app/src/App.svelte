@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Terminal } from "@xterm/xterm";
-  import type { SessionMeta } from "./lib/protocol";
-  import { Connection } from "./lib/connection";
+  import { Connection, type ConnStatus } from "./lib/connection";
+  import { mergeSessions, tombstone, closeTab as closeTabFn, type LocalSession } from "./lib/session-view";
   import TerminalView from "./components/Terminal.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import TaskPanel from "./components/TaskPanel.svelte";
@@ -9,42 +9,43 @@
   const url = `ws://${location.hostname}:8722`;
   const conn = new Connection({ url });
 
-  let sessions = $state<SessionMeta[]>([]);
+  let sessions = $state<LocalSession[]>([]);
   let activeId = $state("");
   let panelOpen = $state(false);
   let notice = $state("");
+  let status = $state<ConnStatus>("connecting");
   const terms = new Map<string, Terminal>();
 
+  conn.onStatus((s) => (status = s));
   conn.onSessions((list) => {
-    sessions = list;
-    if (!activeId && list.length) activeId = list[0].name;
+    sessions = mergeSessions(sessions, list);
+    if (!activeId && sessions.length) activeId = sessions[0].name;
   });
-  conn.onExit((f) => {
-    // Mark done locally; keep the tab so the last screen stays visible.
-    sessions = sessions.map((s) => (s.name === f.sessionId ? { ...s, state: "done" } : s));
+  conn.onExit((f) => { sessions = tombstone(sessions, f.sessionId); });
+  conn.onResync(() => {
+    notice = "部分历史超出缓冲、未补齐";
+    setTimeout(() => (notice = ""), 4000);
   });
   conn.onError((f) => {
     notice = `${f.code}: ${f.message}`;
     setTimeout(() => (notice = ""), 4000);
   });
 
-  // Pull the current list once connected (also covers reconnecting to a running agent).
   conn.listSessions();
 
-  function newSession(name: string) {
-    conn.newSession(name);
-    activeId = name;
-  }
-  function selectSession(name: string) {
-    activeId = name;
-    panelOpen = false;
-  }
+  function newSession(name: string) { conn.newSession(name); activeId = name; }
+  function selectSession(name: string) { activeId = name; panelOpen = false; }
   function renameSession(name: string, next: string) {
     conn.renameSession(name, next);
+    sessions = sessions.map((s) => (s.name === name ? { ...s, name: next } : s)); // optimistic
     if (activeId === name) activeId = next;
   }
-  function killSession(name: string) {
-    conn.kill(name);
+  function killSession(name: string) { conn.kill(name); }
+  function closeTab(name: string) {
+    conn.detach(name);
+    sessions = closeTabFn(sessions, name);
+    terms.delete(name);
+    if (activeId === name) activeId = sessions[0]?.name ?? "";
   }
   function copyOutput(name: string) {
     const term = terms.get(name);
@@ -57,7 +58,14 @@
 </script>
 
 <div class="shell">
-  <SessionTabs {sessions} {activeId} onSelect={selectSession} onNew={newSession} />
+  <div class="topbar">
+    <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
+    <SessionTabs {sessions} {activeId} onSelect={selectSession} onNew={newSession} onClose={closeTab} />
+  </div>
+
+  {#if status !== "online"}
+    <div class="banner">连接断开，正在重连…</div>
+  {/if}
 
   <div class="main">
     {#each sessions as s (s.name)}
@@ -65,6 +73,7 @@
         {conn}
         sessionId={s.name}
         active={s.name === activeId}
+        closed={s.closed ?? false}
         onReady={(id, t) => terms.set(id, t)}
       />
     {/each}
@@ -82,6 +91,7 @@
         onRename={renameSession}
         onKill={killSession}
         onCopy={copyOutput}
+        onClose={closeTab}
       />
     </div>
   {/if}
@@ -91,6 +101,12 @@
 
 <style>
   .shell { display: flex; flex-direction: column; height: 100dvh; background: #000; }
+  .topbar { display: flex; align-items: center; gap: 6px; background: #111; }
+  .conn-dot { width: 9px; height: 9px; border-radius: 50%; margin-left: 8px; flex: 0 0 auto; }
+  .conn-dot.online { background: #2d4; }
+  .conn-dot.connecting { background: #fd3; }
+  .conn-dot.offline { background: #e33; }
+  .banner { background: #a33; color: #fff; padding: 6px 12px; font-size: 13px; text-align: center; }
   .main { position: relative; flex: 1; min-height: 0; }
   .hint { color: #777; padding: 24px; text-align: center; }
   .panel-toggle { position: fixed; right: 12px; bottom: 12px; padding: 10px 14px;

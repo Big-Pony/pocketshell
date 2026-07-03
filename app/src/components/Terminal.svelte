@@ -8,11 +8,13 @@
     conn,
     sessionId,
     active,
+    closed = false,
     onReady,
   }: {
     conn: Connection;
     sessionId: string;
     active: boolean;
+    closed?: boolean;
     onReady?: (sessionId: string, term: Terminal) => void;
   } = $props();
 
@@ -37,6 +39,7 @@
     onReady?.(sessionId, term);
 
     term.onData((data: string) => {
+      if (closed) return;
       conn.sendInput(sessionId, new TextEncoder().encode(data));
     });
 
