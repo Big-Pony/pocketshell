@@ -115,6 +115,15 @@ export class Connection {
     this.heartbeatMs = opts.heartbeatMs ?? 10_000;  // reserved for Task 8
     this.livenessMs = opts.livenessMs ?? 25_000;    // reserved for Task 8
     this.connect();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && this._status === "offline") {
+          if (this.reconnectTimer !== undefined) { this.sched.clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+          this.backoffAttempt = 0;
+          this.connect();
+        }
+      });
+    }
   }
 
   private connect(): void {
