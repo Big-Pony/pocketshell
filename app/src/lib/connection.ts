@@ -12,9 +12,30 @@ export interface WebSocketLike {
   close(): void;
 }
 
+export type ConnStatus = "connecting" | "online" | "offline";
+
+export interface Scheduler {
+  setTimeout(fn: () => void, ms: number): number;
+  clearTimeout(id: number): void;
+  setInterval(fn: () => void, ms: number): number;
+  clearInterval(id: number): void;
+  now(): number;
+}
+
+const realScheduler: Scheduler = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+  clearTimeout: (id) => clearTimeout(id),
+  setInterval: (fn, ms) => setInterval(fn, ms) as unknown as number,
+  clearInterval: (id) => clearInterval(id),
+  now: () => Date.now(),
+};
+
 export interface ConnectionOpts {
   url: string;
   wsFactory?: (url: string) => WebSocketLike;
+  scheduler?: Scheduler;
+  heartbeatMs?: number;
+  livenessMs?: number;
 }
 
 type OutputCb = (f: { sessionId: string; seq: number; data: Uint8Array }) => void;
@@ -31,7 +52,27 @@ export class Connection {
   private exitCbs: ExitCb[] = [];
   private errorCbs: ErrorCb[] = [];
 
+  private sched: Scheduler;
+  private statusCbs: ((s: ConnStatus) => void)[] = [];
+  private _status: ConnStatus = "connecting";
+
+  get status(): ConnStatus { return this._status; }
+
+  onStatus(cb: (s: ConnStatus) => void): () => void {
+    this.statusCbs.push(cb);
+    return () => { this.statusCbs = this.statusCbs.filter((c) => c !== cb); };
+  }
+
+  private setStatus(s: ConnStatus): void {
+    if (this._status === s) return;
+    this._status = s;
+    for (const cb of this.statusCbs) cb(s);
+  }
+
+  dispose(): void { this.ws.close(); }
+
   constructor(opts: ConnectionOpts) {
+    this.sched = opts.scheduler ?? realScheduler;
     const factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
     this.ws = factory(opts.url);
     this.ws.onopen = () => {
@@ -39,10 +80,12 @@ export class Connection {
       this.queue = [];
       for (const raw of pending) this.ws.send(raw);
       this.open = true;
+      this.setStatus("online");
     };
     this.ws.onmessage = (ev) => this.dispatch(ev.data);
     this.ws.onclose = () => {
       this.open = false;
+      this.setStatus("offline");
     };
   }
 
