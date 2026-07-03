@@ -20,3 +20,15 @@ test("attach carries optional lastSeq", () => {
   if (msg.type !== "attach") throw new Error("wrong type");
   expect(msg.lastSeq).toBe(42);
 });
+
+test("decodes a listSessions client message", () => {
+  const msg = decodeClient(encode({ type: "listSessions" }));
+  expect(msg.type).toBe("listSessions");
+});
+
+test("decodes a renameSession client message", () => {
+  const msg = decodeClient(encode({ type: "renameSession", sessionId: "s1", name: "claude" }));
+  if (msg.type !== "renameSession") throw new Error("wrong type");
+  expect(msg.sessionId).toBe("s1");
+  expect(msg.name).toBe("claude");
+});

@@ -37,6 +37,12 @@ export function startServer(deps: Deps = {}) {
     for (const ws of sockets) send(ws, { type: "exit", sessionId: name, code });
   });
 
+  const pushSessions = () => {
+    const out = encode({ type: "sessions", sessions: terminal.list() });
+    for (const ws of sockets) ws.send(out);
+  };
+  terminal.onSessionsChange(pushSessions);
+
   const server = Bun.serve({
     hostname: config.listen.host,
     port: deps.port ?? config.listen.port,
@@ -61,7 +67,21 @@ export function startServer(deps: Deps = {}) {
         }
         switch (msg.type) {
           case "newSession":
-            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+            try {
+              terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+            } catch (e) {
+              send(ws, { type: "error", code: "ensure_failed", message: String(e) });
+            }
+            break;
+          case "listSessions":
+            send(ws, { type: "sessions", sessions: terminal.list() });
+            break;
+          case "renameSession":
+            try {
+              terminal.rename(msg.sessionId, msg.name);
+            } catch (e) {
+              send(ws, { type: "error", code: "rename_failed", message: String(e) });
+            }
             break;
           case "attach": {
             // Backfill anything the client missed (slice 1: usually nothing).
@@ -92,6 +112,7 @@ export function startServer(deps: Deps = {}) {
   return {
     port: server.port,
     stop() {
+      terminal.dispose();
       server.stop(true);
     },
   };

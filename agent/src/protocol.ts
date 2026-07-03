@@ -18,7 +18,9 @@ export type ClientMsg =
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
   | { type: "newSession"; name: string; cmd?: string; cwd?: string }
-  | { type: "kill"; sessionId: string };
+  | { type: "kill"; sessionId: string }
+  | { type: "listSessions" }
+  | { type: "renameSession"; sessionId: string; name: string };
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }

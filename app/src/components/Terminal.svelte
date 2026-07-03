@@ -4,7 +4,17 @@
   import { FitAddon } from "@xterm/addon-fit";
   import { Connection } from "../lib/connection";
 
-  let { conn, sessionId }: { conn: Connection; sessionId: string } = $props();
+  let {
+    conn,
+    sessionId,
+    active,
+    onReady,
+  }: {
+    conn: Connection;
+    sessionId: string;
+    active: boolean;
+    onReady?: (sessionId: string, term: Terminal) => void;
+  } = $props();
 
   let host: HTMLDivElement;
   let term: Terminal;
@@ -17,22 +27,21 @@
     term.open(host);
     fit.fit();
 
-    // Render bytes for this session as they arrive.
-    let unsubscribeOutput: (() => void) | undefined = conn.onOutput((f) => {
+    const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId === sessionId) term.write(f.data);
     });
 
-    // Ensure the session exists, then attach and size it to the viewport.
-    conn.newSession(sessionId);
+    // Session is created by App (SessionTabs "new"); here we only attach + size.
     conn.attach(sessionId);
     conn.resize(sessionId, term.cols, term.rows);
+    onReady?.(sessionId, term);
 
-    // Send keystrokes as raw bytes.
     term.onData((data: string) => {
       conn.sendInput(sessionId, new TextEncoder().encode(data));
     });
 
     const onResize = () => {
+      if (!active) return;
       fit.fit();
       conn.resize(sessionId, term.cols, term.rows);
     };
@@ -44,14 +53,18 @@
       term?.dispose();
     };
   });
+
+  // Re-fit when this session becomes visible (xterm can't measure while hidden).
+  $effect(() => {
+    if (active && term && fit) {
+      queueMicrotask(() => { fit.fit(); conn.resize(sessionId, term.cols, term.rows); });
+    }
+  });
 </script>
 
-<div class="term" bind:this={host}></div>
+<div class="term" class:hidden={!active} bind:this={host}></div>
 
 <style>
-  .term {
-    width: 100%;
-    height: 100dvh;
-    background: #000;
-  }
+  .term { width: 100%; height: 100%; background: #000; }
+  .hidden { display: none; }
 </style>
