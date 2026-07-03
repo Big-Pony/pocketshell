@@ -2,16 +2,63 @@ import { test, expect } from "vitest";
 import { Connection, type WebSocketLike, type Scheduler } from "../src/lib/connection";
 import { encode } from "../src/lib/protocol";
 import { toB64 } from "../src/lib/bytes";
+import type { SecureChannel } from "../src/lib/secure-channel";
+import type { SessionMeta } from "../src/lib/protocol";
 
+// Handshake marker bytes for the passthrough channel
+const M1 = new Uint8Array([1]);
+const M2 = new Uint8Array([2]);
+
+// Passthrough SecureChannel test double: identity encoding, IK-shaped handshake.
+// start() -> M1; receive(M2) -> established; in transport receive(frame) -> {status:"message",plaintext:frame}
+// send(pt) -> pt (no encryption, identity transform)
+function passthroughInitiator(): SecureChannel {
+  let state: SecureChannel["state"] = "handshaking";
+  return {
+    get state() { return state; },
+    start() { return M1; },
+    receive(frame: Uint8Array) {
+      if (state === "handshaking") {
+        if (frame[0] === M2[0]) { state = "transport"; return { status: "handshake" as const, established: true }; }
+        return { status: "fail" as const, reason: "bad" };
+      }
+      return { status: "message" as const, plaintext: frame };
+    },
+    send(pt: Uint8Array) { return pt; },
+  };
+}
+
+// Binary FakeWS: sends Uint8Array, receives via ArrayBuffer
 class FakeWS implements WebSocketLike {
+  binaryType = "arraybuffer";
   onopen: (() => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
+  onmessage: ((ev: { data: ArrayBuffer }) => void) | null = null;
   onclose: (() => void) | null = null;
-  sent: string[] = [];
-  send(data: string) { this.sent.push(data); }
+  sent: Uint8Array[] = [];
+  send(data: Uint8Array) { this.sent.push(data); }
   close() { this.onclose?.(); }
-  emit(raw: string) { this.onmessage?.({ data: raw }); }
+  // fire a bytes frame as if the server sent it
+  fire(b: Uint8Array) {
+    this.onmessage?.({ data: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
+  }
+  // simulate open
   open() { this.onopen?.(); }
+  // fire a server JSON message (post-handshake, in passthrough channel plaintext == wire bytes)
+  emit(raw: string) { this.fire(new TextEncoder().encode(raw)); }
+}
+
+// Complete the handshake: open triggers M1 sent, then fire M2 to get established
+function completeHandshake(ws: FakeWS) {
+  ws.open();     // sends M1
+  ws.fire(M2);   // established -> onEstablished() -> sends listSessions etc.
+}
+
+// Helper: decode a sent Uint8Array as JSON
+function decodeMsg(bytes: Uint8Array) { return JSON.parse(new TextDecoder().decode(bytes)); }
+// Helper: filter out the M1 handshake frame from sent array (index 0 after open)
+function businessSent(ws: FakeWS) {
+  // After open() and fire(M2): sent[0]=M1, sent[1..]=business frames
+  return ws.sent.slice(1);
 }
 
 function makeFakeScheduler() {
@@ -42,14 +89,18 @@ function makeFakeScheduler() {
   return { sched, advance };
 }
 
+// ──────────────────────────────────────────────────────────────
+// TEST 1 (orig): status starts connecting, goes online on open, offline on close
+// Preserved: online on established (post-handshake), offline on close
+// ──────────────────────────────────────────────────────────────
 test("status starts connecting, goes online on open, offline on close", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
   const seen: string[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
   conn.onStatus((s) => seen.push(s));
   expect(conn.status).toBe("connecting");
-  ws.open();
+  completeHandshake(ws);                 // open -> M1; M2 -> established -> "online"
   expect(conn.status).toBe("online");
   ws.close();
   expect(conn.status).toBe("offline");
@@ -57,36 +108,47 @@ test("status starts connecting, goes online on open, offline on close", () => {
   conn.dispose?.();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 2 (orig): queues nothing until open, then flushes newSession + input
+// Preserved: pre-open calls buffered, post-handshake flush includes queued msgs + listSessions
+// ──────────────────────────────────────────────────────────────
 test("queues nothing until open, then flushes newSession + input", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
   conn.newSession("s1");
   conn.sendInput("s1", new TextEncoder().encode("hi"));
-  expect(ws.sent.length).toBe(0);          // not open yet -> buffered
-  ws.open();
-  const types = ws.sent.map((r) => JSON.parse(r).type);
+  expect(ws.sent.length).toBe(0);        // not open yet -> buffered
+  completeHandshake(ws);
+  // sent[0]=M1(handshake), then business frames flushed
+  const types = businessSent(ws).map((b) => decodeMsg(b).type);
   expect(types).toEqual(["newSession", "input", "listSessions"]);
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 3 (orig): decodes output frames and delivers decoded bytes
+// Preserved: output bytes correctly delivered after handshake
+// ──────────────────────────────────────────────────────────────
 test("decodes output frames and delivers decoded bytes", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   const got: string[] = [];
   conn.onOutput((f) => got.push(new TextDecoder().decode(f.data)));
   ws.emit(encode({ type: "output", sessionId: "s1", seq: 1, data: toB64(new TextEncoder().encode("XYZ")) }));
   expect(got).toEqual(["XYZ"]);
 });
 
-import type { SessionMeta } from "../src/lib/protocol";
-
+// ──────────────────────────────────────────────────────────────
+// TEST 4 (orig): dispatches a sessions frame to onSessions
+// Preserved: sessions callback fires with correct payload after handshake
+// ──────────────────────────────────────────────────────────────
 test("dispatches a sessions frame to onSessions", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   const got: SessionMeta[][] = [];
   conn.onSessions((s) => got.push(s));
   const meta: SessionMeta = { name: "s1", state: "run", cols: 80, rows: 24, lastLine: "hi", createdAt: 0 };
@@ -94,11 +156,15 @@ test("dispatches a sessions frame to onSessions", () => {
   expect(got).toEqual([[meta]]);
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 5 (orig): dispatches exit + error frames
+// Preserved: exit/error callbacks fire with correct codes after handshake
+// ──────────────────────────────────────────────────────────────
 test("dispatches exit + error frames", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   const exits: number[] = [];
   const errs: string[] = [];
   conn.onExit((f) => exits.push(f.code));
@@ -109,14 +175,19 @@ test("dispatches exit + error frames", () => {
   expect(errs).toEqual(["boom"]);
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 6 (orig): listSessions + renameSession are sent once open
+// Preserved: listSessions auto-sent on established, plus explicit calls both appear
+// ──────────────────────────────────────────────────────────────
 test("listSessions + renameSession are sent once open", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   conn.listSessions();
   conn.renameSession("s1", "claude");
-  const msgs = ws.sent.map((r) => JSON.parse(r));
+  // businessSent skips M1; in order: listSessions(from onEstablished), listSessions(explicit), renameSession
+  const msgs = businessSent(ws).map((b) => decodeMsg(b));
   expect(msgs).toEqual([
     { type: "listSessions" },
     { type: "listSessions" },
@@ -124,64 +195,87 @@ test("listSessions + renameSession are sent once open", () => {
   ]);
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 7 (orig): setStatus does not re-notify on the same status
+// Preserved: duplicate "online" after second open (second handshake) is deduped
+// ──────────────────────────────────────────────────────────────
 test("setStatus does not re-notify on the same status", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
   const seen: string[] = [];
   conn.onStatus((s) => seen.push(s));
-  ws.open();
-  ws.open(); // second onopen -> setStatus("online") again, must be deduped
+  completeHandshake(ws);   // -> online
+  // Simulate second onopen + handshake (same ws, second onopen call)
+  ws.open();               // starts a new channel, sends M1
+  ws.fire(M2);             // complete second handshake -> tries to setStatus("online") again
   expect(seen.filter((s) => s === "online").length).toBe(1);
   conn.dispose?.();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 8 (orig): tracks max seq per session and attaches with it
+// Preserved: seq tracking correct; attach sends correct lastSeq
+// ──────────────────────────────────────────────────────────────
 test("tracks max seq per session and attaches with it", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   ws.emit(encode({ type: "output", sessionId: "s1", seq: 5, data: toB64(new Uint8Array([65])) }));
   ws.emit(encode({ type: "output", sessionId: "s1", seq: 4, data: toB64(new Uint8Array([66])) })); // out-of-order lower, ignored for max
-  ws.sent.length = 0;
+  ws.sent.length = 0; // clear all sent (including M1 + onEstablished frames)
   conn.attach("s1");
-  expect(JSON.parse(ws.sent[0])).toEqual({ type: "attach", sessionId: "s1", lastSeq: 5 });
+  // After clearing, first sent is the attach frame (channel is in transport, so sent directly)
+  expect(decodeMsg(ws.sent[0])).toEqual({ type: "attach", sessionId: "s1", lastSeq: 5 });
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 9 (orig): dispatches resync frames to onResync
+// Preserved: resync callback fires correctly after handshake
+// ──────────────────────────────────────────────────────────────
 test("dispatches resync frames to onResync", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   const got: any[] = [];
   conn.onResync((f) => got.push(f));
   ws.emit(encode({ type: "resync", sessionId: "s1", from: 9 }));
   expect(got).toEqual([{ sessionId: "s1", from: 9 }]);
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 10 (orig): reconnects after close with exponential backoff
+// Preserved: reconnect creates new socket, backoff delay, new handshake → online
+// ──────────────────────────────────────────────────────────────
 test("reconnects after close with exponential backoff", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
-  created[0].open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
   expect(conn.status).toBe("online");
   created[0].close();
   expect(conn.status).toBe("offline");
   advance(500);                 // first backoff = 500ms
   expect(created.length).toBe(2); // a new socket was created
-  created[1].open();
+  completeHandshake(created[1]);
   expect(conn.status).toBe("online");
   conn.dispose();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 11 (orig): ignores stale socket callbacks after reconnect
+// Preserved: stale socket's close event is ignored after new socket is live
+// ──────────────────────────────────────────────────────────────
 test("ignores stale socket callbacks after reconnect", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
-  created[0].open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
   created[0].close();
   advance(500);
-  created[1].open();
+  completeHandshake(created[1]);
   const seen: string[] = [];
   conn.onStatus((s) => seen.push(s));
   created[0].close();           // stale socket fires again -> must be ignored
@@ -190,63 +284,121 @@ test("ignores stale socket callbacks after reconnect", () => {
   conn.dispose();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 12 (orig): re-attaches all attached sessions with lastSeq on reconnect
+// Preserved: re-attach sends correct lastSeq for each session after reconnect handshake
+// ──────────────────────────────────────────────────────────────
 test("re-attaches all attached sessions with lastSeq on reconnect", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
-  created[0].open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
   conn.attach("s1");
   conn.attach("s2");
   created[0].emit(encode({ type: "output", sessionId: "s1", seq: 3, data: toB64(new Uint8Array([65])) }));
   created[0].close();
   advance(500);
-  created[1].open();
-  const msgs = created[1].sent.map((r) => JSON.parse(r));
+  completeHandshake(created[1]);
+  const msgs = businessSent(created[1]).map((b) => decodeMsg(b));
   expect(msgs).toContainEqual({ type: "attach", sessionId: "s1", lastSeq: 3 });
   expect(msgs).toContainEqual({ type: "attach", sessionId: "s2", lastSeq: 0 });
-  expect(msgs.some((m) => m.type === "listSessions")).toBe(true);
+  expect(msgs.some((m: any) => m.type === "listSessions")).toBe(true);
   conn.dispose();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 13 (orig): sends listSessions on connect even with no attached sessions
+// Preserved: listSessions sent in onEstablished even with no sessions
+// ──────────────────────────────────────────────────────────────
 test("sends listSessions on connect even with no attached sessions", () => {
   const { sched } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
-  const msgs = ws.sent.map((r) => JSON.parse(r));
-  expect(msgs.some((m) => m.type === "listSessions")).toBe(true);
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  const msgs = businessSent(ws).map((b) => decodeMsg(b));
+  expect(msgs.some((m: any) => m.type === "listSessions")).toBe(true);
   conn.dispose?.();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 14 (orig): sends ping on heartbeat interval
+// Preserved: encrypted ping sent on heartbeat interval (passthrough = identity, so decode works)
+// ──────────────────────────────────────────────────────────────
 test("sends ping on heartbeat interval", () => {
   const { sched, advance } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
-  ws.sent.length = 0;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  ws.sent.length = 0;           // clear M1 + onEstablished frames
   advance(1000);
-  expect(JSON.parse(ws.sent[0])).toEqual({ type: "ping" });
+  expect(decodeMsg(ws.sent[0])).toEqual({ type: "ping" });
   conn.dispose();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 15 (orig): goes offline when no frame arrives within livenessMs
+// Preserved: liveness check triggers close -> offline when no frames arrive
+// ──────────────────────────────────────────────────────────────
 test("goes offline when no frame arrives within livenessMs", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
-  created[0].open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
   advance(4000); // no frames received -> liveness exceeded on a heartbeat tick
   expect(conn.status).toBe("offline");
   conn.dispose();
 });
 
+// ──────────────────────────────────────────────────────────────
+// TEST 16 (orig): liveness timer is refreshed by incoming frames
+// Preserved: incoming frames reset liveness, preventing offline
+// ──────────────────────────────────────────────────────────────
 test("liveness timer is refreshed by incoming frames", () => {
   const { sched, advance } = makeFakeScheduler();
   let ws!: FakeWS;
-  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => (ws = new FakeWS()) });
-  ws.open();
+  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
   advance(2000);
-  ws.emit(encode({ type: "pong" })); // refresh
+  ws.emit(encode({ type: "pong" })); // refresh (pong is a valid ServerMsg, but dispatch ignores unknown types gracefully)
   advance(2000);
   expect(conn.status).toBe("online");
   conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// NEW TEST A: business sends queued until handshake completes, then flushed
+// ──────────────────────────────────────────────────────────────
+test("business sends are queued until handshake completes, then flushed encrypted-through", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({
+    url: "ws://x", wsFactory: () => (ws = new FakeWS()), scheduler: sched,
+    channelFactory: passthroughInitiator,
+  });
+  ws.open();                      // sends M1 (handshake), starts timeout
+  expect(ws.sent[0]).toEqual(M1);
+  conn.listSessions();            // business call before established -> queued
+  expect(ws.sent.length).toBe(1); // still only M1
+  ws.fire(M2);                    // handshake reply -> established -> flush
+  // after established: listSessions flushed as plaintext JSON bytes (passthrough)
+  const flushed = new TextDecoder().decode(ws.sent[ws.sent.length - 1]);
+  expect(flushed).toBe(encode({ type: "listSessions" }));
+});
+
+// ──────────────────────────────────────────────────────────────
+// NEW TEST B: handshake timeout -> offline
+// ──────────────────────────────────────────────────────────────
+test("handshake timeout -> offline + notice path (status offline)", () => {
+  const { sched, advance } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const statuses: string[] = [];
+  const conn = new Connection({
+    url: "ws://x", wsFactory: () => (ws = new FakeWS()), scheduler: sched,
+    channelFactory: passthroughInitiator,
+    handshakeTimeoutMs: 100,
+  });
+  conn.onStatus((s) => statuses.push(s));
+  ws.open();           // starts handshake timeout
+  advance(100);        // fire the handshake timeout (no M2 arrived)
+  expect(statuses).toContain("offline");
 });
