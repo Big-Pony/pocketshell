@@ -188,3 +188,21 @@ test("ignores stale socket callbacks after reconnect", () => {
   expect(seen).toEqual([]);
   conn.dispose();
 });
+
+test("re-attaches all attached sessions with lastSeq on reconnect", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
+  created[0].open();
+  conn.attach("s1");
+  conn.attach("s2");
+  created[0].emit(encode({ type: "output", sessionId: "s1", seq: 3, data: toB64(new Uint8Array([65])) }));
+  created[0].close();
+  advance(500);
+  created[1].open();
+  const msgs = created[1].sent.map((r) => JSON.parse(r));
+  expect(msgs).toContainEqual({ type: "attach", sessionId: "s1", lastSeq: 3 });
+  expect(msgs).toContainEqual({ type: "attach", sessionId: "s2", lastSeq: 0 });
+  expect(msgs.some((m) => m.type === "listSessions")).toBe(true);
+  conn.dispose();
+});
