@@ -45,7 +45,7 @@ type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
 
 export class Connection {
-  private ws: WebSocketLike;
+  private ws!: WebSocketLike;
   private open = false;
   private queue: string[] = [];
   private outputCbs: OutputCb[] = [];
@@ -59,6 +59,13 @@ export class Connection {
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
   private _status: ConnStatus = "connecting";
+
+  private url: string;
+  private factory: (url: string) => WebSocketLike;
+  private backoffAttempt = 0;
+  private reconnectTimer?: number;
+  private heartbeatMs: number;
+  private livenessMs: number;
 
   get status(): ConnStatus { return this._status; }
 
@@ -76,21 +83,44 @@ export class Connection {
   dispose(): void { this.ws.close(); }
 
   constructor(opts: ConnectionOpts) {
+    this.factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
+    this.url = opts.url;
     this.sched = opts.scheduler ?? realScheduler;
-    const factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
-    this.ws = factory(opts.url);
-    this.ws.onopen = () => {
+    this.heartbeatMs = opts.heartbeatMs ?? 10_000;  // reserved for Task 8
+    this.livenessMs = opts.livenessMs ?? 25_000;    // reserved for Task 8
+    this.connect();
+  }
+
+  private connect(): void {
+    const socket = this.factory(this.url);
+    this.ws = socket;
+    this.open = false;
+    this.setStatus("connecting");
+    socket.onopen = () => {
+      if (socket !== this.ws) return;
+      this.open = true;
+      this.backoffAttempt = 0;
       const pending = this.queue;
       this.queue = [];
-      for (const raw of pending) this.ws.send(raw);
-      this.open = true;
+      for (const raw of pending) socket.send(raw);
       this.setStatus("online");
     };
-    this.ws.onmessage = (ev) => this.dispatch(ev.data);
-    this.ws.onclose = () => {
-      this.open = false;
-      this.setStatus("offline");
+    socket.onmessage = (ev) => {
+      if (socket !== this.ws) return;
+      this.dispatch(ev.data);
     };
+    socket.onclose = () => {
+      if (socket !== this.ws) return;
+      this.handleDown();
+    };
+  }
+
+  private handleDown(): void {
+    this.open = false;
+    this.setStatus("offline");
+    const delay = Math.min(10_000, 500 * 2 ** this.backoffAttempt);
+    this.backoffAttempt++;
+    this.reconnectTimer = this.sched.setTimeout(() => this.connect(), delay);
   }
 
   private dispatch(raw: string): void {

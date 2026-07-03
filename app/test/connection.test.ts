@@ -157,3 +157,34 @@ test("dispatches resync frames to onResync", () => {
   ws.emit(encode({ type: "resync", sessionId: "s1", from: 9 }));
   expect(got).toEqual([{ sessionId: "s1", from: 9 }]);
 });
+
+test("reconnects after close with exponential backoff", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
+  created[0].open();
+  expect(conn.status).toBe("online");
+  created[0].close();
+  expect(conn.status).toBe("offline");
+  advance(500);                 // first backoff = 500ms
+  expect(created.length).toBe(2); // a new socket was created
+  created[1].open();
+  expect(conn.status).toBe("online");
+  conn.dispose();
+});
+
+test("ignores stale socket callbacks after reconnect", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
+  created[0].open();
+  created[0].close();
+  advance(500);
+  created[1].open();
+  const seen: string[] = [];
+  conn.onStatus((s) => seen.push(s));
+  created[0].close();           // stale socket fires again -> must be ignored
+  expect(conn.status).toBe("online");
+  expect(seen).toEqual([]);
+  conn.dispose();
+});
