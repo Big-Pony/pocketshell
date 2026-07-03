@@ -5,12 +5,14 @@
   import TerminalView from "./components/Terminal.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import TaskPanel from "./components/TaskPanel.svelte";
-  import { getAgentPubKey } from "./lib/keystore";
+  import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
+  import DeviceManager from "./components/DeviceManager.svelte";
 
-  const url = `ws://${location.hostname}:8722`;
+  const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
 
   let sessions = $state<LocalSession[]>([]);
   let activeId = $state("");
+  let showDevices = $state(false);
   let panelOpen = $state(false);
   let notice = $state(
     !getAgentPubKey()
@@ -18,7 +20,7 @@
       : ""
   );
 
-  const conn = new Connection({ url });
+  const conn = new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");
   const terms = new Map<string, Terminal>();
 
@@ -67,6 +69,7 @@
   <div class="topbar">
     <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
     <SessionTabs {sessions} {activeId} onSelect={selectSession} onNew={newSession} onClose={closeTab} />
+    <button class="devices-btn" onclick={() => (showDevices = true)} title="设备管理">🛡</button>
   </div>
 
   {#if status !== "online"}
@@ -103,6 +106,9 @@
   {/if}
 
   {#if notice}<div class="notice">{notice}</div>{/if}
+  {#if showDevices}
+    <DeviceManager {conn} onClose={() => (showDevices = false)} />
+  {/if}
 </div>
 
 <style>
@@ -120,4 +126,5 @@
   .panel { position: fixed; left: 0; right: 0; bottom: 56px; max-height: 50dvh; overflow-y: auto; z-index: 9; }
   .notice { position: fixed; top: 0; left: 0; right: 0; background: #a33; color: #fff;
             padding: 8px 12px; font-size: 13px; z-index: 20; }
+  .devices-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 2px 6px; }
 </style>
