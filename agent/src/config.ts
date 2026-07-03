@@ -45,6 +45,20 @@ export function buildPairingString(pub: Uint8Array, addr: string, code: string):
   return "pocketshell-pair:" + Buffer.from(json, "utf8").toString("base64url");
 }
 
+export function resolveTlsMaterial(
+  keyDir: string,
+  tls: { enabled: boolean; cert?: string; key?: string },
+): { cert: string; key: string } | null {
+  if (!tls.enabled) return null;
+  const certPath = tls.cert ?? join(keyDir, "tls_cert.pem");
+  const keyPath = tls.key ?? join(keyDir, "tls_key.pem");
+  if (existsSync(certPath) && existsSync(keyPath)) {
+    return { cert: readFileSync(certPath, "utf8"), key: readFileSync(keyPath, "utf8") };
+  }
+  console.warn("[pocketshell] TLS enabled but cert/key not found. Provide POCKETSHELL_TLS_CERT / POCKETSHELL_TLS_KEY.");
+  return null;
+}
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): AgentConfig {
   const keyDir = env.POCKETSHELL_KEY_DIR ?? join(homedir(), ".pocketshell");
   const authorizedKeys = (env.POCKETSHELL_AUTHORIZED_KEYS ?? "")

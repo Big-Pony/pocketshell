@@ -4,7 +4,7 @@
 // S4a: wrapped in SecureChannel handshake — plaintext message loop unchanged.
 // S4b: in-channel pairing — pending state, pair verify, registry∪env authorize.
 import type { ServerWebSocket } from "bun";
-import { loadConfig, type AgentConfig } from "./config";
+import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
@@ -176,9 +176,11 @@ export function startServer(deps: Deps = {}) {
     handleClient(conn, text);
   };
 
+  const tlsMaterial = resolveTlsMaterial(config.keyDir, config.tls);
   const server = Bun.serve({
     hostname: config.listen.host,
     port: deps.port ?? config.listen.port,
+    tls: tlsMaterial ?? undefined,
     fetch(req, srv) {
       if (srv.upgrade(req)) return;
       return new Response("PocketShell agent — WebSocket only", { status: 426 });
@@ -208,7 +210,15 @@ export function startServer(deps: Deps = {}) {
 // Allow `bun run src/server.ts` to boot directly.
 if (import.meta.main) {
   const cfg = loadConfig();
+  const proto = cfg.tls.enabled ? "wss" : "ws";
+  const addr = `${proto}://${cfg.listen.host}:${cfg.listen.port}`;
   const s = startServer({ config: cfg });
-  console.log(`[pocketshell] agent listening on :${s.port}`);
-  console.log(`[pocketshell] agent public key (put into app VITE_AGENT_PUBKEY / localStorage):`, toB64(cfg.identity.publicKey));
+  console.log(`[pocketshell] agent listening on ${addr}`);
+  console.log(`[pocketshell] TLS:`, cfg.tls.enabled ? "enabled" : "disabled");
+  console.log(`[pocketshell] pairing mode:`, cfg.pairingMode ? "on" : "off");
+  console.log(`[pocketshell] registered devices:`, cfg.registry.list().length);
+  console.log(`[pocketshell] agent public key:`, toB64(cfg.identity.publicKey));
+  if (cfg.pairingMode && cfg.pairing) {
+    console.log(`[pocketshell] pairing string:`, buildPairingString(cfg.identity.publicKey, addr, cfg.pairing.code));
+  }
 }
