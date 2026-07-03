@@ -46,13 +46,13 @@ export class ReplayService {
     return frame;
   }
 
-  since(sessionId: string, lastSeq: number): { frames: OutputFrame[]; gap: boolean } {
+  since(sessionId: string, lastSeq: number): { frames: OutputFrame[]; gap: boolean; oldestSeq: number } {
     const s = this.sessions.get(sessionId);
-    if (!s || s.ring.length === 0) return { frames: [], gap: false };
+    if (!s || s.ring.length === 0) return { frames: [], gap: false, oldestSeq: 0 };
     // gap if the client's lastSeq predates what we still hold.
     const gap = lastSeq + 1 < s.oldestSeq;
     const frames = s.ring.filter((f) => f.seq > lastSeq);
-    return { frames, gap };
+    return { frames, gap, oldestSeq: s.oldestSeq };
   }
 
   latestSeq(sessionId: string): number {

@@ -28,7 +28,7 @@ test("since returns only frames after lastSeq, no gap when in buffer", () => {
 
 test("since on unknown session returns empty, no gap", () => {
   const r = new ReplayService();
-  expect(r.since("nope", 0)).toEqual({ frames: [], gap: false });
+  expect(r.since("nope", 0)).toEqual({ frames: [], gap: false, oldestSeq: 0 });
 });
 
 test("since reports gap when the client's next needed frame was evicted", () => {
@@ -60,5 +60,16 @@ test("since reports no gap when the client sits exactly at oldestSeq-1", () => {
 test("since with current latestSeq returns nothing", () => {
   const r = new ReplayService();
   r.ingest("s", b("a"));
-  expect(r.since("s", 1)).toEqual({ frames: [], gap: false });
+  expect(r.since("s", 1)).toEqual({ frames: [], gap: false, oldestSeq: 1 });
+});
+
+test("since reports oldestSeq of the retained buffer on gap", () => {
+  const r = new ReplayService(2); // 2-byte cap
+  r.ingest("s", b("a")); // seq1
+  r.ingest("s", b("b")); // seq2 -> buffer[1,2]
+  r.ingest("s", b("c")); // seq3 -> evict1 -> buffer[2,3], oldest=2
+  r.ingest("s", b("d")); // seq4 -> evict2 -> buffer[3,4], oldest=3
+  const res = r.since("s", 1);
+  expect(res.gap).toBe(true);
+  expect(res.oldestSeq).toBe(3);
 });
