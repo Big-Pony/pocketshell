@@ -32,3 +32,17 @@ test("decodes a renameSession client message", () => {
   expect(msg.sessionId).toBe("s1");
   expect(msg.name).toBe("claude");
 });
+
+test("mirrors ping client message", () => {
+  expect(decodeClient(encode({ type: "ping" })).type).toBe("ping");
+});
+
+test("mirrors pong server message", () => {
+  expect(decodeServer(encode({ type: "pong" })).type).toBe("pong");
+});
+
+test("mirrors resync server message with from seq", () => {
+  const msg = decodeServer(encode({ type: "resync", sessionId: "s", from: 7 }));
+  if (msg.type !== "resync") throw new Error("wrong type");
+  expect(msg.from).toBe(7);
+});

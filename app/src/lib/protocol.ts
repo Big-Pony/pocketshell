@@ -17,13 +17,16 @@ export type ClientMsg =
   | { type: "newSession"; name: string; cmd?: string; cwd?: string }
   | { type: "kill"; sessionId: string }
   | { type: "listSessions" }
-  | { type: "renameSession"; sessionId: string; name: string };
+  | { type: "renameSession"; sessionId: string; name: string }
+  | { type: "ping" };
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }
   | { type: "sessions"; sessions: SessionMeta[] }
   | { type: "exit"; sessionId: string; code: number }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | { type: "pong" }
+  | { type: "resync"; sessionId: string; from: number };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);
