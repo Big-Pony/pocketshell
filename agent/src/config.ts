@@ -1,6 +1,6 @@
 // A1 config — S4a adds a persistent Noise static identity + authorized-keys
 // allowlist. Pairing TTL / device registry remain later slices.
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import DH from "noise-handshake/dh";
@@ -17,6 +17,7 @@ export interface AgentConfig {
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
   mkdirSync(keyDir, { recursive: true, mode: 0o700 });
+  chmodSync(keyDir, 0o700);
   const file = join(keyDir, "agent_key");
   if (existsSync(file)) {
     const j = JSON.parse(readFileSync(file, "utf8"));
@@ -37,7 +38,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .filter((s) => s.length > 0);
   return {
     listen: {
-      host: env.POCKETSHELL_HOST ?? "127.0.0.1",
+      host: env.POCKETSHELL_HOST ?? "127.0.0.1", // loopback by default; set POCKETSHELL_HOST=0.0.0.0 to expose on LAN
       port: env.POCKETSHELL_PORT ? Number(env.POCKETSHELL_PORT) : 8722,
     },
     workspaceRoot: env.POCKETSHELL_WORKSPACE ?? process.cwd(),

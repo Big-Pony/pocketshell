@@ -18,6 +18,7 @@ test("loadConfig generates a 32-byte static identity persisted at 600", () => {
   const file = join(keyDir, "agent_key");
   expect(existsSync(file)).toBe(true);
   expect(statSync(file).mode & 0o777).toBe(0o600);
+  expect(statSync(keyDir).mode & 0o777).toBe(0o700);
   rmSync(keyDir, { recursive: true, force: true });
 });
 
@@ -27,6 +28,7 @@ test("loadConfig reloads the same identity on second call", () => {
   const a = loadConfig(env);
   const b = loadConfig(env);
   expect(toB64(a.identity.publicKey)).toBe(toB64(b.identity.publicKey));
+  expect(toB64(a.identity.secretKey)).toBe(toB64(b.identity.secretKey));
   rmSync(keyDir, { recursive: true, force: true });
 });
 
