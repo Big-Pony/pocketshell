@@ -122,3 +122,15 @@ test("listSessions + renameSession are sent once open", () => {
     { type: "renameSession", sessionId: "s1", name: "claude" },
   ]);
 });
+
+test("setStatus does not re-notify on the same status", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()) });
+  const seen: string[] = [];
+  conn.onStatus((s) => seen.push(s));
+  ws.open();
+  ws.open(); // second onopen -> setStatus("online") again, must be deduped
+  expect(seen.filter((s) => s === "online").length).toBe(1);
+  conn.dispose?.();
+});
