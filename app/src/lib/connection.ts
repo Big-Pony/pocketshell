@@ -66,6 +66,8 @@ export class Connection {
   private reconnectTimer?: number;
   private heartbeatMs: number;
   private livenessMs: number;
+  private hbTimer?: number;
+  private lastRx = 0;
 
   get status(): ConnStatus { return this._status; }
 
@@ -80,7 +82,31 @@ export class Connection {
     for (const cb of this.statusCbs) cb(s);
   }
 
-  dispose(): void { this.ws.close(); }
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastRx = this.sched.now();
+    this.hbTimer = this.sched.setInterval(() => {
+      if (this.sched.now() - this.lastRx > this.livenessMs) {
+        this.stopHeartbeat();
+        this.ws.close(); // -> onclose guard passes (still current) -> handleDown
+        return;
+      }
+      if (this.open) this.ws.send(encode({ type: "ping" }));
+    }, this.heartbeatMs);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.hbTimer !== undefined) {
+      this.sched.clearInterval(this.hbTimer);
+      this.hbTimer = undefined;
+    }
+  }
+
+  dispose(): void {
+    this.stopHeartbeat();
+    if (this.reconnectTimer !== undefined) this.sched.clearTimeout(this.reconnectTimer);
+    this.ws.close();
+  }
 
   constructor(opts: ConnectionOpts) {
     this.factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
@@ -109,10 +135,12 @@ export class Connection {
       }
       // always refresh session list on connect (regardless of attached sessions)
       socket.send(encode({ type: "listSessions" }));
+      this.startHeartbeat();
       this.setStatus("online");
     };
     socket.onmessage = (ev) => {
       if (socket !== this.ws) return;
+      this.lastRx = this.sched.now();
       this.dispatch(ev.data);
     };
     socket.onclose = () => {
@@ -122,6 +150,7 @@ export class Connection {
   }
 
   private handleDown(): void {
+    this.stopHeartbeat();
     this.open = false;
     this.setStatus("offline");
     const delay = Math.min(10_000, 500 * 2 ** this.backoffAttempt);

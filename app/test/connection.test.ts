@@ -217,3 +217,36 @@ test("sends listSessions on connect even with no attached sessions", () => {
   expect(msgs.some((m) => m.type === "listSessions")).toBe(true);
   conn.dispose?.();
 });
+
+test("sends ping on heartbeat interval", () => {
+  const { sched, advance } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => (ws = new FakeWS()) });
+  ws.open();
+  ws.sent.length = 0;
+  advance(1000);
+  expect(JSON.parse(ws.sent[0])).toEqual({ type: "ping" });
+  conn.dispose();
+});
+
+test("goes offline when no frame arrives within livenessMs", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; } });
+  created[0].open();
+  advance(4000); // no frames received -> liveness exceeded on a heartbeat tick
+  expect(conn.status).toBe("offline");
+  conn.dispose();
+});
+
+test("liveness timer is refreshed by incoming frames", () => {
+  const { sched, advance } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, heartbeatMs: 1000, livenessMs: 3000, wsFactory: () => (ws = new FakeWS()) });
+  ws.open();
+  advance(2000);
+  ws.emit(encode({ type: "pong" })); // refresh
+  advance(2000);
+  expect(conn.status).toBe("online");
+  conn.dispose();
+});
