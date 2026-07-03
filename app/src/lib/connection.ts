@@ -12,38 +12,159 @@ export interface WebSocketLike {
   close(): void;
 }
 
+export type ConnStatus = "connecting" | "online" | "offline";
+
+export interface Scheduler {
+  setTimeout(fn: () => void, ms: number): number;
+  clearTimeout(id: number): void;
+  setInterval(fn: () => void, ms: number): number;
+  clearInterval(id: number): void;
+  now(): number;
+}
+
+const realScheduler: Scheduler = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+  clearTimeout: (id) => clearTimeout(id),
+  setInterval: (fn, ms) => setInterval(fn, ms) as unknown as number,
+  clearInterval: (id) => clearInterval(id),
+  now: () => Date.now(),
+};
+
 export interface ConnectionOpts {
   url: string;
   wsFactory?: (url: string) => WebSocketLike;
+  scheduler?: Scheduler;
+  heartbeatMs?: number;
+  livenessMs?: number;
 }
 
 type OutputCb = (f: { sessionId: string; seq: number; data: Uint8Array }) => void;
 type SessionsCb = (sessions: SessionMeta[]) => void;
 type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
+type ResyncCb = (f: { sessionId: string; from: number }) => void;
 
 export class Connection {
-  private ws: WebSocketLike;
+  private ws!: WebSocketLike;
   private open = false;
   private queue: string[] = [];
   private outputCbs: OutputCb[] = [];
   private sessionsCbs: SessionsCb[] = [];
   private exitCbs: ExitCb[] = [];
   private errorCbs: ErrorCb[] = [];
+  private resyncCbs: ResyncCb[] = [];
+  private attached = new Set<string>();
+  private seen = new Map<string, number>();
+
+  private sched: Scheduler;
+  private statusCbs: ((s: ConnStatus) => void)[] = [];
+  private _status: ConnStatus = "connecting";
+
+  private url: string;
+  private factory: (url: string) => WebSocketLike;
+  private backoffAttempt = 0;
+  private reconnectTimer?: number;
+  private heartbeatMs: number;
+  private livenessMs: number;
+  private hbTimer?: number;
+  private lastRx = 0;
+
+  get status(): ConnStatus { return this._status; }
+
+  onStatus(cb: (s: ConnStatus) => void): () => void {
+    this.statusCbs.push(cb);
+    return () => { this.statusCbs = this.statusCbs.filter((c) => c !== cb); };
+  }
+
+  private setStatus(s: ConnStatus): void {
+    if (this._status === s) return;
+    this._status = s;
+    for (const cb of this.statusCbs) cb(s);
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastRx = this.sched.now();
+    this.hbTimer = this.sched.setInterval(() => {
+      if (this.sched.now() - this.lastRx > this.livenessMs) {
+        this.stopHeartbeat();
+        this.ws.close(); // -> onclose guard passes (still current) -> handleDown
+        return;
+      }
+      if (this.open) this.ws.send(encode({ type: "ping" }));
+    }, this.heartbeatMs);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.hbTimer !== undefined) {
+      this.sched.clearInterval(this.hbTimer);
+      this.hbTimer = undefined;
+    }
+  }
+
+  dispose(): void {
+    this.stopHeartbeat();
+    if (this.reconnectTimer !== undefined) this.sched.clearTimeout(this.reconnectTimer);
+    this.ws.close();
+  }
 
   constructor(opts: ConnectionOpts) {
-    const factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
-    this.ws = factory(opts.url);
-    this.ws.onopen = () => {
+    this.factory = opts.wsFactory ?? ((u) => new WebSocket(u) as unknown as WebSocketLike);
+    this.url = opts.url;
+    this.sched = opts.scheduler ?? realScheduler;
+    this.heartbeatMs = opts.heartbeatMs ?? 10_000;  // reserved for Task 8
+    this.livenessMs = opts.livenessMs ?? 25_000;    // reserved for Task 8
+    this.connect();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && this._status === "offline") {
+          if (this.reconnectTimer !== undefined) { this.sched.clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+          this.backoffAttempt = 0;
+          this.connect();
+        }
+      });
+    }
+  }
+
+  private connect(): void {
+    const socket = this.factory(this.url);
+    this.ws = socket;
+    this.open = false;
+    this.setStatus("connecting");
+    socket.onopen = () => {
+      if (socket !== this.ws) return;
+      this.open = true;
+      this.backoffAttempt = 0;
       const pending = this.queue;
       this.queue = [];
-      for (const raw of pending) this.ws.send(raw);
-      this.open = true;
+      for (const raw of pending) socket.send(raw);
+      // on reconnect: re-attach all attached sessions with their seen seq
+      for (const id of this.attached) {
+        socket.send(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 }));
+      }
+      // always refresh session list on connect (regardless of attached sessions)
+      socket.send(encode({ type: "listSessions" }));
+      this.startHeartbeat();
+      this.setStatus("online");
     };
-    this.ws.onmessage = (ev) => this.dispatch(ev.data);
-    this.ws.onclose = () => {
-      this.open = false;
+    socket.onmessage = (ev) => {
+      if (socket !== this.ws) return;
+      this.lastRx = this.sched.now();
+      this.dispatch(ev.data);
     };
+    socket.onclose = () => {
+      if (socket !== this.ws) return;
+      this.handleDown();
+    };
+  }
+
+  private handleDown(): void {
+    this.stopHeartbeat();
+    this.open = false;
+    this.setStatus("offline");
+    const delay = Math.min(10_000, 500 * 2 ** this.backoffAttempt);
+    this.backoffAttempt++;
+    this.reconnectTimer = this.sched.setTimeout(() => this.connect(), delay);
   }
 
   private dispatch(raw: string): void {
@@ -55,8 +176,12 @@ export class Connection {
       return;
     }
     if (msg.type === "output") {
+      const prev = this.seen.get(msg.sessionId) ?? 0;
+      if (msg.seq > prev) this.seen.set(msg.sessionId, msg.seq);
       const f = { sessionId: msg.sessionId, seq: msg.seq, data: fromB64(msg.data) };
       for (const cb of this.outputCbs) cb(f);
+    } else if (msg.type === "resync") {
+      for (const cb of this.resyncCbs) cb({ sessionId: msg.sessionId, from: msg.from });
     } else if (msg.type === "sessions") {
       for (const cb of this.sessionsCbs) cb(msg.sessions);
     } else if (msg.type === "exit") {
@@ -76,7 +201,9 @@ export class Connection {
     this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd });
   }
   attach(sessionId: string, lastSeq?: number): void {
-    this.send({ type: "attach", sessionId, lastSeq });
+    this.attached.add(sessionId);
+    const seq = this.seen.get(sessionId) ?? lastSeq ?? 0;
+    this.send({ type: "attach", sessionId, lastSeq: seq });
   }
   sendInput(sessionId: string, data: Uint8Array): void {
     this.send({ type: "input", sessionId, data: toB64(data) });
@@ -110,5 +237,13 @@ export class Connection {
   onError(cb: ErrorCb): () => void {
     this.errorCbs.push(cb);
     return () => { this.errorCbs = this.errorCbs.filter((c) => c !== cb); };
+  }
+  onResync(cb: ResyncCb): () => void {
+    this.resyncCbs.push(cb);
+    return () => { this.resyncCbs = this.resyncCbs.filter((c) => c !== cb); };
+  }
+  detach(sessionId: string): void {
+    this.attached.delete(sessionId);
+    this.seen.delete(sessionId);
   }
 }

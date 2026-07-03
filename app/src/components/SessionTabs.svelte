@@ -1,5 +1,4 @@
 <script lang="ts">
-  import type { SessionMeta } from "../lib/protocol";
   import { stateDotClass } from "../lib/session-view";
 
   let {
@@ -7,11 +6,13 @@
     activeId,
     onSelect,
     onNew,
+    onClose,
   }: {
-    sessions: SessionMeta[];
+    sessions: import("../lib/session-view").LocalSession[];
     activeId: string;
     onSelect: (name: string) => void;
     onNew: (name: string) => void;
+    onClose: (name: string) => void;
   } = $props();
 
   let adding = $state(false);
@@ -37,6 +38,9 @@
       onclick={() => onSelect(s.name)}
     >
       <span class="dot {stateDotClass(s.state)}"></span>{s.name}
+      {#if s.closed}<span class="close" role="button" tabindex="0"
+        onclick={(e) => { e.stopPropagation(); onClose(s.name); }}
+        onkeydown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onClose(s.name); } }}>×</span>{/if}
     </button>
   {/each}
 
@@ -64,4 +68,5 @@
   .dot-wait { background: #fd3; }
   .dot-done { background: #888; }
   .new-input { background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 6px; }
+  .close { margin-left: 4px; color: #e77; }
 </style>

@@ -84,9 +84,8 @@ export function startServer(deps: Deps = {}) {
             }
             break;
           case "attach": {
-            // Backfill anything the client missed (slice 1: usually nothing).
-            // gap flag ignored in slice 1; a later slice will send a re-sync marker when true.
-            const { frames } = replay.since(msg.sessionId, msg.lastSeq ?? 0);
+            const { frames, gap, oldestSeq } = replay.since(msg.sessionId, msg.lastSeq ?? 0);
+            if (gap) send(ws, { type: "resync", sessionId: msg.sessionId, from: oldestSeq });
             for (const f of frames) {
               send(ws, { type: "output", sessionId: f.sessionId, seq: f.seq, data: toB64(f.data) });
             }
@@ -100,6 +99,9 @@ export function startServer(deps: Deps = {}) {
             break;
           case "kill":
             void terminal.kill(msg.sessionId);
+            break;
+          case "ping":
+            send(ws, { type: "pong" });
             break;
           default:
             send(ws, { type: "error", code: "unknown_type", message: "unknown message type" });

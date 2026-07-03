@@ -76,3 +76,62 @@ test("listSessions on an empty agent returns an empty sessions frame", async () 
   ws.close();
   srv.stop();
 });
+
+test("attach with an evicted lastSeq sends a resync before backfill frames", async () => {
+  const { ReplayService } = await import("../src/replay");
+  const replay = new ReplayService(2); // tiny cap forces a gap
+  const enc = new TextEncoder();
+  replay.ingest("x", enc.encode("a")); // seq1
+  replay.ingest("x", enc.encode("b")); // seq2
+  replay.ingest("x", enc.encode("c")); // seq3 -> buffer[2,3]
+  replay.ingest("x", enc.encode("d")); // seq4 -> buffer[3,4], oldest=3
+  const srv = startServer({ port: 0, replay });
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  const got: any[] = [];
+  await new Promise<void>((res) => (ws.onopen = () => res()));
+  ws.onmessage = (ev) => got.push(decodeServer(ev.data as string));
+  ws.send(encode({ type: "attach", sessionId: "x", lastSeq: 1 }));
+  await Bun.sleep(150);
+  const resync = got.find((m) => m.type === "resync");
+  expect(resync).toEqual({ type: "resync", sessionId: "x", from: 3 });
+  const outSeqs = got.filter((m) => m.type === "output").map((m) => m.seq);
+  expect(outSeqs).toEqual([3, 4]);
+  // Assert that resync precedes backfill frames
+  const resyncIdx = got.findIndex((m) => m.type === "resync");
+  const firstOutputIdx = got.findIndex((m) => m.type === "output");
+  expect(resyncIdx).toBeLessThan(firstOutputIdx);
+  ws.close();
+  srv.stop();
+});
+
+test("attach within buffer sends no resync", async () => {
+  const { ReplayService } = await import("../src/replay");
+  const replay = new ReplayService();
+  const enc = new TextEncoder();
+  replay.ingest("y", enc.encode("a")); // seq1
+  replay.ingest("y", enc.encode("b")); // seq2
+  const srv = startServer({ port: 0, replay });
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  const got: any[] = [];
+  await new Promise<void>((res) => (ws.onopen = () => res()));
+  ws.onmessage = (ev) => got.push(decodeServer(ev.data as string));
+  ws.send(encode({ type: "attach", sessionId: "y", lastSeq: 1 }));
+  await Bun.sleep(150);
+  expect(got.some((m) => m.type === "resync")).toBe(false);
+  expect(got.filter((m) => m.type === "output").map((m) => m.seq)).toEqual([2]);
+  ws.close();
+  srv.stop();
+});
+
+test("ping is answered with pong", async () => {
+  const srv = startServer({ port: 0 });
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  const got: any[] = [];
+  await new Promise<void>((res) => (ws.onopen = () => res()));
+  ws.onmessage = (ev) => got.push(decodeServer(ev.data as string));
+  ws.send(encode({ type: "ping" }));
+  await Bun.sleep(100);
+  expect(got.some((m) => m.type === "pong")).toBe(true);
+  ws.close();
+  srv.stop();
+});

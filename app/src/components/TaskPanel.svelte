@@ -1,5 +1,4 @@
 <script lang="ts">
-  import type { SessionMeta } from "../lib/protocol";
   import { stateDotClass, needsKillConfirm } from "../lib/session-view";
 
   let {
@@ -8,12 +7,14 @@
     onRename,
     onKill,
     onCopy,
+    onClose,
   }: {
-    sessions: SessionMeta[];
+    sessions: import("../lib/session-view").LocalSession[];
     onSelect: (name: string) => void;
     onRename: (name: string, newName: string) => void;
     onKill: (name: string) => void;
     onCopy: (name: string) => void;
+    onClose: (name: string) => void;
   } = $props();
 
   let menuFor = $state<string | null>(null);   // session name whose menu is open
@@ -35,7 +36,7 @@
     closeMenu();
     if (next && next.trim() && next.trim() !== name) onRename(name, next.trim());
   }
-  function requestKill(s: SessionMeta) {
+  function requestKill(s: import("../lib/session-view").LocalSession) {
     closeMenu();
     if (needsKillConfirm(s.state)) confirmKill = s.name;
     else onKill(s.name);
@@ -61,7 +62,11 @@
         <div class="menu">
           <button onclick={() => doRename(s.name)}>Rename</button>
           <button onclick={() => { onCopy(s.name); closeMenu(); }}>Copy output</button>
-          <button class="danger" onclick={() => requestKill(s)}>Kill</button>
+          {#if s.closed}
+            <button onclick={() => { onClose(s.name); closeMenu(); }}>Close tab</button>
+          {:else}
+            <button class="danger" onclick={() => requestKill(s)}>Kill</button>
+          {/if}
           <button onclick={closeMenu}>Cancel</button>
         </div>
       {/if}

@@ -22,3 +22,14 @@ test("mirrors renameSession client message", () => {
 test("mirrors listSessions client message", () => {
   expect(decodeClient(encode({ type: "listSessions" })).type).toBe("listSessions");
 });
+
+test("mirrors ping client message", () => {
+  expect(decodeClient(encode({ type: "ping" })).type).toBe("ping");
+});
+
+test("mirrors pong + resync server messages", () => {
+  expect(decodeServer(encode({ type: "pong" })).type).toBe("pong");
+  const r = decodeServer(encode({ type: "resync", sessionId: "s", from: 3 }));
+  if (r.type !== "resync") throw new Error("wrong type");
+  expect(r.from).toBe(3);
+});
