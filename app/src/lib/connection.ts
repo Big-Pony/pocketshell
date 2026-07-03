@@ -160,9 +160,15 @@ export class Connection {
     this.setStatus("connecting");
     socket.onopen = () => {
       if (socket !== this.ws) return;
-      this.channel = this.makeChannel();
-      const m1 = this.channel.start();
-      if (m1) socket.send(m1);
+      try {
+        this.channel = this.makeChannel();
+        const m1 = this.channel.start();
+        if (m1) socket.send(m1);
+      } catch (e) {
+        console.warn("[Connection] channel init failed:", e);
+        this.handleDown();
+        return;
+      }
       this.hsTimer = this.sched.setTimeout(() => {
         // no msg2 in time -> treat as down
         this.clearHsTimer();

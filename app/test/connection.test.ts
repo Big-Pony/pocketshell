@@ -402,3 +402,20 @@ test("handshake timeout -> offline + notice path (status offline)", () => {
   advance(100);        // fire the handshake timeout (no M2 arrived)
   expect(statuses).toContain("offline");
 });
+
+// ──────────────────────────────────────────────────────────────
+// NEW TEST C: channel init failure on open -> offline (does not hang)
+// ──────────────────────────────────────────────────────────────
+test("channel init failure on open -> offline (does not hang)", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const statuses: string[] = [];
+  const conn = new Connection({
+    url: "ws://x", scheduler: sched,
+    wsFactory: () => (ws = new FakeWS()),
+    channelFactory: () => { throw new Error("no agent pubkey"); },
+  });
+  conn.onStatus((s) => statuses.push(s));
+  ws.open();  // fires onopen -> makeChannel throws -> handleDown -> offline
+  expect(conn.status).toBe("offline");
+});
