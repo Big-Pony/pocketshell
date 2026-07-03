@@ -7,7 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
-import { decodeClient, encode, type ServerMsg } from "./protocol";
+import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
 
@@ -75,6 +75,7 @@ export function startServer(deps: Deps = {}) {
     conn.ready = true;
     if (conn.pairTimer) clearTimeout(conn.pairTimer);
     sendSecure(conn, { type: "paired", ok: true });
+    config.audit.log({ event: "pair_ok", pub: conn.remoteStatic, ip: conn.ip });
   };
 
   const handleClient = (conn: Conn, raw: string) => {
@@ -103,11 +104,30 @@ export function startServer(deps: Deps = {}) {
       case "resize": terminal.resize(msg.sessionId, msg.cols, msg.rows); break;
       case "kill": void terminal.kill(msg.sessionId); break;
       case "ping": sendSecure(conn, { type: "pong" }); break;
+      case "listDevices": {
+        const envKeysArr = Array.from(envKeys);
+        const list: DeviceInfo[] = [
+          ...config.registry.list().map((d) => ({ ...d, source: "registry" as const, self: d.pubKey === conn.remoteStatic })),
+          ...envKeysArr.map((pub) => ({ pubKey: pub, name: "env", addedAt: "", lastSeen: null, source: "env" as const, self: pub === conn.remoteStatic })),
+        ];
+        sendSecure(conn, { type: "devices", devices: list });
+        break;
+      }
+      case "revokeDevice": {
+        if (envKeys.has(msg.pubKey)) { sendSecure(conn, { type: "error", code: "revoke_denied", message: "env keys are read-only" }); break; }
+        const removed = config.registry.remove(msg.pubKey);
+        if (removed) {
+          config.audit.log({ event: "revoke", pub: msg.pubKey, ip: conn.ip });
+          for (const c of conns.values()) if (c.remoteStatic === msg.pubKey) c.ws.close();
+        }
+        break;
+      }
       default: sendSecure(conn, { type: "error", code: "unknown_type", message: "unknown message type" }); break;
     }
   };
 
   const onOpen = (ws: ServerWebSocket<unknown>, ip = "", factory = channelFactory) => {
+    if (ip && config.rateLimiter.isLocked(ip)) { ws.close(); return; }
     const conn: Conn = { ws, channel: factory(), ready: false, pending: false, remoteStatic: null, ip };
     conns.set(ws, conn);
     const m1 = conn.channel.start();
@@ -119,7 +139,7 @@ export function startServer(deps: Deps = {}) {
     if (!conn) return;
     const frame = typeof raw === "string" ? new Uint8Array(Buffer.from(raw, "utf8")) : new Uint8Array(raw as Uint8Array);
     const r = conn.channel.receive(frame);
-    if (r.status === "fail") { console.warn("[pocketshell] channel fail:", r.reason); ws.close(); return; }
+    if (r.status === "fail") { console.warn("[pocketshell] channel fail:", r.reason); config.audit.log({ event: "handshake_fail", ip: conn.ip, reason: r.reason }); config.rateLimiter.record(conn.ip); ws.close(); return; }
     if (r.status === "handshake") {
       if (r.reply) ws.send(r.reply);
       if (r.established) {
@@ -131,6 +151,7 @@ export function startServer(deps: Deps = {}) {
         } else {
           conn.ready = true;
           if (conn.remoteStatic) config.registry.touch(conn.remoteStatic);
+          config.audit.log({ event: "handshake_ok", pub: conn.remoteStatic, ip: conn.ip });
           console.log("[pocketshell] connect (authorized)");
         }
       }
@@ -145,6 +166,8 @@ export function startServer(deps: Deps = {}) {
       const v = config.pairing ? config.pairing.verify(msg.code) : { ok: false as const, reason: "no_attempts" as const };
       if (v.ok) { finishPairing(conn, msg.deviceName); }
       else {
+        config.audit.log({ event: "pair_fail", ip: conn.ip, reason: v.reason });
+        config.rateLimiter.record(conn.ip);
         conn.ws.send(conn.channel.send(new Uint8Array(Buffer.from(encode({ type: "error", code: "pair_failed", message: v.reason }), "utf8"))));
         conn.ws.close();
       }

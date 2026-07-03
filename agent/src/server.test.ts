@@ -4,6 +4,8 @@ import type { SecureChannel } from "./secure-channel";
 import { encode, decodeServer } from "./protocol";
 import { loadDeviceRegistry } from "./device-registry";
 import { createPairing } from "./pairing";
+import { createRateLimiter } from "./rate-limit";
+import { createAudit } from "./audit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +13,9 @@ import { join } from "node:path";
 const M1 = new Uint8Array([1]);
 const M2 = new Uint8Array([2]);
 const utf8 = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
+
+function noopAudit() { return createAudit({ write: () => {} }); }
+function noopLimiter() { return createRateLimiter({ now: () => 0 }); }
 
 // passthrough responder: no crypto, frames pass as-is after a marker handshake
 function passthroughResponder(): SecureChannel {
@@ -81,6 +86,7 @@ test("pending connection: pair with correct code registers device + replies pair
     authorizedKeys: [], replayBufferBytes: 4096,
     registry, pairing, pairingMode: true,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(),
   };
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", true) });
   const ws = fakeWs();
@@ -104,6 +110,7 @@ test("pending connection: non-pair message closes the socket", () => {
     authorizedKeys: [], replayBufferBytes: 4096,
     registry, pairing, pairingMode: true,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(),
   };
   let closed = false;
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", true) });
@@ -113,6 +120,62 @@ test("pending connection: non-pair message closes the socket", () => {
   srv.__test.message(ws as any, utf8(encode({ type: "listSessions" })));
   expect(closed).toBe(true);
   expect(registry.has("PHONEPUB")).toBe(false);
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("authorized: listDevices returns registry + env with self flag", () => {
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  registry.add("PHONEPUB", "iPhone");
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: ["ENVPUB"], replayBufferBytes: 4096,
+    registry, pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(),
+  };
+  const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", false) });
+  const ws = fakeWs();
+  srv.__test.open(ws as any, "1.2.3.4");
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "listDevices" })));
+  const reply: any = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  expect(reply.type).toBe("devices");
+  const phone = reply.devices.find((d: any) => d.pubKey === "PHONEPUB");
+  const env = reply.devices.find((d: any) => d.pubKey === "ENVPUB");
+  expect(phone).toMatchObject({ source: "registry", self: true });
+  expect(env).toMatchObject({ source: "env", self: false, lastSeen: null });
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("revokeDevice removes from registry and closes that device's live socket", () => {
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  registry.add("A", "admin"); registry.add("B", "victim");
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry, pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(),
+  };
+  const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("A", false) });
+  // admin conn "A"
+  const wsA = fakeWs();
+  srv.__test.open(wsA as any, "1.1.1.1");
+  srv.__test.message(wsA as any, M1);
+  // victim conn "B"
+  let bClosed = false;
+  const wsB: any = { sent: [] as Uint8Array[], send(d: any) { this.sent.push(d); }, close() { bClosed = true; } };
+  srv.__test.openWith(wsB, "2.2.2.2", stubResponder("B", false));
+  srv.__test.message(wsB as any, M1);
+  expect(registry.has("B")).toBe(true);
+  srv.__test.message(wsA as any, utf8(encode({ type: "revokeDevice", pubKey: "B" })));
+  expect(registry.has("B")).toBe(false);
+  expect(bClosed).toBe(true);
   srv.stop();
   rmSync(file, { force: true });
 });

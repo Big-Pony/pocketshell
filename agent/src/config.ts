@@ -7,6 +7,8 @@ import DH from "noise-handshake/dh";
 import { toB64, fromB64 } from "./bytes";
 import { loadDeviceRegistry, type DeviceRegistry } from "./device-registry";
 import { createPairing, type Pairing } from "./pairing";
+import { createRateLimiter, type RateLimiter } from "./rate-limit";
+import { createAudit, fileAuditWriter, type Audit } from "./audit";
 
 export interface AgentConfig {
   listen: { host: string; port: number };
@@ -19,6 +21,8 @@ export interface AgentConfig {
   pairingMode: boolean;
   pairing: Pairing | null;
   tls: { enabled: boolean; cert?: string; key?: string };
+  rateLimiter: RateLimiter;
+  audit: Audit;
 }
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
@@ -56,6 +60,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     cert: env.POCKETSHELL_TLS_CERT,
     key: env.POCKETSHELL_TLS_KEY,
   };
+  const audit = createAudit({ write: fileAuditWriter(join(keyDir, "audit.log")) });
+  const rateLimiter = createRateLimiter({ now: () => Date.now(), onLock: (ip) => audit.log({ event: "ratelimit_lock", ip }) });
   return {
     listen: {
       host: env.POCKETSHELL_HOST ?? "127.0.0.1",
@@ -70,5 +76,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     pairingMode,
     pairing,
     tls,
+    rateLimiter,
+    audit,
   };
 }
