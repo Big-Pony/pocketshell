@@ -8,7 +8,6 @@
   import { getAgentPubKey } from "./lib/keystore";
 
   const url = `ws://${location.hostname}:8722`;
-  const conn = new Connection({ url });
 
   let sessions = $state<LocalSession[]>([]);
   let activeId = $state("");
@@ -18,6 +17,8 @@
       ? "未配置 Agent 公钥：从 Agent 启动日志复制公钥，设 VITE_AGENT_PUBKEY 或 localStorage['pocketshell.agentPubKey']"
       : ""
   );
+
+  const conn = new Connection({ url });
   let status = $state<ConnStatus>("connecting");
   const terms = new Map<string, Terminal>();
 
