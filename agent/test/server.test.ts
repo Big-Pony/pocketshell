@@ -33,7 +33,6 @@ async function openHandshakedWs(port: number): Promise<WebSocket> {
   });
   // switch to text-mode handler for JSON business frames
   ws.onmessage = null;
-  ws.binaryType = "blob"; // reset; caller will override
   return ws;
 }
 

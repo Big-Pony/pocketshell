@@ -132,9 +132,8 @@ export function startServer(deps: Deps = {}) {
 
 // Allow `bun run src/server.ts` to boot directly.
 if (import.meta.main) {
-  const { toB64: b64 } = await import("./bytes");
   const cfg = loadConfig();
   const s = startServer({ config: cfg });
   console.log(`[pocketshell] agent listening on :${s.port}`);
-  console.log(`[pocketshell] agent public key (put into app VITE_AGENT_PUBKEY / localStorage):`, b64(cfg.identity.publicKey));
+  console.log(`[pocketshell] agent public key (put into app VITE_AGENT_PUBKEY / localStorage):`, toB64(cfg.identity.publicKey));
 }
