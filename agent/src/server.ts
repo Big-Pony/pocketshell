@@ -2,6 +2,7 @@
 // TerminalService (A2) + ReplayService (A4). Noise handshake + pairing land in
 // a later slice; the message shapes here are the frozen contract from A3 §3.
 // S4a: wrapped in SecureChannel handshake — plaintext message loop unchanged.
+// S4b: in-channel pairing — pending state, pair verify, registry∪env authorize.
 import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig } from "./config";
 import { TerminalService } from "./terminal";
@@ -16,6 +17,7 @@ interface Deps {
   terminal?: TerminalService;
   replay?: ReplayService;
   channelFactory?: () => SecureChannel;
+  pairTimeoutMs?: number;
 }
 
 export function startServer(deps: Deps = {}) {
@@ -23,11 +25,28 @@ export function startServer(deps: Deps = {}) {
   const terminal = deps.terminal ?? new TerminalService();
   const replay = deps.replay ?? new ReplayService(config.replayBufferBytes);
 
+  const envKeys = new Set(config.authorizedKeys);
+  const authorize = (pub: string): "authorized" | "pending" | "reject" => {
+    if (config.registry.has(pub) || envKeys.has(pub)) return "authorized";
+    if (config.pairingMode) return "pending";
+    return "reject";
+  };
+
   const channelFactory =
     deps.channelFactory ??
-    (() => createResponderChannel({ identity: config.identity, authorize: (p) => config.authorizedKeys.includes(p) ? "authorized" : "reject" }));
+    (() => createResponderChannel({ identity: config.identity, authorize }));
 
-  interface Conn { ws: ServerWebSocket<unknown>; channel: SecureChannel; ready: boolean; }
+  const pairTimeoutMs = deps.pairTimeoutMs ?? 10_000;
+
+  interface Conn {
+    ws: ServerWebSocket<unknown>;
+    channel: SecureChannel;
+    ready: boolean;
+    pending: boolean;
+    remoteStatic: string | null;
+    ip: string;
+    pairTimer?: ReturnType<typeof setTimeout>;
+  }
   const conns = new Map<ServerWebSocket<unknown>, Conn>();
 
   const sendSecure = (conn: Conn, msg: ServerMsg) => {
@@ -49,6 +68,14 @@ export function startServer(deps: Deps = {}) {
     for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions: terminal.list() });
   };
   terminal.onSessionsChange(pushSessions);
+
+  const finishPairing = (conn: Conn, deviceName: string) => {
+    config.registry.add(conn.remoteStatic!, deviceName || "device");
+    conn.pending = false;
+    conn.ready = true;
+    if (conn.pairTimer) clearTimeout(conn.pairTimer);
+    sendSecure(conn, { type: "paired", ok: true });
+  };
 
   const handleClient = (conn: Conn, raw: string) => {
     let msg;
@@ -80,8 +107,8 @@ export function startServer(deps: Deps = {}) {
     }
   };
 
-  const onOpen = (ws: ServerWebSocket<unknown>) => {
-    const conn: Conn = { ws, channel: channelFactory(), ready: false };
+  const onOpen = (ws: ServerWebSocket<unknown>, ip = "", factory = channelFactory) => {
+    const conn: Conn = { ws, channel: factory(), ready: false, pending: false, remoteStatic: null, ip };
     conns.set(ws, conn);
     const m1 = conn.channel.start();
     if (m1) ws.send(m1); // responder returns null; kept for symmetry
@@ -95,11 +122,35 @@ export function startServer(deps: Deps = {}) {
     if (r.status === "fail") { console.warn("[pocketshell] channel fail:", r.reason); ws.close(); return; }
     if (r.status === "handshake") {
       if (r.reply) ws.send(r.reply);
-      if (r.established) { conn.ready = true; console.log("[pocketshell] connect (authorized)"); }
+      if (r.established) {
+        conn.remoteStatic = r.remoteStatic ?? null;
+        if (r.pending) {
+          conn.pending = true;
+          conn.pairTimer = setTimeout(() => { if (conn.pending) conn.ws.close(); }, pairTimeoutMs);
+          console.log("[pocketshell] pending device awaiting pair");
+        } else {
+          conn.ready = true;
+          if (conn.remoteStatic) config.registry.touch(conn.remoteStatic);
+          console.log("[pocketshell] connect (authorized)");
+        }
+      }
       return;
     }
     // r.status === "message"
-    handleClient(conn, Buffer.from(r.plaintext).toString("utf8"));
+    const text = Buffer.from(r.plaintext).toString("utf8");
+    if (conn.pending) {
+      let msg: ReturnType<typeof decodeClient>;
+      try { msg = decodeClient(text); } catch { conn.ws.close(); return; }
+      if (msg.type !== "pair") { conn.ws.close(); return; }
+      const v = config.pairing ? config.pairing.verify(msg.code) : { ok: false as const, reason: "no_attempts" as const };
+      if (v.ok) { finishPairing(conn, msg.deviceName); }
+      else {
+        conn.ws.send(conn.channel.send(new Uint8Array(Buffer.from(encode({ type: "error", code: "pair_failed", message: v.reason }), "utf8"))));
+        conn.ws.close();
+      }
+      return;
+    }
+    handleClient(conn, text);
   };
 
   const server = Bun.serve({
@@ -110,7 +161,7 @@ export function startServer(deps: Deps = {}) {
       return new Response("PocketShell agent — WebSocket only", { status: 426 });
     },
     websocket: {
-      open(ws) { onOpen(ws); },
+      open(ws) { onOpen(ws, (ws as any).remoteAddress ?? ""); },
       close(ws) { conns.delete(ws); console.log("[pocketshell] disconnect"); },
       message(ws, raw) { onMessage(ws, raw as any); },
     },
@@ -123,7 +174,8 @@ export function startServer(deps: Deps = {}) {
       server.stop(true);
     },
     __test: {
-      open: onOpen,
+      open: (ws: any, ip = "") => onOpen(ws, ip),
+      openWith: (ws: any, ip: string, factory: () => SecureChannel) => onOpen(ws, ip, factory),
       message: onMessage,
       broadcastOutputForTest: () => { for (const conn of conns.values()) sendSecure(conn, { type: "pong" }); },
     },
