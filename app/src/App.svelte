@@ -2,21 +2,25 @@
   import type { Terminal } from "@xterm/xterm";
   import { Connection, type ConnStatus } from "./lib/connection";
   import { mergeSessions, tombstone, closeTab as closeTabFn, type LocalSession } from "./lib/session-view";
+  import { clampSplit, type BottomPanel } from "./lib/shell";
   import TerminalView from "./components/Terminal.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import TaskPanel from "./components/TaskPanel.svelte";
-  import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
+  import BottomBar from "./components/BottomBar.svelte";
   import DeviceManager from "./components/DeviceManager.svelte";
+  import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
 
   const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
 
   let sessions = $state<LocalSession[]>([]);
   let activeId = $state("");
-  let showDevices = $state(false);
-  let panelOpen = $state(false);
+  let backgrounded = $state<Set<string>>(new Set());
+  let bottomPanel = $state<BottomPanel>("kbd");
+  let splitRatio = $state(0.6);
+  let fullscreen = $state(false);
   let notice = $state(
     !getAgentPubKey()
-      ? "未配置 Agent 公钥：从 Agent 启动日志复制公钥，设 VITE_AGENT_PUBKEY 或 localStorage['pocketshell.agentPubKey']"
+      ? "未配置 Agent 公钥：打开「设置 → 设备管理」粘贴配对串完成配对"
       : ""
   );
 
@@ -38,14 +42,19 @@
     notice = `${f.code}: ${f.message}`;
     setTimeout(() => (notice = ""), 4000);
   });
-
   conn.listSessions();
 
-  function newSession(name: string) { conn.newSession(name); activeId = name; }
-  function selectSession(name: string) { activeId = name; panelOpen = false; }
+  // Top-tab list = live sessions minus the ones sent to background.
+  const topSessions = $derived(sessions.filter((s) => !backgrounded.has(s.name)));
+
+  function newSession(name: string) { conn.newSession(name); activeId = name; backgrounded.delete(name); backgrounded = new Set(backgrounded); }
+  function selectSession(name: string) {
+    activeId = name;
+    if (backgrounded.has(name)) { backgrounded.delete(name); backgrounded = new Set(backgrounded); }
+  }
   function renameSession(name: string, next: string) {
     conn.renameSession(name, next);
-    sessions = sessions.map((s) => (s.name === name ? { ...s, name: next } : s)); // optimistic
+    sessions = sessions.map((s) => (s.name === name ? { ...s, name: next } : s));
     if (activeId === name) activeId = next;
   }
   function killSession(name: string) { conn.kill(name); }
@@ -53,7 +62,7 @@
     conn.detach(name);
     sessions = closeTabFn(sessions, name);
     terms.delete(name);
-    if (activeId === name) activeId = sessions[0]?.name ?? "";
+    if (activeId === name) activeId = topSessions[0]?.name ?? "";
   }
   function copyOutput(name: string) {
     const term = terms.get(name);
@@ -63,23 +72,49 @@
     for (let i = 0; i < buf.length; i++) text += buf.getLine(i)?.translateToString(true) + "\n";
     void navigator.clipboard?.writeText(text.replace(/\n+$/, "\n"));
   }
+
+  // ---- Divider drag + double-tap fullscreen ----
+  let dragging = false;
+  let lastTapAt = 0;
+  function onDividerDown(e: PointerEvent) {
+    const now = e.timeStamp;
+    if (now - lastTapAt < 300) { fullscreen = !fullscreen; lastTapAt = 0; return; }
+    lastTapAt = now;
+    dragging = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onDividerMove(e: PointerEvent) {
+    if (!dragging) return;
+    const h = window.innerHeight;
+    splitRatio = clampSplit(e.clientY / h);
+  }
+  function onDividerUp(e: PointerEvent) {
+    dragging = false;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+
+  const topFlex = $derived(fullscreen ? 1 : splitRatio);
+
+  // Placeholder: S5b will replace with real Keyboard; S5c with SnippetPanel; S5d with SettingsPanel.
+  function sendActive(text: string) {
+    if (!activeId) return;
+    conn.sendInput(activeId, new TextEncoder().encode(text));
+  }
 </script>
 
 <div class="shell">
   <div class="topbar">
     <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
-    <SessionTabs {sessions} {activeId} onSelect={selectSession} onNew={newSession} onClose={closeTab} />
-    <button class="devices-btn" onclick={() => (showDevices = true)} title="设备管理">🛡</button>
+    <SessionTabs sessions={topSessions} {activeId} onSelect={selectSession} onNew={newSession} onClose={closeTab} />
   </div>
 
   {#if notice}<div class="notice">{notice}</div>{/if}
-
   {#if status !== "online"}
     <div class="banner">连接断开，正在重连…</div>
   {/if}
 
-  <div class="main">
-    {#each sessions as s (s.name)}
+  <div class="top" style="flex: {topFlex} 1 0;">
+    {#each topSessions as s (s.name)}
       <TerminalView
         {conn}
         sessionId={s.name}
@@ -88,28 +123,34 @@
         onReady={(id, t) => terms.set(id, t)}
       />
     {/each}
-    {#if sessions.length === 0}
+    {#if topSessions.length === 0}
       <div class="hint">No session yet. Tap ＋ above to start one.</div>
     {/if}
   </div>
 
-  <button class="panel-toggle" onclick={() => (panelOpen = !panelOpen)}>Tasks</button>
-  {#if panelOpen}
-    <div class="panel">
-      <TaskPanel
-        {sessions}
-        onSelect={selectSession}
-        onRename={renameSession}
-        onKill={killSession}
-        onCopy={copyOutput}
-        onClose={closeTab}
-      />
+  {#if !fullscreen}
+    <div class="divider" role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}></div>
+    <div class="bottom" style="flex: {1 - topFlex} 1 0;">
+      {#if bottomPanel === "task"}
+        <TaskPanel
+          {sessions}
+          onSelect={selectSession}
+          onRename={renameSession}
+          onKill={killSession}
+          onCopy={copyOutput}
+          onClose={closeTab}
+        />
+      {:else if bottomPanel === "set"}
+        <DeviceManager {conn} onClose={() => (bottomPanel = "kbd")} />
+      {:else if bottomPanel === "kbd"}
+        <div class="placeholder">键盘（S5b）</div>
+      {:else if bottomPanel === "snip"}
+        <div class="placeholder">快捷指令（S5c）</div>
+      {/if}
     </div>
   {/if}
 
-  {#if showDevices}
-    <DeviceManager {conn} onClose={() => (showDevices = false)} />
-  {/if}
+  <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={(p) => (bottomPanel = p)} />
 </div>
 
 <style>
@@ -120,13 +161,10 @@
   .conn-dot.connecting { background: #fd3; }
   .conn-dot.offline { background: #e33; }
   .banner { background: #a33; color: #fff; padding: 6px 12px; font-size: 13px; text-align: center; }
-  .main { position: relative; flex: 1; min-height: 0; }
-  .hint { color: #777; padding: 24px; text-align: center; }
-  .panel-toggle { position: fixed; right: 12px; bottom: 12px; padding: 10px 14px;
-                  background: #2d4; color: #000; border: 0; border-radius: 8px; z-index: 10; }
-  .panel { position: fixed; left: 0; right: 0; bottom: 56px; max-height: 50dvh; overflow-y: auto; z-index: 9; }
-  /* In normal flow (below the topbar) so it never covers the 🛡 device-manager
-     entry — the pairing notice appears exactly when you need to reach it. */
   .notice { background: #a33; color: #fff; padding: 8px 12px; font-size: 13px; }
-  .devices-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 2px 6px; }
+  .top { position: relative; min-height: 0; overflow: hidden; }
+  .divider { height: 10px; background: #222; cursor: row-resize; flex: 0 0 auto; touch-action: none; }
+  .bottom { min-height: 0; overflow: auto; background: #0a0a0a; }
+  .placeholder { color: #666; padding: 24px; text-align: center; }
+  .hint { color: #777; padding: 24px; text-align: center; }
 </style>
