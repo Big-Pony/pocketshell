@@ -68,6 +68,8 @@ export class Connection {
   private snippetsCbs: ((s: Snippet[]) => void)[] = [];
   private establishedThisSocket = false;
   private pairFailStreak = 0;
+  private rpcSeq = 0;
+  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }>();
 
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
@@ -132,7 +134,32 @@ export class Connection {
     this.stopHeartbeat();
     this.clearHsTimer();
     if (this.reconnectTimer !== undefined) this.sched.clearTimeout(this.reconnectTimer);
+    this.rejectAllPending();
     this.ws.close();
+  }
+
+  rpc(method: string, params?: unknown): Promise<unknown> {
+    const id = String(++this.rpcSeq);
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = this.sched.setTimeout(() => {
+        this.pending.delete(id);
+        const e = new Error("rpc_timeout") as Error & { code?: string };
+        e.code = "rpc_timeout";
+        reject(e);
+      }, 10_000);
+      this.pending.set(id, { resolve, reject, timer });
+      this.send({ type: "rpc", id, method, params });
+    });
+  }
+
+  private rejectAllPending(): void {
+    for (const [, p] of this.pending) {
+      this.sched.clearTimeout(p.timer);
+      const e = new Error("disconnected") as Error & { code?: string };
+      e.code = "disconnected";
+      p.reject(e);
+    }
+    this.pending.clear();
   }
 
   constructor(opts: ConnectionOpts) {
@@ -235,6 +262,7 @@ export class Connection {
   private handleDown(): void {
     this.clearHsTimer();
     this.stopHeartbeat();
+    this.rejectAllPending();
     this.open = false;
     this.pairing = false;
     // A pairing attempt that keeps closing before the handshake completes is
@@ -286,6 +314,14 @@ export class Connection {
       for (const cb of this.devicesCbs) cb(msg.devices);
     } else if (msg.type === "snippets") {
       for (const cb of this.snippetsCbs) cb(msg.items);
+    } else if (msg.type === "response") {
+      const p = this.pending.get(msg.id);
+      if (p) {
+        this.pending.delete(msg.id);
+        this.sched.clearTimeout(p.timer);
+        if (msg.ok) p.resolve(msg.result);
+        else { const e = new Error(msg.error.message) as Error & { code?: string }; e.code = msg.error.code; p.reject(e); }
+      }
     } else if (msg.type === "error") {
       // A rejected pairing (expired/wrong/exhausted code) must not be retried:
       // the agent closes right after, and re-sending the same dead code on every
