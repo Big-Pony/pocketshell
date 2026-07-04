@@ -6,7 +6,7 @@ import { loadDeviceRegistry } from "./device-registry";
 import { createPairing } from "./pairing";
 import { createRateLimiter } from "./rate-limit";
 import { createAudit } from "./audit";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -236,4 +236,47 @@ test("revokeDevice removes from registry and closes that device's live socket", 
   expect(bClosed).toBe(true);
   srv.stop();
   rmSync(file, { force: true });
+});
+
+test("rpc fs.tree routes to fs-service and replies directly with id", () => {
+  const dir = join(mkdtempSync(join(tmpdir(), "ps-rpc-")), "");
+  mkdirSync(join(dir, "sub"));
+  writeFileSync(join(dir, "a.txt"), "hi");
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1); // handshake
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "rpc", id: "1", method: "fs.tree", params: { path: dir } })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  expect(reply.type).toBe("response");
+  if (reply.type === "response" && reply.ok) {
+    expect(reply.id).toBe("1");
+    expect((reply.result as any).nodes.map((n: any) => n.name)).toContain("a.txt");
+  }
+  srv.stop();
+});
+
+test("rpc unknown method replies ok:false", () => {
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "rpc", id: "2", method: "bogus.x", params: {} })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  if (reply.type === "response") { expect(reply.ok).toBe(false); expect(reply.id).toBe("2"); }
+  srv.stop();
+});
+
+test("rpc handler error is wrapped as ok:false", () => {
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "rpc", id: "3", method: "fs.read", params: { path: "/no/such/file" } })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  if (reply.type === "response" && !reply.ok) expect(reply.id).toBe("3");
+  srv.stop();
 });

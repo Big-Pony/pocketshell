@@ -7,6 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
+import { fsTree, fsRead } from "./fs-service";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
@@ -147,6 +148,25 @@ export function startServer(deps: Deps = {}) {
       case "removeSnippet":
         if (config.snippets.remove(msg.id)) pushSnippets();
         break;
+      case "rpc": {
+        const { id, method, params } = msg;
+        const p = (params ?? {}) as any;
+        try {
+          let result: unknown;
+          switch (method) {
+            case "fs.tree": result = fsTree(String(p.path)); break;
+            case "fs.read": result = fsRead(String(p.path)); break;
+            // fs.diff + git.* land in P1b (Task 15); fs.op lands in P1c (Task 18)
+            default:
+              sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
+              return;
+          }
+          sendSecure(conn, { type: "response", id, ok: true, result });
+        } catch (e) {
+          sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } });
+        }
+        break;
+      }
       default: sendSecure(conn, { type: "error", code: "unknown_type", message: "unknown message type" }); break;
     }
   };
