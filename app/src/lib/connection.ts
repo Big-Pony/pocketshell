@@ -2,7 +2,7 @@
 // encode/decode, dispatch. Noise handshake, reconnect state machine, secure
 // storage, pairing, and rpc() are added in later slices.
 // S4b: in-channel pairing — send pair on established, await paired, then normal flow.
-import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo } from "./protocol";
+import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo, type Snippet } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
 import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
@@ -65,6 +65,7 @@ export class Connection {
   private seen = new Map<string, number>();
   private pairing = false;
   private devicesCbs: ((d: DeviceInfo[]) => void)[] = [];
+  private snippetsCbs: ((s: Snippet[]) => void)[] = [];
   private establishedThisSocket = false;
   private pairFailStreak = 0;
 
@@ -283,6 +284,8 @@ export class Connection {
       this.setStatus("online");
     } else if (msg.type === "devices") {
       for (const cb of this.devicesCbs) cb(msg.devices);
+    } else if (msg.type === "snippets") {
+      for (const cb of this.snippetsCbs) cb(msg.items);
     } else if (msg.type === "error") {
       // A rejected pairing (expired/wrong/exhausted code) must not be retried:
       // the agent closes right after, and re-sending the same dead code on every
@@ -330,6 +333,15 @@ export class Connection {
   }
   listDevices(): void { this.send({ type: "listDevices" }); }
   revokeDevice(pubKey: string): void { this.send({ type: "revokeDevice", pubKey }); }
+  listSnippets(): void { this.send({ type: "listSnippets" }); }
+  addSnippet(i: { group: string; label: string; command: string; autoEnter: boolean }): void {
+    this.send({ type: "addSnippet", group: i.group, label: i.label, command: i.command, autoEnter: i.autoEnter });
+  }
+  removeSnippet(id: string): void { this.send({ type: "removeSnippet", id }); }
+  onSnippets(cb: (s: Snippet[]) => void): () => void {
+    this.snippetsCbs.push(cb);
+    return () => { this.snippetsCbs = this.snippetsCbs.filter((c) => c !== cb); };
+  }
   onDevices(cb: (d: DeviceInfo[]) => void): () => void {
     this.devicesCbs.push(cb);
     return () => { this.devicesCbs = this.devicesCbs.filter((c) => c !== cb); };
