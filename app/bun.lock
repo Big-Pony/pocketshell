@@ -7,6 +7,7 @@
       "dependencies": {
         "@xterm/addon-fit": "^0.10.0",
         "@xterm/xterm": "^5.5.0",
+        "highlight.js": "^11.11.1",
         "noise-handshake": "^4.2.0",
         "sodium-javascript": "^0.8.0",
       },
@@ -277,6 +278,8 @@
     "has-tostringtag": ["has-tostringtag@1.0.2", "https://mirrors.cloud.tencent.com/npm/has-tostringtag/-/has-tostringtag-1.0.2.tgz", { "dependencies": { "has-symbols": "^1.0.3" } }, "sha512-NqADB8VjPFLM2V0VvHUewwwsw0ZWBaIdgo+ieHtK3hasLz4qeCRjYcqfB6AQrBggRKppKF8L52/VqdVsO47Dlw=="],
 
     "hasown": ["hasown@2.0.4", "https://mirrors.cloud.tencent.com/npm/hasown/-/hasown-2.0.4.tgz", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A=="],
+
+    "highlight.js": ["highlight.js@11.11.1", "https://mirrors.cloud.tencent.com/npm/highlight.js/-/highlight.js-11.11.1.tgz", {}, "sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w=="],
 
     "html-encoding-sniffer": ["html-encoding-sniffer@4.0.0", "https://mirrors.cloud.tencent.com/npm/html-encoding-sniffer/-/html-encoding-sniffer-4.0.0.tgz", { "dependencies": { "whatwg-encoding": "^3.1.1" } }, "sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ=="],
 
