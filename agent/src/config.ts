@@ -9,6 +9,7 @@ import { loadDeviceRegistry, type DeviceRegistry } from "./device-registry";
 import { createPairing, type Pairing } from "./pairing";
 import { createRateLimiter, type RateLimiter } from "./rate-limit";
 import { createAudit, fileAuditWriter, type Audit } from "./audit";
+import { openSnippetStore, type SnippetStore } from "./snippet-store";
 
 export interface AgentConfig {
   listen: { host: string; port: number };
@@ -23,6 +24,7 @@ export interface AgentConfig {
   tls: { enabled: boolean; cert?: string; key?: string };
   rateLimiter: RateLimiter;
   audit: Audit;
+  snippets: SnippetStore;
 }
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
@@ -83,6 +85,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   };
   const audit = createAudit({ write: fileAuditWriter(join(keyDir, "audit.log")) });
   const rateLimiter = createRateLimiter({ now: () => Date.now(), onLock: (ip) => audit.log({ event: "ratelimit_lock", ip }) });
+  const identity = loadOrCreateIdentity(keyDir);
+  const snippets = openSnippetStore(join(keyDir, "pocketshell.db"));
   return {
     listen: {
       host: env.POCKETSHELL_HOST ?? "127.0.0.1",
@@ -91,7 +95,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     workspaceRoot: env.POCKETSHELL_WORKSPACE ?? process.cwd(),
     replayBufferBytes: env.POCKETSHELL_REPLAY_BYTES ? Number(env.POCKETSHELL_REPLAY_BYTES) : 256 * 1024,
     keyDir,
-    identity: loadOrCreateIdentity(keyDir),
+    identity: identity,
     authorizedKeys,
     registry,
     pairingMode,
@@ -99,5 +103,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     tls,
     rateLimiter,
     audit,
+    snippets,
   };
 }
