@@ -8,6 +8,8 @@
   import TaskPanel from "./components/TaskPanel.svelte";
   import BottomBar from "./components/BottomBar.svelte";
   import DeviceManager from "./components/DeviceManager.svelte";
+  import Keyboard from "./components/Keyboard.svelte";
+  import type { AppCommand } from "./lib/input-router";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
 
   const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
@@ -95,10 +97,43 @@
 
   const topFlex = $derived(fullscreen ? 1 : splitRatio);
 
-  // Placeholder: S5b will replace with real Keyboard; S5c with SnippetPanel; S5d with SettingsPanel.
   function sendActive(text: string) {
     if (!activeId) return;
     conn.sendInput(activeId, new TextEncoder().encode(text));
+  }
+
+  function shiftTab(delta: number) {
+    const list = topSessions;
+    if (!list.length) return;
+    const i = Math.max(0, list.findIndex((s) => s.name === activeId));
+    const next = list[(i + delta + list.length) % list.length];
+    if (next) activeId = next.name;
+  }
+
+  function toBackground() {
+    if (!activeId) return;
+    backgrounded.add(activeId);
+    backgrounded = new Set(backgrounded);
+    activeId = topSessions[0]?.name ?? "";
+  }
+
+  function runCommand(c: AppCommand) {
+    switch (c.type) {
+      case "prevTab": shiftTab(-1); break;
+      case "nextTab": shiftTab(1); break;
+      case "gotoTab": { const s = topSessions[c.index]; if (s) activeId = s.name; break; }
+      case "newSession": { const n = `s${sessions.length + 1}`; newSession(n); break; }
+      case "toBackground": toBackground(); break;
+      case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
+      case "scrollDown": terms.get(activeId)?.scrollPages(1); break;
+      case "toggleFullscreen": fullscreen = !fullscreen; break;
+      case "copyVisible": copyOutput(activeId); break;
+      case "renameSession": {
+        const next = prompt("新的会话名称", activeId);
+        if (next && next.trim() && next !== activeId) renameSession(activeId, next.trim());
+        break;
+      }
+    }
   }
 </script>
 
@@ -143,7 +178,7 @@
       {:else if bottomPanel === "set"}
         <DeviceManager {conn} onClose={() => (bottomPanel = "kbd")} />
       {:else if bottomPanel === "kbd"}
-        <div class="placeholder">键盘（S5b）</div>
+        <Keyboard onText={sendActive} onCommand={runCommand} />
       {:else if bottomPanel === "snip"}
         <div class="placeholder">快捷指令（S5c）</div>
       {/if}
