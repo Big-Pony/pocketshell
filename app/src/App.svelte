@@ -9,6 +9,7 @@
   import BottomBar from "./components/BottomBar.svelte";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
+  import SnippetPanel from "./components/SnippetPanel.svelte";
   import type { AppCommand } from "./lib/input-router";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
 
@@ -180,7 +181,7 @@
       {:else if bottomPanel === "kbd"}
         <Keyboard onText={sendActive} onCommand={runCommand} />
       {:else if bottomPanel === "snip"}
-        <div class="placeholder">快捷指令（S5c）</div>
+        <SnippetPanel {conn} onInsert={sendActive} />
       {/if}
     </div>
   {/if}
@@ -200,6 +201,5 @@
   .top { position: relative; min-height: 0; overflow: hidden; }
   .divider { height: 10px; background: #222; cursor: row-resize; flex: 0 0 auto; touch-action: none; }
   .bottom { min-height: 0; overflow: auto; background: #0a0a0a; }
-  .placeholder { color: #666; padding: 24px; text-align: center; }
   .hint { color: #777; padding: 24px; text-align: center; }
 </style>
