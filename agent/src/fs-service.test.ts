@@ -1,8 +1,9 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fsTree, fsRead, langForExt } from "./fs-service";
+import { fsTree, fsRead, langForExt, fsDiff, fsOp } from "./fs-service";
+import { runGit, isRepo } from "./git-service";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
 
@@ -74,4 +75,97 @@ test("fsRead truncates beyond maxLines", () => {
 test("langForExt maps known + unknown extensions", () => {
   expect(langForExt("x.py")).toBe("python");
   expect(langForExt("x.unknownext")).toBe("plaintext");
+});
+
+// P1b: diff + git marks
+function gitRepo(d: string) {
+  runGit(d, ["init", "-q"]);
+  runGit(d, ["config", "user.email", "t@t"]);
+  runGit(d, ["config", "user.name", "T"]);
+}
+
+test("fsDiff parses working-tree hunks", () => {
+  const d = tmp();
+  gitRepo(d);
+  writeFileSync(join(d, "a.txt"), "one\ntwo\nthree\n");
+  runGit(d, ["add", "."]); runGit(d, ["commit", "-q", "-m", "init"]);
+  writeFileSync(join(d, "a.txt"), "one\nTWO\nthree\n"); // modify line 2
+  const r = fsDiff(join(d, "a.txt"), d);
+  expect(r.hunks.length).toBeGreaterThan(0);
+  const kinds = r.hunks[0].lines.map((l) => l.kind);
+  expect(kinds).toContain("add");
+  expect(kinds).toContain("del");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsDiff returns empty hunks when unchanged", () => {
+  const d = tmp();
+  gitRepo(d);
+  writeFileSync(join(d, "a.txt"), "x\n"); runGit(d, ["add", "."]); runGit(d, ["commit", "-q", "-m", "i"]);
+  const r = fsDiff(join(d, "a.txt"), d);
+  expect(r.hunks).toEqual([]);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsTree inlines git marks for tracked/untracked entries", () => {
+  const d = tmp();
+  gitRepo(d);
+  writeFileSync(join(d, "tracked.txt"), "one\n");
+  runGit(d, ["add", "."]); runGit(d, ["commit", "-q", "-m", "init"]);
+  writeFileSync(join(d, "tracked.txt"), "one\ntwo\n"); // modified
+  writeFileSync(join(d, "fresh.txt"), "n");            // untracked
+  const r = fsTree(d);
+  const byName = Object.fromEntries(r.nodes.map((n) => [n.name, n.git]));
+  expect(byName["tracked.txt"]).toBe("M");
+  expect(byName["fresh.txt"]).toBe("?");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsTree leaves git undefined outside a repo", () => {
+  const d = tmp();
+  writeFileSync(join(d, "a.txt"), "x");
+  const r = fsTree(d);
+  expect(r.nodes[0].git).toBeUndefined();
+  rmSync(d, { recursive: true, force: true });
+});
+
+// P1c: fsOp
+test("fsOp rename moves a file", () => {
+  const d = tmp();
+  writeFileSync(join(d, "old.txt"), "x");
+  fsOp("rename", join(d, "old.txt"), join(d, "new.txt"));
+  expect(existsSync(join(d, "new.txt"))).toBe(true);
+  expect(existsSync(join(d, "old.txt"))).toBe(false);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsOp delete removes a file and a dir", () => {
+  const d = tmp();
+  writeFileSync(join(d, "f.txt"), "x");
+  mkdirSync(join(d, "sub")); writeFileSync(join(d, "sub", "g"), "y");
+  fsOp("delete", join(d, "f.txt"));
+  fsOp("delete", join(d, "sub"));
+  expect(existsSync(join(d, "f.txt"))).toBe(false);
+  expect(existsSync(join(d, "sub"))).toBe(false);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsOp mkdir creates a dir when parent exists", () => {
+  const d = tmp();
+  fsOp("mkdir", join(d, "made"));
+  expect(statS(join(d, "made")).isDirectory()).toBe(true);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsOp mkdir throws when parent missing", () => {
+  const d = tmp();
+  expect(() => fsOp("mkdir", join(d, "no", "deep"))).toThrow();
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsOp rename without target throws", () => {
+  const d = tmp();
+  writeFileSync(join(d, "a"), "x");
+  expect(() => fsOp("rename", join(d, "a"))).toThrow();
+  rmSync(d, { recursive: true, force: true });
 });
