@@ -151,6 +151,64 @@ test("authorized: listDevices returns registry + env with self flag", () => {
   rmSync(file, { force: true });
 });
 
+test("transport-phase channel fail on an established conn is NOT counted toward rate limit", () => {
+  const recorded: string[] = [];
+  const spyLimiter = { record: (ip: string) => recorded.push(ip), isLocked: () => false };
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry: loadDeviceRegistry(tmpRegFile()), pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: spyLimiter, audit: noopAudit(),
+  };
+  // stub: 1st frame -> established authorized; 2nd frame -> transport fail
+  const failAfterEstablish = (): SecureChannel => {
+    let n = 0;
+    let state: SecureChannel["state"] = "handshaking";
+    return {
+      get state() { return state; },
+      start() { return null; },
+      receive() {
+        if (n++ === 0) { state = "transport"; return { status: "handshake", reply: M2, established: true, remoteStatic: "X", pending: false }; }
+        state = "failed";
+        return { status: "fail", reason: "decrypt_failed" };
+      },
+      send(pt) { return pt; },
+    };
+  };
+  const srv = startServer({ port: 0, config: cfg, channelFactory: failAfterEstablish });
+  const ws = fakeWs();
+  srv.__test.open(ws as any, "7.7.7.7");
+  srv.__test.message(ws as any, M1);                 // -> established
+  srv.__test.message(ws as any, utf8("garbage"));    // -> transport fail
+  expect(recorded).toEqual([]);                       // established peer's decrypt fail not counted
+  srv.stop();
+});
+
+test("handshake-phase channel fail IS counted toward rate limit", () => {
+  const recorded: string[] = [];
+  const spyLimiter = { record: (ip: string) => recorded.push(ip), isLocked: () => false };
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry: loadDeviceRegistry(tmpRegFile()), pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: spyLimiter, audit: noopAudit(),
+  };
+  const rejectAtHandshake = (): SecureChannel => ({
+    get state() { return "handshaking" as const; },
+    start() { return null; },
+    receive() { return { status: "fail", reason: "unauthorized" }; },
+    send(pt) { return pt; },
+  });
+  const srv = startServer({ port: 0, config: cfg, channelFactory: rejectAtHandshake });
+  const ws = fakeWs();
+  srv.__test.open(ws as any, "8.8.8.8");
+  srv.__test.message(ws as any, M1);                 // -> handshake fail
+  expect(recorded).toEqual(["8.8.8.8"]);
+  srv.stop();
+});
+
 test("revokeDevice removes from registry and closes that device's live socket", () => {
   const file = tmpRegFile();
   const registry = loadDeviceRegistry(file);

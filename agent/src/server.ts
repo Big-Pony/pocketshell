@@ -28,7 +28,11 @@ export function startServer(deps: Deps = {}) {
   const envKeys = new Set(config.authorizedKeys);
   const authorize = (pub: string): "authorized" | "pending" | "reject" => {
     if (config.registry.has(pub) || envKeys.has(pub)) return "authorized";
-    if (config.pairingMode) return "pending";
+    // Admit an unregistered peer to the pending window only while the pairing
+    // code is still live (not consumed/expired). Once spent, unregistered peers
+    // are rejected at the handshake rather than kept admissible for the whole
+    // process lifetime.
+    if (config.pairingMode && config.pairing?.isLive()) return "pending";
     return "reject";
   };
 
@@ -139,7 +143,20 @@ export function startServer(deps: Deps = {}) {
     if (!conn) return;
     const frame = typeof raw === "string" ? new Uint8Array(Buffer.from(raw, "utf8")) : new Uint8Array(raw as Uint8Array);
     const r = conn.channel.receive(frame);
-    if (r.status === "fail") { console.warn("[pocketshell] channel fail:", r.reason); config.audit.log({ event: "handshake_fail", ip: conn.ip, reason: r.reason }); config.rateLimiter.record(conn.ip); ws.close(); return; }
+    if (r.status === "fail") {
+      console.warn("[pocketshell] channel fail:", r.reason);
+      // Only handshake-phase failures (random keys / bad handshake) feed the
+      // brute-force limiter. A transport-phase decrypt failure happens only
+      // after a peer already completed the handshake (authorized or pending),
+      // so it is not a handshake brute-force vector — don't count/mislabel it.
+      const established = conn.ready || conn.pending;
+      if (!established) {
+        config.audit.log({ event: "handshake_fail", ip: conn.ip, reason: r.reason });
+        config.rateLimiter.record(conn.ip);
+      }
+      ws.close();
+      return;
+    }
     if (r.status === "handshake") {
       if (r.reply) ws.send(r.reply);
       if (r.established) {

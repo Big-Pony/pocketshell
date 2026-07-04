@@ -1,5 +1,7 @@
-// A8 RateLimiter — per-IP sliding-window failure counter with lockout.
-// In-memory only (cleared on restart). Injected clock for tests.
+// A8 RateLimiter — per-IP fixed-window failure counter with lockout: a window
+// starts at the first failure and resets once windowMs elapses (not a true
+// sliding window). In-memory only (cleared on restart; no per-IP eviction).
+// Injected clock for tests.
 export interface RateLimiter { record(ip: string): void; isLocked(ip: string): boolean; }
 
 interface Entry { count: number; windowStart: number; lockedUntil: number; }

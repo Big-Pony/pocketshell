@@ -13,6 +13,10 @@ export function generatePairingCode(): string {
 
 export interface Pairing {
   readonly code: string;
+  // True while the code can still succeed: not consumed, not expired, attempts
+  // remain. authorize() gates the pending window on this so unregistered peers
+  // stop being admitted once the code is spent — not for the whole process life.
+  isLive(): boolean;
   verify(code: string): { ok: true } | { ok: false; reason: "expired" | "consumed" | "no_attempts" | "bad_code" };
 }
 
@@ -23,6 +27,7 @@ export function createPairing(opts: { code?: string; ttlMs?: number; maxAttempts
   let consumed = false;
   return {
     get code() { return code; },
+    isLive() { return !consumed && opts.now() <= expiresAt && attemptsLeft > 0; },
     verify(input) {
       if (consumed) return { ok: false, reason: "consumed" };
       if (opts.now() > expiresAt) return { ok: false, reason: "expired" };
