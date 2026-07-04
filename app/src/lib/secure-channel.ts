@@ -3,7 +3,9 @@
 import Noise from "noise-handshake";
 import Cipher from "noise-handshake/cipher";
 
-const PROLOGUE = Buffer.from("pocketshell-v1");
+// Browser has no Node Buffer global; noise-handshake / sodium-javascript accept
+// Uint8Array (they use b4a internally), so keep everything as Uint8Array here.
+const PROLOGUE = new TextEncoder().encode("pocketshell-v1");
 
 export type RecvResult =
   | { status: "handshake"; reply?: Uint8Array; established?: boolean }
@@ -22,10 +24,10 @@ export function createInitiatorChannel(opts: {
   agentPublicKey: Uint8Array;
 }): SecureChannel {
   const hs = new Noise("IK", true, {
-    publicKey: Buffer.from(opts.identity.publicKey),
-    secretKey: Buffer.from(opts.identity.secretKey),
+    publicKey: opts.identity.publicKey,
+    secretKey: opts.identity.secretKey,
   });
-  hs.initialise(PROLOGUE, Buffer.from(opts.agentPublicKey));
+  hs.initialise(PROLOGUE, opts.agentPublicKey);
   let state: SecureChannel["state"] = "handshaking";
   let tx: Cipher | null = null;
   let rx: Cipher | null = null;
@@ -38,7 +40,7 @@ export function createInitiatorChannel(opts: {
     receive(frame) {
       if (state === "transport") {
         try {
-          return { status: "message", plaintext: new Uint8Array(rx!.decrypt(Buffer.from(frame))) };
+          return { status: "message", plaintext: new Uint8Array(rx!.decrypt(frame)) };
         } catch {
           state = "failed";
           return { status: "fail", reason: "decrypt_failed" };
@@ -46,7 +48,7 @@ export function createInitiatorChannel(opts: {
       }
       if (state !== "handshaking") return { status: "fail", reason: "bad_state" };
       try {
-        hs.recv(Buffer.from(frame)); // msg2
+        hs.recv(frame); // msg2
       } catch {
         state = "failed";
         return { status: "fail", reason: "handshake_error" };
@@ -58,7 +60,7 @@ export function createInitiatorChannel(opts: {
     },
     send(plaintext) {
       if (state !== "transport") throw new Error("send before transport");
-      return new Uint8Array(tx!.encrypt(Buffer.from(plaintext)));
+      return new Uint8Array(tx!.encrypt(plaintext));
     },
   };
 }
