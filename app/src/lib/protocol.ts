@@ -19,6 +19,10 @@ export interface DeviceInfo {
   self: boolean;
 }
 
+export interface Snippet {
+  id: string; group: string; label: string; command: string; autoEnter: boolean;
+}
+
 export type ClientMsg =
   | { type: "attach"; sessionId: string; lastSeq?: number }
   | { type: "input"; sessionId: string; data: string }
@@ -30,6 +34,9 @@ export type ClientMsg =
   | { type: "ping" }
   | { type: "pair"; code: string; deviceName: string }
   | { type: "listDevices" }
+  | { type: "listSnippets" }
+  | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
+  | { type: "removeSnippet"; id: string }
   | { type: "revokeDevice"; pubKey: string };
 
 export type ServerMsg =
@@ -40,7 +47,8 @@ export type ServerMsg =
   | { type: "pong" }
   | { type: "resync"; sessionId: string; from: number }
   | { type: "paired"; ok: true }
-  | { type: "devices"; devices: DeviceInfo[] };
+  | { type: "devices"; devices: DeviceInfo[] }
+  | { type: "snippets"; items: Snippet[] };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);

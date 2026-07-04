@@ -21,3 +21,12 @@ test("listDevices and revokeDevice round-trips", () => {
 test("paired round-trips", () => {
   expect(decodeServer(encode({ type: "paired", ok: true }))).toEqual({ type: "paired", ok: true });
 });
+
+test("snippet messages round-trip", () => {
+  expect(decodeClient(encode({ type: "listSnippets" }))).toEqual({ type: "listSnippets" });
+  expect(decodeClient(encode({ type: "addSnippet", group: "Git", label: "st", command: "git status", autoEnter: true })))
+    .toEqual({ type: "addSnippet", group: "Git", label: "st", command: "git status", autoEnter: true });
+  expect(decodeClient(encode({ type: "removeSnippet", id: "x1" }))).toEqual({ type: "removeSnippet", id: "x1" });
+  const items = [{ id: "x1", group: "Git", label: "st", command: "git status", autoEnter: true }];
+  expect(decodeServer(encode({ type: "snippets", items }))).toEqual({ type: "snippets", items });
+});
