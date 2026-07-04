@@ -1,0 +1,28 @@
+import { test, expect } from "vitest";
+import { fileTabId, openFileTab, closeFileTab, cycle, type TopTab } from "./top-tabs";
+
+test("fileTabId is stable per path+mode", () => {
+  expect(fileTabId("/a.ts", "code")).toBe("file:code:/a.ts");
+  expect(fileTabId("/a.ts", "diff")).not.toBe(fileTabId("/a.ts", "code"));
+});
+
+test("openFileTab appends once, dedupes on repeat", () => {
+  let tabs: TopTab[] = [];
+  tabs = openFileTab(tabs, "/a.ts", "code");
+  tabs = openFileTab(tabs, "/a.ts", "code");
+  expect(tabs.length).toBe(1);
+  expect(tabs[0]).toMatchObject({ kind: "file", path: "/a.ts", mode: "code", title: "a.ts" });
+});
+
+test("closeFileTab removes by id", () => {
+  let tabs: TopTab[] = openFileTab([], "/a.ts", "code");
+  tabs = closeFileTab(tabs, fileTabId("/a.ts", "code"));
+  expect(tabs.length).toBe(0);
+});
+
+test("cycle steps forward and wraps", () => {
+  const order = ["s1", "s2", "file:code:/a.ts"];
+  expect(cycle(order, "s1", 1)).toBe("s2");
+  expect(cycle(order, "file:code:/a.ts", 1)).toBe("s1");
+  expect(cycle(order, "s1", -1)).toBe("file:code:/a.ts");
+});
