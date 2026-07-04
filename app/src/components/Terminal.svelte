@@ -23,7 +23,7 @@
   let fit: FitAddon;
 
   onMount(() => {
-    term = new Terminal({ fontSize: 14, convertEol: false, cursorBlink: true });
+    term = new Terminal({ fontSize: 14, convertEol: false, cursorBlink: true, disableStdin: true });
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
@@ -34,14 +34,11 @@
     });
 
     // Session is created by App (SessionTabs "new"); here we only attach + size.
+    // Input is routed by the custom keyboard (S5b) through conn.sendInput —
+    // xterm is display-only.
     conn.attach(sessionId);
     conn.resize(sessionId, term.cols, term.rows);
     onReady?.(sessionId, term);
-
-    term.onData((data: string) => {
-      if (closed) return;
-      conn.sendInput(sessionId, new TextEncoder().encode(data));
-    });
 
     const onResize = () => {
       if (!active) return;
