@@ -10,6 +10,7 @@
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
+  import SettingsPanel from "./components/SettingsPanel.svelte";
   import type { AppCommand } from "./lib/input-router";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
 
@@ -177,7 +178,7 @@
           onClose={closeTab}
         />
       {:else if bottomPanel === "set"}
-        <DeviceManager {conn} onClose={() => (bottomPanel = "kbd")} />
+        <SettingsPanel {conn} />
       {:else if bottomPanel === "kbd"}
         <Keyboard onText={sendActive} onCommand={runCommand} />
       {:else if bottomPanel === "snip"}
