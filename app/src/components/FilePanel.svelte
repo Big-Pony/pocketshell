@@ -3,8 +3,8 @@
   import FileTree from "./FileTree.svelte";
   import GitPanel from "./GitPanel.svelte";
 
-  let { conn, onOpenFile, onOpenDiff }: {
-    conn: Connection; onOpenFile: (path: string) => void; onOpenDiff: (path: string) => void;
+  let { conn, onOpenFile, onOpenDiff, onCd }: {
+    conn: Connection; onOpenFile: (path: string) => void; onOpenDiff: (path: string) => void; onCd: (path: string) => void;
   } = $props();
   let sub = $state<"dir" | "git">("dir");
 </script>
@@ -16,7 +16,7 @@
   </div>
   <div class="body">
     {#if sub === "dir"}
-      <FileTree {conn} {onOpenFile} />
+      <FileTree {conn} {onOpenFile} {onCd} />
     {:else}
       <GitPanel {conn} {onOpenDiff} />
     {/if}

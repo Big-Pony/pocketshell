@@ -248,7 +248,7 @@
     </div>
     <div class="bottom" style="flex: {1 - topFlex} 1 0;">
       {#if bottomPanel === "file"}
-        <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} />
+        <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} />
       {:else if bottomPanel === "task"}
         <TaskPanel
           {sessions}
