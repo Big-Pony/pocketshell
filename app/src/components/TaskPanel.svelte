@@ -1,5 +1,6 @@
 <script lang="ts">
   import { stateDotClass, needsKillConfirm } from "../lib/session-view";
+  import ContextMenu from "./ContextMenu.svelte";
 
   let {
     sessions,
@@ -64,17 +65,16 @@
       </button>
 
       {#if menuFor === s.name}
-        <div class="ctxmenu">
-          <button onclick={() => doRename(s.name)}><span class="ic">✎</span>重命名</button>
-          <button onclick={() => { onCopy(s.name); closeMenu(); }}><span class="ic">📋</span>复制输出</button>
-          {#if s.closed}
-            <button onclick={() => { onClose(s.name); closeMenu(); }}><span class="ic">×</span>关闭标签</button>
-          {:else}
-            <button class="danger" onclick={() => requestKill(s)}><span class="ic">⏹</span>终止</button>
-          {/if}
-          <div class="sep"></div>
-          <button onclick={closeMenu}>取消</button>
-        </div>
+        <ContextMenu
+          onClose={closeMenu}
+          items={[
+            { label: "重命名", icon: "✎", onSelect: () => doRename(s.name) },
+            { label: "复制输出", icon: "📋", onSelect: () => onCopy(s.name) },
+            ...(s.closed
+              ? [{ label: "关闭标签", icon: "×", onSelect: () => onClose(s.name) }]
+              : [{ label: "终止", icon: "⏹", danger: true, onSelect: () => requestKill(s) }]),
+          ]}
+        />
       {/if}
 
       {#if confirmKill === s.name}
@@ -157,36 +157,6 @@
     padding: 5px 10px;
     flex: 0 0 auto;
   }
-
-  .ctxmenu {
-    position: absolute;
-    z-index: 30;
-    left: 10px;
-    top: 10px;
-    background: #1e2936;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-xl);
-    padding: 4px 0;
-    min-width: 160px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-    display: flex;
-    flex-direction: column;
-  }
-  .ctxmenu button {
-    background: transparent;
-    border: 0;
-    padding: 9px 14px;
-    font-size: 0.73rem;
-    color: var(--text);
-    text-align: left;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .ctxmenu button:active { background: var(--key); }
-  .ctxmenu .danger { color: var(--red); }
-  .ctxmenu .sep { height: 1px; background: var(--line); margin: 3px 0; }
-  .ic { font-size: 0.8rem; }
 
   .confirm-overlay {
     position: fixed;
