@@ -73,6 +73,15 @@ export function startServer(deps: Deps = {}) {
   };
   terminal.onSessionsChange(pushSessions);
 
+  const pushSnippets = (target?: Conn) => {
+    const items = config.snippets.list().map((r) => ({
+      id: r.id, group: r.group, label: r.label, command: r.command, autoEnter: r.autoEnter,
+    }));
+    const msg: ServerMsg = { type: "snippets", items };
+    if (target) sendSecure(target, msg);
+    else for (const conn of conns.values()) sendSecure(conn, msg);
+  };
+
   const finishPairing = (conn: Conn, deviceName: string) => {
     config.registry.add(conn.remoteStatic!, deviceName || "device");
     conn.pending = false;
@@ -126,6 +135,18 @@ export function startServer(deps: Deps = {}) {
         }
         break;
       }
+      case "listSnippets":
+        pushSnippets(conn);
+        break;
+      case "addSnippet":
+        try {
+          config.snippets.add({ group: msg.group, label: msg.label, command: msg.command, autoEnter: msg.autoEnter });
+          pushSnippets();
+        } catch (e) { sendSecure(conn, { type: "error", code: "snippet_add_failed", message: String(e) }); }
+        break;
+      case "removeSnippet":
+        if (config.snippets.remove(msg.id)) pushSnippets();
+        break;
       default: sendSecure(conn, { type: "error", code: "unknown_type", message: "unknown message type" }); break;
     }
   };
