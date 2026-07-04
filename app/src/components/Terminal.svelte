@@ -25,7 +25,19 @@
   let fit: FitAddon;
 
   onMount(() => {
-    term = new Terminal({ fontSize, convertEol: false, cursorBlink: true, disableStdin: true });
+    term = new Terminal({
+      fontSize,
+      fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace',
+      convertEol: false,
+      cursorBlink: true,
+      disableStdin: true,
+      theme: {
+        background: "#1c242c",
+        foreground: "#c8d3dc",
+        cursor: "#46d0b4",
+        selectionBackground: "rgba(106, 169, 232, 0.28)",
+      },
+    });
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
@@ -73,9 +85,14 @@
   });
 </script>
 
-<div class="term" class:hidden={!active} bind:this={host}></div>
+<div class="term" class:hidden={!active} class:closed bind:this={host}></div>
 
 <style>
-  .term { width: 100%; height: 100%; background: #000; }
+  .term {
+    width: 100%;
+    height: 100%;
+    padding: 6px 8px;
+  }
   .hidden { display: none; }
+  .closed { opacity: 0.6; }
 </style>

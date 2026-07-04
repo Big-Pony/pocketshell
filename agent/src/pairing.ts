@@ -22,7 +22,7 @@ export interface Pairing {
 
 export function createPairing(opts: { code?: string; ttlMs?: number; maxAttempts?: number; now: () => number }): Pairing {
   const code = opts.code ?? generatePairingCode();
-  const expiresAt = opts.now() + (opts.ttlMs ?? 90_000);
+  const expiresAt = opts.now() + (opts.ttlMs ?? 300_000);
   let attemptsLeft = opts.maxAttempts ?? 5;
   let consumed = false;
   return {

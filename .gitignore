@@ -7,3 +7,5 @@ dist/
 .env
 .env.local
 bun.lockb
+.playwright-mcp
+docs/tmp

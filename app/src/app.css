@@ -1,2 +1,56 @@
-html, body { height: 100%; margin: 0; }
-body { overflow: hidden; background: #000; }
+/* Design tokens based on docs/需求/原型构想/remote-code-mockup.html */
+:root {
+  --bg: #0f1317;
+  --bg-deep: #07090b;
+  --panel: #161c22;
+  --panel2: #1c242c;
+  --line: #26303a;
+  --line-strong: #33404c;
+  --text: #c8d3dc;
+  --dim: #6b7885;
+  --dimmer: #4a5866;
+  --amber: #e8a33d;
+  --teal: #46d0b4;
+  --teal-dark: #08211b;
+  --red: #e06c5f;
+  --red-dark: #3a2a20;
+  --blue: #6aa9e8;
+  --key: #222c35;
+  --keyhi: #2d3a46;
+  --key-line: #33404c;
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-top: env(safe-area-inset-top);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", sans-serif;
+  color: var(--text);
+  background: var(--bg-deep);
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+
+.mono {
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
+}
+
+/* Utility helpers */
+.flex { display: flex; }
+.col { flex-direction: column; }
+.grow { flex: 1; }
+.none { display: none; }

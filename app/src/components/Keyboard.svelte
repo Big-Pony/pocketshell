@@ -32,12 +32,21 @@
 
   const isModOn = (id: string) => MODSET.has(id) && mods[id as ModName] !== "off";
   const isModLocked = (id: string) => MODSET.has(id) && mods[id as ModName] === "locked";
+
+  function keyLabel(k: import("../lib/keymap").KeyCap): { main: string; upper?: string } {
+    const main = capFor(k, layout);
+    const shifted = activeMods(mods).shift;
+    if (k.up) {
+      return shifted ? { main: k.up, upper: main } : { main, upper: k.up };
+    }
+    return { main };
+  }
 </script>
 
 <div class="kb">
   <div class="subtabs">
-    <button class:on={sub === "keys"} onclick={() => (sub = "keys")}>全键盘</button>
-    <button class:on={sub === "ime"} onclick={() => (sub = "ime")}>输入法缓冲</button>
+    <button class:on={sub === "keys"} onclick={() => (sub = "keys")}>⌨ 全键盘</button>
+    <button class:on={sub === "ime"} onclick={() => (sub = "ime")}>✎ 输入法缓冲</button>
   </div>
 
   {#if sub === "keys"}
@@ -45,44 +54,189 @@
       {#each LAYOUT as row}
         <div class="row">
           {#each row as k (k.id)}
+            {@const label = keyLabel(k)}
+            {@const isMod = MODSET.has(k.id)}
+            {@const on = isModOn(k.id)}
+            {@const locked = isModLocked(k.id)}
             <button
               class="key"
-              class:mod={MODSET.has(k.id)}
-              class:on={isModOn(k.id)}
-              class:locked={isModLocked(k.id)}
+              class:mod={isMod}
+              class:on
+              class:locked
+              class:has-up={label.upper}
+              data-key-id={k.id}
               style="flex-grow: {k.wide ?? 1};"
               onpointerdown={(e) => { e.preventDefault(); press(k.id); }}
-            >{capFor(k, layout)}</button>
+            >
+              {#if label.upper}<span class="up">{label.upper}</span>{/if}
+              <span class="main">{label.main}</span>
+            </button>
           {/each}
         </div>
       {/each}
     </div>
   {:else}
     <div class="ime">
-      <textarea bind:value={imeBuf} placeholder="用系统输入法编辑整段（中文/长指令），点发送一次性注入终端" rows="3"></textarea>
+      <div class="target">发送到当前会话 · 用系统输入法编辑整段后一次性注入</div>
+      <textarea bind:value={imeBuf} placeholder="例如：帮我给登录接口加上基于 IP 的限流，每分钟最多 20 次…" rows="3"></textarea>
       <div class="ime-actions">
-        <button onclick={() => (imeBuf = "")}>清空</button>
-        <button class="send" onclick={sendIme}>发送 ⏎</button>
+        <button class="clear" onclick={() => (imeBuf = "")}>清空</button>
+        <button class="send" onclick={sendIme}>发送到终端 ⏎</button>
       </div>
+      <div class="hint">发送前内容只存在于本地缓冲区，断线也不丢失。</div>
     </div>
   {/if}
 </div>
 
 <style>
-  .kb { display: flex; flex-direction: column; height: 100%; background: #0a0a0a; }
-  .subtabs { display: flex; gap: 8px; padding: 4px 8px; }
-  .subtabs button { background: #1a1a1a; color: #aaa; border: 0; border-radius: 6px; padding: 4px 10px; font-size: 12px; }
-  .subtabs button.on { background: #2d4; color: #000; }
-  .rows { display: flex; flex-direction: column; gap: 4px; padding: 4px; flex: 1; }
-  .row { display: flex; gap: 4px; }
-  .key { flex: 1 1 0; min-width: 0; background: #222; color: #eee; border: 0; border-radius: 5px;
-         padding: 8px 0; font-size: 13px; touch-action: none; user-select: none; }
-  .key.mod { background: #333; font-size: 11px; }
-  .key.on { background: #2d4; color: #000; }
-  .key.locked { background: #4a8; color: #000; box-shadow: inset 0 0 0 2px #fff6; }
-  .ime { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
-  .ime textarea { width: 100%; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #333; border-radius: 6px; }
-  .ime-actions { display: flex; gap: 8px; justify-content: flex-end; }
-  .ime-actions .send { background: #2d4; color: #000; border: 0; border-radius: 6px; padding: 6px 14px; }
-  .ime-actions button { background: #333; color: #eee; border: 0; border-radius: 6px; padding: 6px 14px; }
+  .kb {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg);
+    padding-bottom: var(--safe-bottom);
+  }
+  .subtabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px 8px;
+    flex: 0 0 auto;
+  }
+  .subtabs button {
+    flex: 1;
+    background: var(--key);
+    color: var(--dim);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 5px 0;
+    font-size: 0.68rem;
+    transition: background 0.15s, color 0.15s;
+  }
+  .subtabs button.on {
+    background: var(--panel2);
+    color: var(--teal);
+    border-color: var(--line-strong);
+  }
+
+  .rows {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .row {
+    display: flex;
+    gap: 3px;
+  }
+  .key {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 2.3em;
+    background: var(--key);
+    color: var(--text);
+    border: 1px solid var(--key-line);
+    border-bottom-width: 2px;
+    border-radius: var(--radius-sm);
+    padding: 4px 0;
+    font-size: 0.72rem;
+    touch-action: none;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    line-height: 1;
+    transition: background 0.08s, border-color 0.08s, transform 0.05s;
+    overflow: hidden;
+  }
+  .key:active {
+    background: var(--keyhi);
+    border-bottom-width: 1px;
+    transform: translateY(1px);
+  }
+  .key.mod {
+    background: #2a3540;
+    font-size: 0.58rem;
+    color: var(--dim);
+  }
+  .key.mod.on {
+    background: var(--teal);
+    color: var(--teal-dark);
+    border-color: var(--teal);
+  }
+  .key.mod.locked {
+    background: #3a8c7a;
+    color: var(--teal-dark);
+    border-color: var(--teal);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25);
+  }
+  .key .main {
+    font-size: inherit;
+  }
+  .key .up {
+    font-size: 0.55rem;
+    color: var(--dim);
+    line-height: 1;
+  }
+  .key.has-up {
+    padding-top: 2px;
+  }
+
+  .ime {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .target {
+    font-size: 0.7rem;
+    color: var(--dim);
+  }
+  .ime textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    color: var(--text);
+    padding: 10px;
+    font-size: 0.85rem;
+    resize: none;
+    font-family: inherit;
+    outline: none;
+  }
+  .ime textarea:focus {
+    border-color: var(--teal);
+  }
+  .ime-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .ime-actions button {
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    font-size: 0.78rem;
+  }
+  .ime-actions .send {
+    background: var(--teal);
+    color: var(--teal-dark);
+    font-weight: 600;
+    flex: 1;
+  }
+  .ime-actions .clear {
+    background: var(--key);
+    color: var(--text);
+  }
+  .hint {
+    font-size: 0.68rem;
+    color: var(--dim);
+    line-height: 1.6;
+  }
 </style>

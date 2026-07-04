@@ -88,7 +88,7 @@
     const buf = term.buffer.active;
     let text = "";
     for (let i = 0; i < buf.length; i++) text += buf.getLine(i)?.translateToString(true) + "\n";
-    void navigator.clipboard?.writeText(text.replace(/\n+$/, "\n"));
+    void navigator.clipboard?.writeText(text.replace(/\n+$/, "\n")).then(() => showToast("已复制可见输出"));
   }
 
   // ---- Divider drag + double-tap fullscreen ----
@@ -151,17 +151,42 @@
       }
     }
   }
+
+  // ---- Toast ----
+  let toastText = $state("");
+  let toastVisible = $state(false);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  function showToast(text: string) {
+    toastText = text;
+    toastVisible = true;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toastVisible = false), 1800);
+  }
+
+  const statusText: Record<ConnStatus, string> = {
+    online: "已连接",
+    connecting: "连接中…",
+    offline: "已断开",
+  };
 </script>
 
 <div class="shell">
   <div class="topbar">
-    <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
+    <span class="brand mono">◧ PocketShell</span>
+    <span class="version">S5</span>
+    <div class="conn">
+      <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
+      <span class="conn-text mono">{statusText[status]}</span>
+    </div>
+  </div>
+
+  <div class="tabs-wrap">
     <SessionTabs sessions={topSessions} {activeId} onSelect={selectSession} onNew={newSession} onClose={closeTab} />
   </div>
 
   {#if notice}<div class="notice">{notice}</div>{/if}
   {#if status !== "online"}
-    <div class="banner">连接断开，正在重连…</div>
+    <div class="banner">⚠ 连接已断开 · 会话由服务器托管，任务继续运行 · 正在重连…</div>
   {/if}
 
   <div class="top" style="flex: {topFlex} 1 0;">
@@ -176,12 +201,17 @@
       />
     {/each}
     {#if topSessions.length === 0}
-      <div class="hint">No session yet. Tap ＋ above to start one.</div>
+      <div class="hint">
+        <div class="hint-title">还没有会话</div>
+        <div class="hint-body">点击上方 ＋ 新建，或在键盘上按 Fn + n</div>
+      </div>
     {/if}
   </div>
 
   {#if !fullscreen}
-    <div class="divider" role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}></div>
+    <div class="divider" role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
+      <div class="grip"></div>
+    </div>
     <div class="bottom" style="flex: {1 - topFlex} 1 0;">
       {#if bottomPanel === "task"}
         <TaskPanel
@@ -205,17 +235,150 @@
   <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={openPanel} />
 </div>
 
+{#if toastVisible}
+  <div class="toast" class:visible={toastVisible}>{toastText}</div>
+{/if}
+
 <style>
-  .shell { display: flex; flex-direction: column; height: 100dvh; background: #000; }
-  .topbar { display: flex; align-items: center; gap: 6px; background: #111; }
-  .conn-dot { width: 9px; height: 9px; border-radius: 50%; margin-left: 8px; flex: 0 0 auto; }
-  .conn-dot.online { background: #2d4; }
-  .conn-dot.connecting { background: #fd3; }
-  .conn-dot.offline { background: #e33; }
-  .banner { background: #a33; color: #fff; padding: 6px 12px; font-size: 13px; text-align: center; }
-  .notice { background: #a33; color: #fff; padding: 8px 12px; font-size: 13px; }
-  .top { position: relative; min-height: 0; overflow: hidden; }
-  .divider { height: 10px; background: #222; cursor: row-resize; flex: 0 0 auto; touch-action: none; }
-  .bottom { min-height: 0; overflow: auto; background: #0a0a0a; }
-  .hint { color: #777; padding: 24px; text-align: center; }
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    background: var(--bg);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 6px;
+    background: var(--bg);
+    flex: 0 0 auto;
+  }
+  .brand {
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    font-size: 0.85rem;
+    color: var(--teal);
+  }
+  .version {
+    font-size: 0.62rem;
+    color: var(--dim);
+  }
+  .conn {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    color: var(--dim);
+  }
+  .conn-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--dimmer);
+  }
+  .conn-dot.online { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+  .conn-dot.connecting { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .conn-dot.offline { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .conn-text {
+    min-width: 3em;
+    text-align: right;
+  }
+
+  .tabs-wrap {
+    flex: 0 0 auto;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .banner {
+    background: var(--red-dark);
+    color: var(--amber);
+    font-size: 0.72rem;
+    padding: 6px 12px;
+    border-bottom: 1px solid #55402c;
+    text-align: center;
+    flex: 0 0 auto;
+  }
+  .notice {
+    background: var(--red-dark);
+    color: var(--red);
+    padding: 8px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid #55402c;
+    flex: 0 0 auto;
+  }
+
+  .top {
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--panel2);
+    border-top: 1px solid var(--line-strong);
+  }
+  .hint {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--dim);
+    text-align: center;
+    gap: 6px;
+  }
+  .hint-title { font-size: 15px; color: var(--text); }
+  .hint-body { font-size: 12px; }
+
+  .divider {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 6px 0;
+    touch-action: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .grip {
+    width: 44px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--keyhi);
+  }
+
+  .bottom {
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: 110px;
+    transform: translateX(-50%) translateY(8px);
+    background: #243039;
+    border: 1px solid var(--line-strong);
+    color: var(--text);
+    font-size: 0.72rem;
+    padding: 8px 14px;
+    border-radius: var(--radius-xl);
+    opacity: 0;
+    transition: 0.2s;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 20;
+  }
+  .toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>

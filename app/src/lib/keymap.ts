@@ -1,7 +1,7 @@
 // app/src/lib/keymap.ts
 // Static keyboard layout + escape sequences for the custom on-screen keyboard.
 // Mobile adaptation: modifiers appear once (sticky), arrows share one bottom row.
-export interface KeyCap { id: string; cap: string; wide?: number }
+export interface KeyCap { id: string; cap: string; up?: string; wide?: number }
 
 export const MOD_IDS = ["Shift", "Ctrl", "Alt", "Cmd", "Fn", "Caps"] as const;
 
@@ -36,18 +36,21 @@ export const LAYOUT: KeyCap[][] = [
   [{ id: "Esc", cap: "Esc" }, ...fkeys],
   // 数字行
   [
-    { id: "`", cap: "`" }, ...letters("1234567890"),
-    { id: "-", cap: "-" }, { id: "=", cap: "=" }, { id: "Backspace", cap: "⌫", wide: 1.5 },
+    { id: "`", cap: "`", up: "~" },
+    ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((c) => ({ id: c, cap: c, up: SHIFT_SYMBOLS[c] })),
+    { id: "-", cap: "-", up: "_" },
+    { id: "=", cap: "=", up: "+" },
+    { id: "Backspace", cap: "⌫", wide: 1.5 },
   ],
   // Q 行
   [{ id: "Tab", cap: "Tab", wide: 1.3 }, ...letters("qwertyuiop"),
-   { id: "[", cap: "[" }, { id: "]", cap: "]" }, { id: "\\", cap: "\\" }],
+   { id: "[", cap: "[", up: "{" }, { id: "]", cap: "]", up: "}" }, { id: "\\", cap: "\\", up: "|" }],
   // A 行
   [{ id: "Caps", cap: "Caps", wide: 1.5 }, ...letters("asdfghjkl"),
-   { id: ";", cap: ";" }, { id: "'", cap: "'" }, { id: "Enter", cap: "⏎", wide: 1.5 }],
+   { id: ";", cap: ";", up: ":" }, { id: "'", cap: "'", up: "\"" }, { id: "Enter", cap: "⏎", wide: 1.5 }],
   // Z 行
   [{ id: "Shift", cap: "Shift", wide: 1.5 }, ...letters("zxcvbnm"),
-   { id: ",", cap: "," }, { id: ".", cap: "." }, { id: "/", cap: "/" }],
+   { id: ",", cap: ",", up: "<" }, { id: ".", cap: ".", up: ">" }, { id: "/", cap: "/", up: "?" }],
   // 底行：修饰键各一个（不左右重复）+ 空格 + 方向键单排
   [
     { id: "Ctrl", cap: "Ctrl" }, { id: "Fn", cap: "Fn" }, { id: "Alt", cap: "Alt" }, { id: "Cmd", cap: "Cmd" },

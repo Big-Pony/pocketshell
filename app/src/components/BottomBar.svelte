@@ -17,7 +17,9 @@
 <nav class="bar">
   {#each tabs as t (t.id)}
     <button
+      class="btab"
       class:active={active === t.id}
+      class:disabled={t.disabled}
       disabled={t.disabled}
       onclick={() => !t.disabled && onSelect(t.id)}
       title={t.disabled ? "文件面板（P1）" : t.label}
@@ -30,14 +32,51 @@
 </nav>
 
 <style>
-  .bar { display: flex; background: #111; border-top: 1px solid #222; flex: 0 0 auto;
-         padding-bottom: env(safe-area-inset-bottom); }
-  .bar button { flex: 1; background: none; border: 0; color: #999; padding: 6px 0;
-                display: flex; flex-direction: column; align-items: center; gap: 2px;
-                font-size: 11px; position: relative; }
-  .bar button.active { color: #2d4; }
-  .bar button:disabled { color: #444; }
-  .ic { font-size: 18px; line-height: 1; }
-  .dot { position: absolute; top: 4px; right: 30%; width: 6px; height: 6px;
-         border-radius: 50%; background: #fd3; }
+  .bar {
+    display: flex;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    flex: 0 0 auto;
+    padding: 4px 2px calc(6px + var(--safe-bottom));
+  }
+  .btab {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    color: var(--dim);
+    padding: 6px 0 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 0.6rem;
+    border-radius: var(--radius-lg);
+    user-select: none;
+    position: relative;
+    transition: background 0.15s, color 0.15s;
+  }
+  .btab.active {
+    color: var(--teal);
+    background: rgba(70, 208, 180, 0.08);
+  }
+  .btab.disabled {
+    color: var(--dimmer);
+    opacity: 0.5;
+  }
+  .btab:not(.disabled):active {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .ic { font-size: 1rem; line-height: 1; margin-bottom: 2px; }
+  .lb { font-size: 0.6rem; }
+  .dot {
+    position: absolute;
+    top: 4px;
+    right: 14%;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.35; } }
 </style>

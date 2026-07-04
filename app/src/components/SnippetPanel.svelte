@@ -34,8 +34,8 @@
 
 <div class="sp">
   <div class="sp-head">
-    <span>快捷指令</span>
-    <button onclick={() => (adding = !adding)}>{adding ? "取消" : "＋ 自定义"}</button>
+    <span class="title">⚡ 快捷指令</span>
+    <button class="add-btn" onclick={() => (adding = !adding)}>{adding ? "取消" : "＋ 自定义"}</button>
   </div>
 
   {#if adding}
@@ -43,37 +43,140 @@
       <input bind:value={form.group} placeholder="分组，如 项目" />
       <input bind:value={form.label} placeholder="显示名，如 build" />
       <input bind:value={form.command} placeholder="命令，如 npm run build" />
-      <label><input type="checkbox" bind:checked={form.autoEnter} /> 自动回车 ⏎</label>
+      <label class="check"><input type="checkbox" bind:checked={form.autoEnter} /> 自动回车 ⏎</label>
       <button class="save" onclick={submit}>保存</button>
     </div>
   {/if}
 
-  {#each groups as g (g.group)}
-    <div class="sp-group">{g.group}</div>
-    <div class="sp-items">
-      {#each g.items as s (s.id)}
-        <div class="sp-row">
-          <button class="ins" onclick={() => insert(s)} title={s.command}>
-            {s.label}{#if s.autoEnter}<span class="cr">⏎</span>{/if}
-          </button>
-          {#if isCustom(s)}<button class="del" onclick={() => del(s)} aria-label="删除">×</button>{/if}
-        </div>
-      {/each}
-    </div>
-  {/each}
+  <div class="groups">
+    {#each groups as g (g.group)}
+      <div class="sp-group">{g.group}</div>
+      <div class="sp-items">
+        {#each g.items as s (s.id)}
+          <div class="sp-row">
+            <button class="ins" onclick={() => insert(s)} title={s.command}>
+              {s.label}{#if s.autoEnter}<span class="cr">⏎</span>{/if}
+            </button>
+            {#if isCustom(s)}<button class="del" onclick={() => del(s)} aria-label="删除">×</button>{/if}
+          </div>
+        {/each}
+      </div>
+    {/each}
+  </div>
+
+  <div class="hint">带 <b>⏎</b> 标记的指令插入后自动回车；不带的只插入文本。自定义指令会同步到同一 Agent 下的所有设备。</div>
 </div>
 
 <style>
-  .sp { padding: 8px; color: #ddd; }
-  .sp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .sp-head button { background: #2d4; color: #000; border: 0; border-radius: 6px; padding: 4px 10px; font-size: 12px; }
-  .sp-form { display: flex; flex-direction: column; gap: 6px; background: #141414; padding: 8px; border-radius: 8px; margin-bottom: 8px; }
-  .sp-form input { background: #111; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 6px; }
-  .sp-form .save { background: #2d4; color: #000; border: 0; border-radius: 6px; padding: 6px; }
-  .sp-group { color: #888; font-size: 12px; margin: 8px 0 4px; }
-  .sp-items { display: flex; flex-wrap: wrap; gap: 6px; }
-  .sp-row { display: flex; align-items: center; background: #1e1e1e; border-radius: 6px; }
-  .ins { background: none; color: #eee; border: 0; padding: 6px 10px; font-size: 13px; }
-  .cr { color: #2d4; margin-left: 4px; }
-  .del { background: none; color: #e66; border: 0; padding: 6px 8px; }
+  .sp {
+    padding: 10px 12px;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+  .sp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    flex: 0 0 auto;
+  }
+  .title { font-size: 0.85rem; font-weight: 600; }
+  .add-btn {
+    background: var(--teal);
+    color: var(--teal-dark);
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 5px 11px;
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+  .sp-form {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    background: var(--panel2);
+    padding: 10px;
+    border-radius: var(--radius-lg);
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .sp-form input {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 7px;
+    font-size: 0.78rem;
+    outline: none;
+  }
+  .sp-form input:focus { border-color: var(--teal); }
+  .check {
+    font-size: 0.72rem;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .save {
+    background: var(--teal);
+    color: var(--teal-dark);
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 7px;
+    font-weight: 600;
+  }
+
+  .groups { flex: 1; overflow-y: auto; }
+  .sp-group {
+    color: var(--dim);
+    font-size: 0.66rem;
+    margin: 10px 2px 6px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .sp-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .sp-row {
+    display: flex;
+    align-items: center;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .ins {
+    background: transparent;
+    color: var(--text);
+    border: 0;
+    padding: 7px 11px;
+    font-size: 0.75rem;
+    font-family: "SF Mono", ui-monospace, monospace;
+  }
+  .ins:active { background: var(--key); }
+  .cr { color: var(--teal); margin-left: 5px; font-size: 0.65rem; }
+  .del {
+    background: transparent;
+    color: var(--red);
+    border: 0;
+    border-left: 1px solid var(--line);
+    padding: 7px 9px;
+    font-size: 0.9rem;
+  }
+  .del:active { background: rgba(224, 108, 95, 0.15); }
+
+  .hint {
+    font-size: 0.68rem;
+    color: var(--dim);
+    line-height: 1.6;
+    margin-top: 12px;
+    flex: 0 0 auto;
+  }
+  .hint b { color: var(--teal); }
 </style>

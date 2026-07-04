@@ -1,3 +1,4 @@
+<!-- app/src/components/DeviceManager.svelte -->
 <script lang="ts">
   import type { Connection } from "../lib/connection";
   import type { DeviceInfo } from "../lib/protocol";
@@ -35,15 +36,18 @@
   }
 </script>
 
-<div class="dm-overlay" role="dialog" aria-modal="true">
+<div class="dm-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }} onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}>
   <div class="dm-panel">
-    <header><h2>设备管理</h2><button onclick={onClose} aria-label="关闭">×</button></header>
+    <header>
+      <h2>设备管理</h2>
+      <button class="close" onclick={onClose} aria-label="关闭">×</button>
+    </header>
 
     <section class="dm-pair">
       <h3>配对新设备（本机）</h3>
       <textarea bind:value={pasteText} placeholder="粘贴 pocketshell-pair:… 配对串" rows="3"></textarea>
       <input bind:value={deviceName} placeholder="本设备名称，如 iPhone" />
-      <button onclick={submitPairing}>配对并连接</button>
+      <button class="pair-btn" onclick={submitPairing}>配对并连接</button>
       {#if error}<p class="dm-error">{error}</p>{/if}
     </section>
 
@@ -57,17 +61,112 @@
           <button disabled={d.source === "env"} onclick={() => revoke(d)}>吊销</button>
         </div>
       {/each}
+      {#if devices.length === 0}
+        <div class="dm-empty">暂无已登记设备</div>
+      {/if}
     </section>
   </div>
 </div>
 
 <style>
-  .dm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: grid; place-items: center; z-index: 50; }
-  .dm-panel { background: #1e1e1e; color: #eee; width: min(92vw, 460px); max-height: 80vh; overflow: auto; border-radius: 10px; padding: 16px; }
-  .dm-panel header { display: flex; justify-content: space-between; align-items: center; }
-  .dm-pair textarea, .dm-pair input { width: 100%; margin: 6px 0; box-sizing: border-box; }
-  .dm-error { color: #ff6b6b; }
-  .dm-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid #333; font-size: 13px; }
-  .dm-src { opacity: .6; }
-  .dm-seen { opacity: .6; font-variant-numeric: tabular-nums; }
+  .dm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(7, 9, 11, 0.75);
+    display: grid;
+    place-items: center;
+    z-index: 50;
+    padding: 16px;
+  }
+  .dm-panel {
+    background: var(--panel2);
+    color: var(--text);
+    width: min(92vw, 460px);
+    max-height: 80vh;
+    overflow: auto;
+    border-radius: 14px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  h2 { font-size: 0.95rem; font-weight: 700; }
+  .close {
+    background: transparent;
+    border: 0;
+    color: var(--dim);
+    font-size: 1.3rem;
+    line-height: 1;
+    padding: 4px 8px;
+  }
+
+  section h3 {
+    font-size: 0.72rem;
+    color: var(--dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .dm-pair {
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .dm-pair textarea,
+  .dm-pair input {
+    width: 100%;
+    margin: 6px 0;
+    box-sizing: border-box;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 8px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    outline: none;
+  }
+  .dm-pair textarea { resize: none; }
+  .dm-pair textarea:focus,
+  .dm-pair input:focus { border-color: var(--teal); }
+  .pair-btn {
+    width: 100%;
+    background: var(--teal);
+    color: var(--teal-dark);
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 9px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+  .dm-error { color: var(--red); font-size: 0.72rem; margin-top: 6px; }
+
+  .dm-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .dm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dm-src, .dm-seen { color: var(--dim); font-size: 0.68rem; }
+  .dm-seen { font-variant-numeric: tabular-nums; }
+  .dm-row button {
+    background: var(--key);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 3px 8px;
+    font-size: 0.68rem;
+  }
+  .dm-row button:not(:disabled):active { background: var(--red); color: #fff; border-color: var(--red); }
+  .dm-row button:disabled { opacity: 0.4; }
+  .dm-empty { color: var(--dim); font-size: 0.72rem; padding: 10px 0; text-align: center; }
 </style>
