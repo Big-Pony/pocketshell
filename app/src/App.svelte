@@ -6,7 +6,10 @@
   import TerminalView from "./components/Terminal.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import TaskPanel from "./components/TaskPanel.svelte";
+  import FilePanel from "./components/FilePanel.svelte";
+  import FilePreview from "./components/FilePreview.svelte";
   import BottomBar from "./components/BottomBar.svelte";
+  import { openFileTab, closeFileTab, fileTabId, cycle, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -24,6 +27,8 @@
   let splitRatio = $state(0.6);
   let fullscreen = $state(false);
   let settings = $state<Settings>(loadSettings());
+  let fileTabs = $state<TopTab[]>([]);
+  let activeTop = $state("");
 
   // App owns settings so they actually apply: fontSize flows to every terminal
   // (reactive prop below), vibrate/layout flow to the keyboard.
@@ -64,6 +69,8 @@
 
   // Top-tab list = live sessions minus the ones sent to background.
   const topSessions = $derived(sessions.filter((s) => !backgrounded.has(s.name)));
+  const topOrder = $derived([...topSessions.map((s) => s.name), ...fileTabs.map((t) => t.id)]);
+  const activeTopId = $derived(activeTop && topOrder.includes(activeTop) ? activeTop : (activeId || topOrder[0] || ""));
 
   function newSession(name: string) { conn.newSession(name); activeId = name; backgrounded.delete(name); backgrounded = new Set(backgrounded); }
   function selectSession(name: string) {
@@ -118,12 +125,24 @@
     conn.sendInput(activeId, new TextEncoder().encode(text));
   }
 
+  function openFile(path: string, mode: "code" | "diff" = "code") {
+    fileTabs = openFileTab(fileTabs, path, mode);
+    activeTop = fileTabId(path, mode);
+    if (fullscreen) fullscreen = false;
+  }
+  function closeFile(id: string) {
+    fileTabs = closeFileTab(fileTabs, id);
+    if (activeTop === id) activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
+  }
+  function selectTop(id: string) {
+    if (id.startsWith("file:")) { activeTop = id; }
+    else { activeTop = ""; selectSession(id); }
+  }
+
   function shiftTab(delta: number) {
-    const list = topSessions;
-    if (!list.length) return;
-    const i = Math.max(0, list.findIndex((s) => s.name === activeId));
-    const next = list[(i + delta + list.length) % list.length];
-    if (next) activeId = next.name;
+    if (!topOrder.length) return;
+    const next = cycle(topOrder, activeTopId, delta);
+    selectTop(next);
   }
 
   function toBackground() {
@@ -137,7 +156,7 @@
     switch (c.type) {
       case "prevTab": shiftTab(-1); break;
       case "nextTab": shiftTab(1); break;
-      case "gotoTab": { const s = topSessions[c.index]; if (s) activeId = s.name; break; }
+      case "gotoTab": { const s = topSessions[c.index]; if (s) selectTop(s.name); break; }
       case "newSession": { const n = `s${sessions.length + 1}`; newSession(n); break; }
       case "toBackground": toBackground(); break;
       case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
@@ -181,7 +200,19 @@
   </div>
 
   <div class="tabs-wrap">
-    <SessionTabs sessions={topSessions} {activeId} onSelect={selectSession} onNew={newSession} onClose={closeTab} />
+    <SessionTabs sessions={topSessions} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onClose={closeTab} />
+    {#if fileTabs.length}
+      <nav class="file-tabs">
+        {#each fileTabs as t (t.id)}
+          <button class="ftab" class:active={activeTopId === t.id} onclick={() => selectTop(t.id)}>
+            <span class="ft-name">{t.title}</span>
+            <span class="ft-x" role="button" tabindex="0"
+              onclick={(e) => { e.stopPropagation(); closeFile(t.id); }}
+              onkeydown={(e) => { if (e.key === "Enter") { e.stopPropagation(); closeFile(t.id); } }}>×</span>
+          </button>
+        {/each}
+      </nav>
+    {/if}
   </div>
 
   {#if notice}<div class="notice">{notice}</div>{/if}
@@ -194,13 +225,16 @@
       <TerminalView
         {conn}
         sessionId={s.name}
-        active={s.name === activeId}
+        active={activeTopId === s.name}
         closed={s.closed ?? false}
         fontSize={settings.fontSize}
         onReady={(id, t) => terms.set(id, t)}
       />
     {/each}
-    {#if topSessions.length === 0}
+    {#each fileTabs as t (t.id)}
+      <FilePreview {conn} path={t.path} mode={t.mode} active={activeTopId === t.id} />
+    {/each}
+    {#if topSessions.length === 0 && fileTabs.length === 0}
       <div class="hint">
         <div class="hint-title">还没有会话</div>
         <div class="hint-body">点击上方 ＋ 新建，或在键盘上按 Fn + n</div>
@@ -213,7 +247,9 @@
       <div class="grip"></div>
     </div>
     <div class="bottom" style="flex: {1 - topFlex} 1 0;">
-      {#if bottomPanel === "task"}
+      {#if bottomPanel === "file"}
+        <FilePanel {conn} onOpenFile={openFile} />
+      {:else if bottomPanel === "task"}
         <TaskPanel
           {sessions}
           onSelect={selectSession}
@@ -294,7 +330,32 @@
     position: relative;
     overflow: hidden;
     background: var(--bg);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
   }
+  .file-tabs {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+    overflow-x: auto;
+  }
+  .ftab {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    color: var(--dim);
+    padding: 4px 6px;
+    font-size: 0.68rem;
+    white-space: nowrap;
+  }
+  .ftab.active { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
+  .ft-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  .ft-x { padding: 0 2px; color: var(--dimmer); }
 
   .banner {
     background: var(--red-dark);

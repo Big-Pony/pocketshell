@@ -6,7 +6,7 @@
   } = $props();
 
   const tabs: { id: BottomPanel; icon: string; label: string; disabled?: boolean }[] = [
-    { id: "file", icon: "🗀", label: "文件", disabled: true },
+    { id: "file", icon: "🗀", label: "文件" },
     { id: "task", icon: "▶", label: "任务" },
     { id: "kbd", icon: "⌨", label: "键盘" },
     { id: "snip", icon: "⚡", label: "指令" },
