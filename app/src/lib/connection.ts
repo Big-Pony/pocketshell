@@ -1,10 +1,11 @@
 // B1 (slice-1, plaintext): the app's single network entry point. WS connect,
 // encode/decode, dispatch. Noise handshake, reconnect state machine, secure
 // storage, pairing, and rpc() are added in later slices.
-import { encode, decodeServer, type ClientMsg, type SessionMeta } from "./protocol";
+// S4b: in-channel pairing — send pair on established, await paired, then normal flow.
+import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
-import { loadOrCreateIdentity, getAgentPubKey } from "./keystore";
+import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
 
 export interface WebSocketLike {
   binaryType?: string;
@@ -41,6 +42,8 @@ export interface ConnectionOpts {
   livenessMs?: number;
   channelFactory?: () => SecureChannel;
   handshakeTimeoutMs?: number;
+  getPairing?: () => { code: string; deviceName: string } | null;
+  onPaired?: () => void;
 }
 
 type OutputCb = (f: { sessionId: string; seq: number; data: Uint8Array }) => void;
@@ -60,6 +63,10 @@ export class Connection {
   private resyncCbs: ResyncCb[] = [];
   private attached = new Set<string>();
   private seen = new Map<string, number>();
+  private pairing = false;
+  private devicesCbs: ((d: DeviceInfo[]) => void)[] = [];
+  private establishedThisSocket = false;
+  private pairFailStreak = 0;
 
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
@@ -78,6 +85,8 @@ export class Connection {
   private makeChannel: () => SecureChannel;
   private handshakeTimeoutMs: number;
   private hsTimer?: number;
+  private getPairing: () => { code: string; deviceName: string } | null;
+  private onPaired?: () => void;
 
   get status(): ConnStatus { return this._status; }
 
@@ -98,7 +107,7 @@ export class Connection {
     this.hbTimer = this.sched.setInterval(() => {
       if (this.sched.now() - this.lastRx > this.livenessMs) {
         this.stopHeartbeat();
-        this.ws.close(); // -> onclose guard passes (still current) -> handleDown
+        this.ws.close();
         return;
       }
       if (this.open && this.channel.state === "transport") {
@@ -141,6 +150,8 @@ export class Connection {
       return createInitiatorChannel({ identity: loadOrCreateIdentity(), agentPublicKey: agentPub });
     });
     this.handshakeTimeoutMs = opts.handshakeTimeoutMs ?? 5000;
+    this.getPairing = opts.getPairing ?? (() => getPendingPair());
+    this.onPaired = opts.onPaired;
     this.connect();
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
@@ -157,6 +168,7 @@ export class Connection {
     const socket = this.factory(this.url);
     this.ws = socket;
     this.open = false;
+    this.establishedThisSocket = false;
     this.setStatus("connecting");
     socket.onopen = () => {
       if (socket !== this.ws) return;
@@ -170,9 +182,8 @@ export class Connection {
         return;
       }
       this.hsTimer = this.sched.setTimeout(() => {
-        // no msg2 in time -> treat as down
         this.clearHsTimer();
-        this.ws.close(); // -> onclose -> handleDown (offline + backoff + notice via status)
+        this.ws.close();
       }, this.handshakeTimeoutMs);
     };
     socket.onmessage = (ev) => {
@@ -194,18 +205,29 @@ export class Connection {
     };
   }
 
-  private onEstablished(socket: WebSocketLike): void {
-    this.open = true;
-    this.backoffAttempt = 0;
+  private flushAndRestore(socket: WebSocketLike): void {
     const pending = this.queue; this.queue = [];
     for (const raw of pending) socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(raw))));
-    // on reconnect: re-attach all attached sessions with their seen seq
     for (const id of this.attached) {
       socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 })))));
     }
-    // always refresh session list on connect (regardless of attached sessions)
     socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "listSessions" })))));
+  }
+
+  private onEstablished(socket: WebSocketLike): void {
+    this.open = true;
+    this.establishedThisSocket = true;
+    this.pairFailStreak = 0;
+    this.backoffAttempt = 0;
     this.startHeartbeat();
+    const pair = this.getPairing();
+    if (pair) {
+      this.pairing = true;
+      socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "pair", code: pair.code, deviceName: pair.deviceName })))));
+      this.setStatus("connecting"); // stay connecting until paired
+      return;
+    }
+    this.flushAndRestore(socket);
     this.setStatus("online");
   }
 
@@ -213,6 +235,21 @@ export class Connection {
     this.clearHsTimer();
     this.stopHeartbeat();
     this.open = false;
+    this.pairing = false;
+    // A pairing attempt that keeps closing before the handshake completes is
+    // being rejected by the agent (closed pairing window / wrong agent key) —
+    // the agent rejects at the handshake with no pair_failed message, so this
+    // is the only signal. Tolerate a transient blip, but after a few dead
+    // attempts drop the code so we stop looping (and self-tripping the limiter).
+    if (this.getPairing() && !this.establishedThisSocket) {
+      if (++this.pairFailStreak >= 3) {
+        clearPendingPair();
+        this.pairFailStreak = 0;
+        for (const cb of this.errorCbs) cb({ code: "pair_failed", message: "配对被拒绝，请在设备管理里重新配对" });
+      }
+    } else {
+      this.pairFailStreak = 0;
+    }
     this.setStatus("offline");
     const delay = Math.min(10_000, 500 * 2 ** this.backoffAttempt);
     this.backoffAttempt++;
@@ -238,7 +275,23 @@ export class Connection {
       for (const cb of this.sessionsCbs) cb(msg.sessions);
     } else if (msg.type === "exit") {
       for (const cb of this.exitCbs) cb({ sessionId: msg.sessionId, code: msg.code });
+    } else if (msg.type === "paired") {
+      this.pairing = false;
+      clearPendingPair();
+      this.onPaired?.();
+      this.flushAndRestore(this.ws);
+      this.setStatus("online");
+    } else if (msg.type === "devices") {
+      for (const cb of this.devicesCbs) cb(msg.devices);
     } else if (msg.type === "error") {
+      // A rejected pairing (expired/wrong/exhausted code) must not be retried:
+      // the agent closes right after, and re-sending the same dead code on every
+      // reconnect would loop forever and self-trip the rate limiter. Drop the
+      // pending code so the next reconnect proceeds as a normal (unpaired) attempt.
+      if (this.pairing && msg.code === "pair_failed") {
+        this.pairing = false;
+        clearPendingPair();
+      }
       for (const cb of this.errorCbs) cb({ code: msg.code, message: msg.message });
     }
   }
@@ -274,6 +327,12 @@ export class Connection {
   }
   renameSession(sessionId: string, name: string): void {
     this.send({ type: "renameSession", sessionId, name });
+  }
+  listDevices(): void { this.send({ type: "listDevices" }); }
+  revokeDevice(pubKey: string): void { this.send({ type: "revokeDevice", pubKey }); }
+  onDevices(cb: (d: DeviceInfo[]) => void): () => void {
+    this.devicesCbs.push(cb);
+    return () => { this.devicesCbs = this.devicesCbs.filter((c) => c !== cb); };
   }
   onOutput(cb: OutputCb): () => void {
     this.outputCbs.push(cb);
