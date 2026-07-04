@@ -9,12 +9,14 @@
     sessionId,
     active,
     closed = false,
+    fontSize = 14,
     onReady,
   }: {
     conn: Connection;
     sessionId: string;
     active: boolean;
     closed?: boolean;
+    fontSize?: number;
     onReady?: (sessionId: string, term: Terminal) => void;
   } = $props();
 
@@ -23,7 +25,7 @@
   let fit: FitAddon;
 
   onMount(() => {
-    term = new Terminal({ fontSize: 14, convertEol: false, cursorBlink: true, disableStdin: true });
+    term = new Terminal({ fontSize, convertEol: false, cursorBlink: true, disableStdin: true });
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
@@ -58,6 +60,15 @@
   $effect(() => {
     if (active && term && fit) {
       queueMicrotask(() => { fit.fit(); conn.resize(sessionId, term.cols, term.rows); });
+    }
+  });
+
+  // Live-apply font-size changes from settings: update xterm then re-fit + resize PTY.
+  $effect(() => {
+    const fs = fontSize;
+    if (term && fit) {
+      term.options.fontSize = fs;
+      if (active) queueMicrotask(() => { fit.fit(); conn.resize(sessionId, term.cols, term.rows); });
     }
   });
 </script>

@@ -21,6 +21,13 @@ export const SHIFT_SYMBOLS: Record<string, string> = {
   ";": ":", "'": "\"", ",": "<", ".": ">", "/": "?", "`": "~",
 };
 
+// Keycap label may differ by layout. Currently only the Cmd/Win key: macOS shows
+// "Cmd", Windows shows "Win" (same id "Cmd" — both map to Meta in the terminal).
+export function capFor(k: KeyCap, layout: "mac" | "win"): string {
+  if (k.id === "Cmd") return layout === "win" ? "Win" : "Cmd";
+  return k.cap;
+}
+
 const letters = (s: string): KeyCap[] => s.split("").map((c) => ({ id: c, cap: c.toUpperCase() }));
 const fkeys = Array.from({ length: 12 }, (_, i) => ({ id: `F${i + 1}`, cap: `F${i + 1}` }));
 

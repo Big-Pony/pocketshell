@@ -1,10 +1,10 @@
 <!-- app/src/components/Keyboard.svelte -->
 <script lang="ts">
-  import { LAYOUT, MOD_IDS } from "../lib/keymap";
+  import { LAYOUT, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
 
-  let { onText, onCommand, vibrate = false }: {
-    onText: (text: string) => void; onCommand: (c: AppCommand) => void; vibrate?: boolean;
+  let { onText, onCommand, vibrate = false, layout = "mac" }: {
+    onText: (text: string) => void; onCommand: (c: AppCommand) => void; vibrate?: boolean; layout?: "mac" | "win";
   } = $props();
 
   let sub = $state<"keys" | "ime">("keys");
@@ -52,7 +52,7 @@
               class:locked={isModLocked(k.id)}
               style="flex-grow: {k.wide ?? 1};"
               onpointerdown={(e) => { e.preventDefault(); press(k.id); }}
-            >{k.cap}</button>
+            >{capFor(k, layout)}</button>
           {/each}
         </div>
       {/each}

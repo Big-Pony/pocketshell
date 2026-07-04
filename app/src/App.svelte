@@ -12,6 +12,7 @@
   import SnippetPanel from "./components/SnippetPanel.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import type { AppCommand } from "./lib/input-router";
+  import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
 
   const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
@@ -22,6 +23,19 @@
   let bottomPanel = $state<BottomPanel>("kbd");
   let splitRatio = $state(0.6);
   let fullscreen = $state(false);
+  let settings = $state<Settings>(loadSettings());
+
+  // App owns settings so they actually apply: fontSize flows to every terminal
+  // (reactive prop below), vibrate/layout flow to the keyboard.
+  function applySettings(next: Settings) {
+    settings = next;
+    saveSettings(next);
+  }
+
+  function openPanel(p: BottomPanel) {
+    bottomPanel = p;
+    fullscreen = false; // leaving fullscreen — otherwise the bottom region stays hidden
+  }
   let notice = $state(
     !getAgentPubKey()
       ? "未配置 Agent 公钥：打开「设置 → 设备管理」粘贴配对串完成配对"
@@ -157,6 +171,7 @@
         sessionId={s.name}
         active={s.name === activeId}
         closed={s.closed ?? false}
+        fontSize={settings.fontSize}
         onReady={(id, t) => terms.set(id, t)}
       />
     {/each}
@@ -178,16 +193,16 @@
           onClose={closeTab}
         />
       {:else if bottomPanel === "set"}
-        <SettingsPanel {conn} />
+        <SettingsPanel {conn} {settings} onChange={applySettings} />
       {:else if bottomPanel === "kbd"}
-        <Keyboard onText={sendActive} onCommand={runCommand} />
+        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} />
       {:else if bottomPanel === "snip"}
         <SnippetPanel {conn} onInsert={sendActive} />
       {/if}
     </div>
   {/if}
 
-  <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={(p) => (bottomPanel = p)} />
+  <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={openPanel} />
 </div>
 
 <style>

@@ -1,16 +1,17 @@
 <!-- app/src/components/SettingsPanel.svelte -->
 <script lang="ts">
   import type { Connection } from "../lib/connection";
-  import { loadSettings, saveSettings, type Settings } from "../lib/settings";
+  import type { Settings } from "../lib/settings";
   import DeviceManager from "./DeviceManager.svelte";
 
-  let { conn }: { conn: Connection } = $props();
-
-  let settings = $state<Settings>(loadSettings());
+  // Controlled: App owns the settings state (and applies them to terminals /
+  // keyboard); this panel only renders and reports changes via onChange.
+  let { conn, settings, onChange }: {
+    conn: Connection; settings: Settings; onChange: (s: Settings) => void;
+  } = $props();
 
   function update<K extends keyof Settings>(k: K, v: Settings[K]) {
-    settings = { ...settings, [k]: v };
-    saveSettings(settings);
+    onChange({ ...settings, [k]: v });
   }
 
   let showDevices = $state(false);

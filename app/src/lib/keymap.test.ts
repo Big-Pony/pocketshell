@@ -1,6 +1,6 @@
 // app/src/lib/keymap.test.ts
 import { test, expect } from "vitest";
-import { SEQ, SHIFT_SYMBOLS, LAYOUT, MOD_IDS } from "./keymap";
+import { SEQ, SHIFT_SYMBOLS, LAYOUT, MOD_IDS, capFor } from "./keymap";
 
 test("arrow + esc + control sequences are the xterm defaults", () => {
   expect(SEQ.ArrowUp).toBe("\x1b[A");
@@ -35,4 +35,10 @@ test("layout has 6 rows and modifiers are single (not duplicated)", () => {
   }
   // arrows all present on the bottom row, single row
   expect(ids.filter((id) => id.startsWith("Arrow")).sort()).toEqual(["ArrowDown","ArrowLeft","ArrowRight","ArrowUp"]);
+});
+
+test("capFor relabels the Cmd key per layout, leaves others unchanged", () => {
+  expect(capFor({ id: "Cmd", cap: "Cmd" }, "mac")).toBe("Cmd");
+  expect(capFor({ id: "Cmd", cap: "Cmd" }, "win")).toBe("Win");
+  expect(capFor({ id: "a", cap: "A" }, "win")).toBe("A");
 });
