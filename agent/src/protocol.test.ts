@@ -30,3 +30,28 @@ test("snippet messages round-trip", () => {
   const items = [{ id: "x1", group: "Git", label: "st", command: "git status", autoEnter: true }];
   expect(decodeServer(encode({ type: "snippets", items }))).toEqual({ type: "snippets", items });
 });
+
+test("rpc request round-trips through decodeClient", () => {
+  const raw = encode({ type: "rpc", id: "7", method: "fs.tree", params: { path: "/tmp" } });
+  const msg = decodeClient(raw);
+  expect(msg.type).toBe("rpc");
+  if (msg.type === "rpc") {
+    expect(msg.id).toBe("7");
+    expect(msg.method).toBe("fs.tree");
+    expect(msg.params).toEqual({ path: "/tmp" });
+  }
+});
+
+test("ok response round-trips through decodeServer", () => {
+  const raw = encode({ type: "response", id: "7", ok: true, result: { a: 1 } });
+  const msg = decodeServer(raw);
+  expect(msg.type).toBe("response");
+  if (msg.type === "response" && msg.ok) expect(msg.result).toEqual({ a: 1 });
+});
+
+test("error response round-trips through decodeServer", () => {
+  const raw = encode({ type: "response", id: "9", ok: false, error: { code: "enoent", message: "no such file" } });
+  const msg = decodeServer(raw);
+  expect(msg.type).toBe("response");
+  if (msg.type === "response" && !msg.ok) expect(msg.error.code).toBe("enoent");
+});

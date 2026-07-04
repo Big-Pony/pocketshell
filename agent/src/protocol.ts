@@ -40,7 +40,8 @@ export type ClientMsg =
   | { type: "listSnippets" }
   | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "removeSnippet"; id: string }
-  | { type: "revokeDevice"; pubKey: string };
+  | { type: "revokeDevice"; pubKey: string }
+  | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }
@@ -51,7 +52,9 @@ export type ServerMsg =
   | { type: "resync"; sessionId: string; from: number }
   | { type: "paired"; ok: true }
   | { type: "devices"; devices: DeviceInfo[] }
-  | { type: "snippets"; items: Snippet[] };
+  | { type: "snippets"; items: Snippet[] }
+  | { type: "response"; id: string; ok: true; result: unknown }
+  | { type: "response"; id: string; ok: false; error: { code: string; message: string } };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);
