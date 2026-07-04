@@ -264,6 +264,14 @@ export class Connection {
     } else if (msg.type === "devices") {
       for (const cb of this.devicesCbs) cb(msg.devices);
     } else if (msg.type === "error") {
+      // A rejected pairing (expired/wrong/exhausted code) must not be retried:
+      // the agent closes right after, and re-sending the same dead code on every
+      // reconnect would loop forever and self-trip the rate limiter. Drop the
+      // pending code so the next reconnect proceeds as a normal (unpaired) attempt.
+      if (this.pairing && msg.code === "pair_failed") {
+        this.pairing = false;
+        clearPendingPair();
+      }
       for (const cb of this.errorCbs) cb({ code: msg.code, message: msg.message });
     }
   }

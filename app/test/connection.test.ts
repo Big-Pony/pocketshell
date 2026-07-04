@@ -4,6 +4,7 @@ import { encode } from "../src/lib/protocol";
 import { toB64 } from "../src/lib/bytes";
 import type { SecureChannel } from "../src/lib/secure-channel";
 import type { SessionMeta } from "../src/lib/protocol";
+import { applyPairing, getPendingPair } from "../src/lib/keystore";
 
 // Handshake marker bytes for the passthrough channel
 const M1 = new Uint8Array([1]);
@@ -418,4 +419,30 @@ test("channel init failure on open -> offline (does not hang)", () => {
   conn.onStatus((s) => statuses.push(s));
   ws.open();  // fires onopen -> makeChannel throws -> handleDown -> offline
   expect(conn.status).toBe("offline");
+});
+
+// ──────────────────────────────────────────────────────────────
+// NEW TEST D (S4b): a pending pairing code is sent on established (deferring
+// listSessions), and a pair_failed rejection clears the code so it is NOT
+// retried on reconnect (which would loop + self-trip the rate limiter).
+// ──────────────────────────────────────────────────────────────
+test("pairing: sends pair on established, and pair_failed clears the pending code", () => {
+  localStorage.clear();
+  applyPairing({ pub: "QUJD", addr: "ws://x", code: "ABCD2345", deviceName: "iPhone" });
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const errors: { code: string; message: string }[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  conn.onError((e) => errors.push(e));
+
+  completeHandshake(ws); // open -> M1; M2 -> established -> should send pair (not listSessions)
+  const types = businessSent(ws).map((b) => decodeMsg(b).type);
+  expect(types).toContain("pair");
+  expect(types).not.toContain("listSessions"); // deferred until paired
+  expect(getPendingPair()).not.toBeNull();
+
+  // agent rejects the code and closes
+  ws.emit(encode({ type: "error", code: "pair_failed", message: "expired" }));
+  expect(getPendingPair()).toBeNull();       // cleared -> no infinite retry
+  expect(errors.some((e) => e.code === "pair_failed")).toBe(true);
 });
