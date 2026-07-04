@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { loadConfig, buildPairingString } from "./config";
+import { loadConfig, buildPairingString, resolveTlsMaterial } from "./config";
 import { toB64 } from "./bytes";
-import { rmSync, mkdtempSync, statSync, existsSync } from "node:fs";
+import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -81,4 +81,18 @@ test("tls off by default, on with POCKETSHELL_TLS=1", () => {
   expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir2, POCKETSHELL_TLS: "1" }).tls.enabled).toBe(true);
   rmSync(keyDir, { recursive: true, force: true });
   rmSync(keyDir2, { recursive: true, force: true });
+});
+
+test("resolveTlsMaterial: disabled->null, present->contents, missing->throws (no silent downgrade)", () => {
+  const keyDir = tmpKeyDir();
+  loadConfig({ POCKETSHELL_KEY_DIR: keyDir }); // create keyDir
+  expect(resolveTlsMaterial(keyDir, { enabled: false })).toBeNull();
+  const cert = join(keyDir, "c.pem");
+  const key = join(keyDir, "k.pem");
+  writeFileSync(cert, "CERTDATA");
+  writeFileSync(key, "KEYDATA");
+  expect(resolveTlsMaterial(keyDir, { enabled: true, cert, key })).toEqual({ cert: "CERTDATA", key: "KEYDATA" });
+  // enabled but material absent must throw, not return null
+  expect(() => resolveTlsMaterial(keyDir, { enabled: true })).toThrow(/TLS enabled/);
+  rmSync(keyDir, { recursive: true, force: true });
 });

@@ -55,8 +55,15 @@ export function resolveTlsMaterial(
   if (existsSync(certPath) && existsSync(keyPath)) {
     return { cert: readFileSync(certPath, "utf8"), key: readFileSync(keyPath, "utf8") };
   }
-  console.warn("[pocketshell] TLS enabled but cert/key not found. Provide POCKETSHELL_TLS_CERT / POCKETSHELL_TLS_KEY.");
-  return null;
+  // Fail loudly rather than silently downgrade to plaintext ws: a silent
+  // downgrade would still print "wss" in the boot log and encode "wss://" into
+  // the pairing string, leaving the app unable to connect. No auto-generation
+  // in this slice — the operator supplies the cert/key (self-signed is fine).
+  throw new Error(
+    `[pocketshell] TLS enabled (POCKETSHELL_TLS=1) but cert/key not found at ${certPath} + ${keyPath}. ` +
+    `Provide POCKETSHELL_TLS_CERT / POCKETSHELL_TLS_KEY, or generate a self-signed pair once:\n` +
+    `  openssl req -x509 -newkey rsa:2048 -nodes -keyout ${keyPath} -out ${certPath} -days 3650 -subj "/CN=pocketshell"`,
+  );
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AgentConfig {
