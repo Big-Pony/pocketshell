@@ -7,7 +7,8 @@ import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
-import { fsTree, fsRead } from "./fs-service";
+import { fsTree, fsRead, fsDiff, fsOp } from "./fs-service";
+import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
@@ -156,7 +157,11 @@ export function startServer(deps: Deps = {}) {
           switch (method) {
             case "fs.tree": result = fsTree(String(p.path)); break;
             case "fs.read": result = fsRead(String(p.path)); break;
-            // fs.diff + git.* land in P1b (Task 15); fs.op lands in P1c (Task 18)
+            case "fs.diff": result = fsDiff(String(p.path), String(p.cwd)); break;
+            case "fs.op": result = fsOp(p.op, String(p.path), p.to ? String(p.to) : undefined); break;
+            case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
+            case "git.branches": result = gitBranches(String(p.cwd)); break;
+            case "git.status": result = gitStatus(String(p.cwd)); break;
             default:
               sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
               return;

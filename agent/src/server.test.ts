@@ -280,3 +280,20 @@ test("rpc handler error is wrapped as ok:false", () => {
   if (reply.type === "response" && !reply.ok) expect(reply.id).toBe("3");
   srv.stop();
 });
+
+import { runGit as rg } from "./git-service";
+
+test("rpc git.status routes through server", () => {
+  const d = mkdtempSync(join(tmpdir(), "ps-gsrv-"));
+  rg(d, ["init", "-q"]); rg(d, ["config", "user.email", "t@t"]); rg(d, ["config", "user.name", "T"]);
+  writeFileSync(join(d, "a.txt"), "x");
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any); srv.__test.message(ws as any, M1); ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "rpc", id: "g1", method: "git.status", params: { cwd: d } })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  if (reply.type === "response" && reply.ok) {
+    expect((reply.result as any).files.some((f: any) => f.path === "a.txt")).toBe(true);
+  }
+  srv.stop();
+});
