@@ -65,6 +65,8 @@ export class Connection {
   private seen = new Map<string, number>();
   private pairing = false;
   private devicesCbs: ((d: DeviceInfo[]) => void)[] = [];
+  private establishedThisSocket = false;
+  private pairFailStreak = 0;
 
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
@@ -166,6 +168,7 @@ export class Connection {
     const socket = this.factory(this.url);
     this.ws = socket;
     this.open = false;
+    this.establishedThisSocket = false;
     this.setStatus("connecting");
     socket.onopen = () => {
       if (socket !== this.ws) return;
@@ -213,6 +216,8 @@ export class Connection {
 
   private onEstablished(socket: WebSocketLike): void {
     this.open = true;
+    this.establishedThisSocket = true;
+    this.pairFailStreak = 0;
     this.backoffAttempt = 0;
     this.startHeartbeat();
     const pair = this.getPairing();
@@ -230,6 +235,21 @@ export class Connection {
     this.clearHsTimer();
     this.stopHeartbeat();
     this.open = false;
+    this.pairing = false;
+    // A pairing attempt that keeps closing before the handshake completes is
+    // being rejected by the agent (closed pairing window / wrong agent key) —
+    // the agent rejects at the handshake with no pair_failed message, so this
+    // is the only signal. Tolerate a transient blip, but after a few dead
+    // attempts drop the code so we stop looping (and self-tripping the limiter).
+    if (this.getPairing() && !this.establishedThisSocket) {
+      if (++this.pairFailStreak >= 3) {
+        clearPendingPair();
+        this.pairFailStreak = 0;
+        for (const cb of this.errorCbs) cb({ code: "pair_failed", message: "配对被拒绝，请在设备管理里重新配对" });
+      }
+    } else {
+      this.pairFailStreak = 0;
+    }
     this.setStatus("offline");
     const delay = Math.min(10_000, 500 * 2 ** this.backoffAttempt);
     this.backoffAttempt++;

@@ -446,3 +446,27 @@ test("pairing: sends pair on established, and pair_failed clears the pending cod
   expect(getPendingPair()).toBeNull();       // cleared -> no infinite retry
   expect(errors.some((e) => e.code === "pair_failed")).toBe(true);
 });
+
+// ──────────────────────────────────────────────────────────────
+// NEW TEST E (S4b): a closed pairing window rejects at the handshake with no
+// pair_failed message (just a socket close). Tolerate a transient blip, but
+// after repeated pre-established closes drop the code so we stop looping.
+// ──────────────────────────────────────────────────────────────
+test("pairing: repeated pre-established closes clear the pending code", () => {
+  localStorage.clear();
+  applyPairing({ pub: "QUJD", addr: "ws://x", code: "ABCD2345", deviceName: "iPhone" });
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const errors: { code: string; message: string }[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  conn.onError((e) => errors.push(e));
+
+  // attempt 1: open sends M1, then close before M2 (agent rejected at handshake)
+  created[0].open(); created[0].close();
+  expect(getPendingPair()).not.toBeNull();   // one blip tolerated
+  advance(600); created[1].open(); created[1].close();
+  expect(getPendingPair()).not.toBeNull();   // two tolerated
+  advance(1100); created[2].open(); created[2].close();
+  expect(getPendingPair()).toBeNull();       // third clears
+  expect(errors.some((e) => e.code === "pair_failed")).toBe(true);
+});

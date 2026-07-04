@@ -72,6 +72,8 @@
     <button class="devices-btn" onclick={() => (showDevices = true)} title="设备管理">🛡</button>
   </div>
 
+  {#if notice}<div class="notice">{notice}</div>{/if}
+
   {#if status !== "online"}
     <div class="banner">连接断开，正在重连…</div>
   {/if}
@@ -105,7 +107,6 @@
     </div>
   {/if}
 
-  {#if notice}<div class="notice">{notice}</div>{/if}
   {#if showDevices}
     <DeviceManager {conn} onClose={() => (showDevices = false)} />
   {/if}
@@ -124,7 +125,8 @@
   .panel-toggle { position: fixed; right: 12px; bottom: 12px; padding: 10px 14px;
                   background: #2d4; color: #000; border: 0; border-radius: 8px; z-index: 10; }
   .panel { position: fixed; left: 0; right: 0; bottom: 56px; max-height: 50dvh; overflow-y: auto; z-index: 9; }
-  .notice { position: fixed; top: 0; left: 0; right: 0; background: #a33; color: #fff;
-            padding: 8px 12px; font-size: 13px; z-index: 20; }
+  /* In normal flow (below the topbar) so it never covers the 🛡 device-manager
+     entry — the pairing notice appears exactly when you need to reach it. */
+  .notice { background: #a33; color: #fff; padding: 8px 12px; font-size: 13px; }
   .devices-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 2px 6px; }
 </style>
