@@ -93,6 +93,10 @@
     height: 100%;
     padding: 6px 8px;
   }
+  .term :global(.xterm-viewport) {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
   .hidden { display: none; }
   .closed { opacity: 0.6; }
 </style>

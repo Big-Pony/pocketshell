@@ -106,8 +106,9 @@ export function fsRead(path: string, opts: { maxBytes?: number; maxLines?: numbe
 
 export interface DiffHunk { header: string; lines: { kind: "add" | "del" | "ctx"; text: string }[] }
 
-export function fsDiff(path: string, cwd: string): { path: string; hunks: DiffHunk[] } {
+export function fsDiff(path: string, cwd?: string): { path: string; hunks: DiffHunk[] } {
   const abs = resolve(path);
+  if (!cwd || cwd === "undefined") cwd = dirname(abs);
   const r = runGit(cwd, ["diff", "--", abs]);
   const hunks: DiffHunk[] = [];
   let cur: DiffHunk | null = null;

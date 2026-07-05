@@ -16,8 +16,7 @@
   let query = $state("");
   let notice = $state("");
   let menuFor = $state<FileNode | null>(null);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let longPressed = false;
+  let menuAnchor = $state<HTMLElement | undefined>();
   let confirmDel = $state<FileNode | null>(null);
   let arm = $state<ArmState>(IDLE);
 
@@ -31,23 +30,23 @@
 
   async function loadRoot() {
     notice = "";
-    try { nodes = await loadLevel(root); }
-    catch (e: any) { notice = e?.message ?? "加载失败"; nodes = []; }
+    try {
+      const kids = await loadLevel(root);
+      const rootName = root === "/" ? "/" : root.slice(root.lastIndexOf("/") + 1);
+      nodes = [{ name: rootName, path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
+    } catch (e: any) { notice = e?.message ?? "加载失败"; nodes = []; }
   }
 
   async function toggle(n: FileNode) {
-    if (longPressed) { longPressed = false; return; }
     if (n.type === "file") { onOpenFile(n.path); return; }
     if (n.expanded) { nodes = collapse(nodes, n.path); return; }
     try { nodes = setChildren(nodes, n.path, await loadLevel(n.path)); }
     catch (e: any) { notice = e?.message ?? "加载失败"; }
   }
 
-  function startPress(n: FileNode) {
-    timer = setTimeout(() => { longPressed = true; menuFor = n; }, 500);
-  }
-  function endPress() {
-    if (timer) { clearTimeout(timer); timer = undefined; }
+  function openMenu(n: FileNode, anchor: HTMLElement) {
+    menuFor = n;
+    menuAnchor = anchor;
   }
 
   function parentOf(path: string): string {
@@ -58,21 +57,28 @@
     const parent = parentOf(path);
     try {
       const kids = await loadLevel(parent);
-      nodes = parent === root ? kids : setChildren(nodes, parent, kids);
+      if (parent === root) {
+        nodes = nodes.map((n) => n.path === root ? { ...n, children: kids, hasChildren: kids.length > 0 } : n);
+      } else {
+        nodes = setChildren(nodes, parent, kids);
+      }
     } catch (e: any) { notice = e?.message ?? "刷新失败"; }
   }
 
+  function childPath(parent: string, name: string): string {
+    return parent === "/" ? "/" + name : parent + "/" + name;
+  }
   async function doRename(n: FileNode) {
     const next = prompt("重命名为", n.name);
     if (!next || !next.trim() || next.trim() === n.name) return;
-    const to = parentOf(n.path) + "/" + next.trim();
+    const to = childPath(parentOf(n.path), next.trim());
     try { await conn.rpc("fs.op", { op: "rename", path: n.path, to }); await refreshParent(n.path); }
     catch (e: any) { notice = e?.message ?? "重命名失败"; }
   }
   async function doMkdir(n: FileNode) {
     const name = prompt("新建目录名", "");
     if (!name || !name.trim()) return;
-    try { await conn.rpc("fs.op", { op: "mkdir", path: n.path + "/" + name.trim() }); await refreshParent(n.path + "/x"); }
+    try { await conn.rpc("fs.op", { op: "mkdir", path: childPath(n.path, name.trim()) }); await refreshParent(childPath(n.path, "x")); }
     catch (e: any) { notice = e?.message ?? "新建失败"; }
   }
   async function confirmDelete(n: FileNode, now: number) {
@@ -115,23 +121,22 @@
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
   <ul class="tree">
     {#each rows as { n, depth } (n.path)}
-      <li>
+      <li class="row-wrap">
         <button class="row" style="padding-left: {6 + depth * 14}px"
-          onclick={() => toggle(n)}
-          onpointerdown={() => startPress(n)}
-          onpointerup={endPress}
-          onpointerleave={endPress}>
+          onclick={() => toggle(n)}>
           <span class="tw">{n.type === "dir" ? (n.expanded ? "▾" : "▸") : "·"}</span>
           <span class="nm">{n.name}</span>
           {#if n.git}<span class="g g-{n.git}">{n.git}</span>{/if}
         </button>
+        <button class="more" aria-label="更多"
+          onclick={(e) => { e.stopPropagation(); openMenu(n, e.currentTarget); }}>⋯</button>
       </li>
     {/each}
   </ul>
 
   {#if menuFor}
     {#if menuFor.type === "dir"}
-      <ContextMenu onClose={() => (menuFor = null)} items={[
+      <ContextMenu onClose={() => (menuFor = null)} anchor={menuAnchor} items={[
         { label: "设为项目根", icon: "◎", onSelect: () => setRoot(menuFor!) },
         ...(menuFor.path === root ? [{ label: "取消根目录绑定", icon: "⊘", onSelect: unsetRoot }] : []),
         { label: "复制路径", icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
@@ -141,7 +146,7 @@
         { label: "删除", icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
       ]} />
     {:else}
-      <ContextMenu onClose={() => (menuFor = null)} items={[
+      <ContextMenu onClose={() => (menuFor = null)} anchor={menuAnchor} items={[
         { label: "打开预览", icon: "▤", onSelect: () => onOpenFile(menuFor!.path) },
         { label: "复制路径", icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
         { label: "重命名", icon: "✎", onSelect: () => doRename(menuFor!) },
@@ -168,13 +173,16 @@
 </div>
 
 <style>
-  .ft { display: flex; flex-direction: column; height: 100%; position: relative; }
+  .ft { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
   .pathbar { font-size: 0.68rem; color: var(--dim); padding: 6px 10px; overflow-x: auto; white-space: nowrap; }
   .filter { margin: 0 8px 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 6px 8px; font-size: 0.72rem; }
   .ft-notice { font-size: 0.68rem; color: var(--amber); padding: 2px 10px; }
-  .tree { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; }
-  .row { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: transparent; color: var(--text); text-align: left; padding: 7px 6px; font-size: 0.74rem; }
+  .tree { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  .row-wrap { display: flex; align-items: center; width: 100%; }
+  .row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); text-align: left; padding: 7px 6px; font-size: 0.74rem; }
   .row:active { background: var(--panel); }
+  .more { flex: 0 0 auto; background: transparent; border: 0; color: var(--dim); padding: 0 6px; font-size: 1rem; line-height: 1; }
+  .more:active { color: var(--text); }
   .tw { width: 1em; color: var(--dim); }
   .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g { font-size: 0.6rem; font-weight: 700; }

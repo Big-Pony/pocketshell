@@ -6,5 +6,5 @@ export default defineConfig({
   resolve: {
     alias: { "sodium-native": "sodium-javascript" },
   },
-  test: { environment: "jsdom" },
+  test: { environment: "jsdom", exclude: ["node_modules", "e2e"] },
 });

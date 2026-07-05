@@ -28,5 +28,5 @@
   .subtabs { display: flex; gap: 6px; padding: 6px 8px; flex: 0 0 auto; }
   .subtabs button { flex: 1; padding: 6px 0; border: 1px solid var(--line); background: var(--panel); color: var(--dim); border-radius: var(--radius-md); font-size: 0.72rem; }
   .subtabs button.on { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
-  .body { flex: 1; min-height: 0; }
+  .body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 </style>

@@ -157,7 +157,7 @@ export function startServer(deps: Deps = {}) {
           switch (method) {
             case "fs.tree": result = fsTree(String(p.path)); break;
             case "fs.read": result = fsRead(String(p.path)); break;
-            case "fs.diff": result = fsDiff(String(p.path), String(p.cwd)); break;
+            case "fs.diff": result = fsDiff(String(p.path), p.cwd ? String(p.cwd) : undefined); break;
             case "fs.op": result = fsOp(p.op, String(p.path), p.to ? String(p.to) : undefined); break;
             case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
             case "git.branches": result = gitBranches(String(p.cwd)); break;

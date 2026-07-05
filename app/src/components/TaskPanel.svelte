@@ -19,15 +19,12 @@
   } = $props();
 
   let menuFor = $state<string | null>(null);   // session name whose menu is open
+  let menuAnchor = $state<HTMLElement | undefined>();
   let confirmKill = $state<string | null>(null); // session name pending kill confirm
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let longPressed = false; // set when the 500ms timer fires; consumed in click handler
 
-  function startPress(name: string) {
-    timer = setTimeout(() => { longPressed = true; menuFor = name; }, 500);
-  }
-  function endPress() {
-    if (timer) { clearTimeout(timer); timer = undefined; }
+  function openMenu(name: string, anchor: HTMLElement) {
+    menuFor = name;
+    menuAnchor = anchor;
   }
   function closeMenu() {
     menuFor = null;
@@ -46,27 +43,30 @@
   const stateLabel: Record<string, string> = { run: "运行中", wait: "等待输入", done: "已结束" };
 </script>
 
+<div class="tp">
 <ul class="list">
   {#each sessions as s (s.name)}
     <li class="sess-card">
-      <button
-        class="row"
-        onclick={() => { if (longPressed) { longPressed = false; return; } onSelect(s.name); }}
-        onpointerdown={() => startPress(s.name)}
-        onpointerup={endPress}
-        onpointerleave={endPress}
-      >
-        <span class="dot {stateDotClass(s.state)}"></span>
-        <span class="info">
-          <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{stateLabel[s.state]}</em></span>
-          <span class="last mono">{s.lastLine}</span>
-        </span>
-        <span class="act">{s.closed ? "关闭" : "切换"}</span>
-      </button>
+      <div class="row-wrap">
+        <button
+          class="row"
+          onclick={() => onSelect(s.name)}
+        >
+          <span class="dot {stateDotClass(s.state)}"></span>
+          <span class="info">
+            <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{stateLabel[s.state]}</em></span>
+            <span class="last mono">{s.lastLine}</span>
+          </span>
+          <span class="act">{s.closed ? "关闭" : "切换"}</span>
+        </button>
+        <button class="more" aria-label="更多"
+          onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget); }}>⋯</button>
+      </div>
 
       {#if menuFor === s.name}
         <ContextMenu
           onClose={closeMenu}
+          anchor={menuAnchor}
           items={[
             { label: "重命名", icon: "✎", onSelect: () => doRename(s.name) },
             { label: "复制输出", icon: "📋", onSelect: () => onCopy(s.name) },
@@ -99,6 +99,8 @@
 <div class="pnote">
   <b>长按会话</b>：重命名、复制输出、终止、关闭标签。<br>
   <b>断线保护</b>：以上会话全部由服务器端 Agent（tmux）托管，App 只是 attach 上去的窗口。
+</div>
+
 </div>
 
 <style>
@@ -188,6 +190,20 @@
   }
   .dlg-btns button.danger { background: var(--red); color: #fff; border-color: transparent; }
 
+  .tp { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .row-wrap { display: flex; align-items: center; }
+  .row { flex: 1; min-width: 0; }
+  .more {
+    flex: 0 0 auto;
+    background: transparent;
+    border: 0;
+    color: var(--dim);
+    padding: 0 10px;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .more:active { color: var(--text); }
+  .list { min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .empty { padding: 16px; color: var(--dim); text-align: center; }
   .pnote {
     font-size: 0.68rem;

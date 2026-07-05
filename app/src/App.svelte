@@ -338,7 +338,8 @@
   .file-tabs {
     display: flex;
     gap: 4px;
-    flex: 0 0 auto;
+    flex: 1;
+    min-width: 0;
     overflow-x: auto;
   }
   .ftab {

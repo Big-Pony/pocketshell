@@ -35,12 +35,21 @@ test.skipIf(!hasTmux)("state transitions run -> wait after output goes quiet", a
   svc.ensure(NAME, { cols: 80, rows: 24 });
   await Bun.sleep(300);
   svc.write(NAME, new TextEncoder().encode("echo BUSY\n"));
-  await Bun.sleep(100);
-  const busy = svc.list().find((s) => s.name === NAME);
-  expect(busy?.state).toBe("run");        // just emitted output
-  await Bun.sleep(700);                    // > RUN_WINDOW_MS, now quiet
-  const idle = svc.list().find((s) => s.name === NAME);
-  expect(idle?.state).toBe("wait");
+
+  const pollFor = async (target: "run" | "wait", timeoutMs: number) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const s = svc.list().find((sess) => sess.name === NAME);
+      if (s?.state === target) return s;
+      await Bun.sleep(50);
+    }
+    return svc.list().find((sess) => sess.name === NAME);
+  };
+
+  const busy = await pollFor("run", 3000);
+  expect(busy?.state).toBe("run");        // output arrived
+  const idle = await pollFor("wait", 3000);
+  expect(idle?.state).toBe("wait");       // quiet for > RUN_WINDOW_MS
   await svc.kill(NAME);
   svc.dispose();
 });
