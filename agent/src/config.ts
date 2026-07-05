@@ -13,6 +13,7 @@ import { openSnippetStore, type SnippetStore } from "./snippet-store";
 
 export interface AgentConfig {
   listen: { host: string; port: number };
+  advertise?: string;
   workspaceRoot: string;
   replayBufferBytes: number;
   keyDir: string;
@@ -63,6 +64,28 @@ export function resolveAdvertise(cfg: {
   return `${scheme}://${cfg.listen.host}:${cfg.listen.port}`;
 }
 
+interface AgentFileConfig {
+  advertise?: string;
+  host?: string;
+  port?: number;
+  tls?: boolean;
+  tlsCert?: string;
+  tlsKey?: string;
+}
+
+function loadAgentJson(keyDir: string): AgentFileConfig {
+  const file = join(keyDir, "agent.json");
+  if (!existsSync(file)) return {};
+  try { return JSON.parse(readFileSync(file, "utf8")) as AgentFileConfig; }
+  catch { return {}; } // malformed file -> ignore, fall back to env/defaults
+}
+
+function persistAgentJson(keyDir: string, cfg: AgentFileConfig): void {
+  const file = join(keyDir, "agent.json");
+  if (existsSync(file)) return; // never clobber user edits
+  writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+}
+
 export function resolveTlsMaterial(
   keyDir: string,
   tls: { enabled: boolean; cert?: string; key?: string },
@@ -93,21 +116,39 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const registry = loadDeviceRegistry(join(keyDir, "devices.json"));
   const pairingMode = registry.list().length === 0 || env.POCKETSHELL_PAIR === "1";
   const pairing = pairingMode ? createPairing({ now: () => Date.now() }) : null;
-  const tlsEnabled = env.POCKETSHELL_TLS === "1";
+
+  const file = loadAgentJson(keyDir);
+
+  const host = env.POCKETSHELL_HOST ?? file.host ?? "127.0.0.1";
+  const port = env.POCKETSHELL_PORT ? Number(env.POCKETSHELL_PORT) : (file.port ?? 8722);
+  const advertise = env.POCKETSHELL_ADVERTISE ?? file.advertise;
+
+  const tlsEnabled =
+    env.POCKETSHELL_TLS === "1" ? true :
+    env.POCKETSHELL_TLS === "0" ? false :
+    (file.tls ?? false);
   const tls = {
     enabled: tlsEnabled,
-    cert: env.POCKETSHELL_TLS_CERT,
-    key: env.POCKETSHELL_TLS_KEY,
+    cert: env.POCKETSHELL_TLS_CERT ?? file.tlsCert,
+    key: env.POCKETSHELL_TLS_KEY ?? file.tlsKey,
   };
+
   const audit = createAudit({ write: fileAuditWriter(join(keyDir, "audit.log")) });
   const rateLimiter = createRateLimiter({ now: () => Date.now(), onLock: (ip) => audit.log({ event: "ratelimit_lock", ip }) });
   const identity = loadOrCreateIdentity(keyDir);
   const snippets = openSnippetStore(join(keyDir, "pocketshell.db"));
+
+  // First run: write a non-sensitive agent.json the operator can edit. Secrets
+  // (Noise keys) never go here — they stay in agent_key (0600).
+  const toWrite: AgentFileConfig = { host, port, tls: tlsEnabled };
+  if (advertise) toWrite.advertise = advertise;
+  if (tls.cert) toWrite.tlsCert = tls.cert;
+  if (tls.key) toWrite.tlsKey = tls.key;
+  persistAgentJson(keyDir, toWrite);
+
   return {
-    listen: {
-      host: env.POCKETSHELL_HOST ?? "127.0.0.1",
-      port: env.POCKETSHELL_PORT ? Number(env.POCKETSHELL_PORT) : 8722,
-    },
+    listen: { host, port },
+    advertise,
     workspaceRoot: env.POCKETSHELL_WORKSPACE ?? process.cwd(),
     replayBufferBytes: env.POCKETSHELL_REPLAY_BYTES ? Number(env.POCKETSHELL_REPLAY_BYTES) : 256 * 1024,
     keyDir,
