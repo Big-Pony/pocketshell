@@ -3,11 +3,12 @@
   import { LAYOUT, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
 
-  let { onText, onCommand, vibrate = false, layout = "mac" }: {
-    onText: (text: string) => void; onCommand: (c: AppCommand) => void; vibrate?: boolean; layout?: "mac" | "win";
+  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0 }: {
+    onText: (text: string) => void; onCommand: (c: AppCommand) => void;
+    vibrate?: boolean; layout?: "mac" | "win"; selecting?: boolean; selCount?: number;
   } = $props();
 
-  let sub = $state<"keys" | "ime">("keys");
+  let sub = $state<"keys" | "ime" | "ops">("keys");
   let mods = $state<ModState>({ ...EMPTY_MODS });
   let imeBuf = $state("");
 
@@ -18,7 +19,7 @@
   function press(id: string) {
     buzz();
     if (MODSET.has(id)) { mods = tapMod(mods, id as ModName); return; }
-    const r = resolveKey(id, activeMods(mods));
+    const r = resolveKey(id, activeMods(mods), selecting);
     if (r.kind === "bytes") onText(r.text);
     else if (r.kind === "command") onCommand(r.command);
     mods = consumeAfterKey(mods);
@@ -47,6 +48,7 @@
   <div class="subtabs">
     <button class:on={sub === "keys"} onclick={() => (sub = "keys")}>⌨ 全键盘</button>
     <button class:on={sub === "ime"} onclick={() => (sub = "ime")}>✎ 输入法缓冲</button>
+    <button class:on={sub === "ops"} onclick={() => (sub = "ops")}>✂ 快捷操作</button>
   </div>
 
   {#if sub === "keys"}
@@ -75,7 +77,7 @@
         </div>
       {/each}
     </div>
-  {:else}
+  {:else if sub === "ime"}
     <div class="ime">
       <div class="target">发送到当前会话 · 用系统输入法编辑整段后一次性注入</div>
       <textarea bind:value={imeBuf} placeholder="例如：帮我给登录接口加上基于 IP 的限流，每分钟最多 20 次…" rows="3"></textarea>
@@ -84,6 +86,35 @@
         <button class="send" onclick={sendIme}>发送到终端 ⏎</button>
       </div>
       <div class="hint">发送前内容只存在于本地缓冲区，断线也不丢失。</div>
+    </div>
+  {:else}
+    <div class="ops">
+      <div class="ops-mode">
+        {#if selecting}选区中 · {selCount} 字 · 方向键扩选{:else}方向键发送到程序 · 点「选区」开始选择{/if}
+      </div>
+      <div class="dpad">
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowUp"); }}>↑</button>
+        <div class="dpad-mid">
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowLeft"); }}>←</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowDown"); }}>↓</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowRight"); }}>→</button>
+        </div>
+      </div>
+      <div class="ops-grid">
+        <button class="act" class:on={selecting}
+          onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? "取消" : "选区"}</button>
+        <button class="act" onclick={() => onCommand({ type: "selCopy" })}>复制选区</button>
+        <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>复制后续内容</button>
+        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>全选并复制</button>
+        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>复制可见屏</button>
+        <button class="act" onclick={() => onCommand({ type: "paste" })}>粘贴</button>
+      </div>
+      <div class="ops-nav">
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("Home"); }}>Home</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("End"); }}>End</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgUp"); }}>PgUp</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgDn"); }}>PgDn</button>
+      </div>
     </div>
   {/if}
 </div>
@@ -238,5 +269,49 @@
     font-size: 0.68rem;
     color: var(--dim);
     line-height: 1.6;
+  }
+  .ops {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .ops-mode {
+    font-size: 0.7rem;
+    color: var(--dim);
+    text-align: center;
+  }
+  .dpad {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+  }
+  .dpad-mid { display: flex; gap: 3px; }
+  .dpad .key { min-width: 3em; }
+  .ops-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+  .ops-nav {
+    display: flex;
+    gap: 6px;
+  }
+  .ops-nav .key { flex: 1; }
+  .act {
+    background: var(--key);
+    color: var(--text);
+    border: 1px solid var(--key-line);
+    border-radius: var(--radius-md);
+    padding: 10px 0;
+    font-size: 0.75rem;
+  }
+  .act.on {
+    background: var(--teal);
+    color: var(--teal-dark);
+    border-color: var(--teal);
   }
 </style>
