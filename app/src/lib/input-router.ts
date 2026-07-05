@@ -36,7 +36,14 @@ export type AppCommand =
   | { type: "newSession" } | { type: "toBackground" }
   | { type: "gotoTab"; index: number }
   | { type: "scrollUp" } | { type: "scrollDown" }
-  | { type: "toggleFullscreen" } | { type: "copyVisible" } | { type: "renameSession" };
+  | { type: "toggleFullscreen" } | { type: "copyVisible" } | { type: "renameSession" }
+  | { type: "selBegin" }
+  | { type: "selMove"; dir: "up" | "down" | "left" | "right" }
+  | { type: "selCancel" }
+  | { type: "selCopy" }
+  | { type: "copyAfter" }
+  | { type: "selectAllCopy" }
+  | { type: "paste" };
 
 export type KeyResult =
   | { kind: "bytes"; text: string }
@@ -46,6 +53,10 @@ export type KeyResult =
 const FN_LETTER: Record<string, AppCommand> = {
   n: { type: "newSession" }, d: { type: "toBackground" },
   f: { type: "toggleFullscreen" }, c: { type: "copyVisible" }, r: { type: "renameSession" },
+};
+
+const ARROW_DIR: Record<string, "up" | "down" | "left" | "right"> = {
+  ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
 };
 
 function fnCommand(id: string): KeyResult {
@@ -59,8 +70,11 @@ function fnCommand(id: string): KeyResult {
 }
 
 /** Resolve a keycap id + active modifiers into PTY bytes or an app command. */
-export function resolveKey(id: string, m: Mods): KeyResult {
+export function resolveKey(id: string, m: Mods, selecting = false): KeyResult {
   if (m.fn) return fnCommand(id);
+  if (selecting && id in ARROW_DIR) {
+    return { kind: "command", command: { type: "selMove", dir: ARROW_DIR[id] } };
+  }
   if (id in SEQ) return { kind: "bytes", text: SEQ[id] };
 
   // Single printable char (letter / digit / symbol).

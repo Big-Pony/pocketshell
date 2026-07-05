@@ -69,3 +69,23 @@ test("fn layer maps to app commands, not PTY", () => {
   expect(resolveKey("3", M({ fn: true }))).toEqual({ kind: "command", command: { type: "gotoTab", index: 2 } });
   expect(resolveKey("x", M({ fn: true }))).toEqual({ kind: "none" });
 });
+
+test("selecting mode: bare arrows become selMove commands", () => {
+  expect(resolveKey("ArrowUp", M(), true)).toEqual({ kind: "command", command: { type: "selMove", dir: "up" } });
+  expect(resolveKey("ArrowDown", M(), true)).toEqual({ kind: "command", command: { type: "selMove", dir: "down" } });
+  expect(resolveKey("ArrowLeft", M(), true)).toEqual({ kind: "command", command: { type: "selMove", dir: "left" } });
+  expect(resolveKey("ArrowRight", M(), true)).toEqual({ kind: "command", command: { type: "selMove", dir: "right" } });
+});
+
+test("selecting mode: Fn+arrow still switches tabs (Fn wins)", () => {
+  expect(resolveKey("ArrowLeft", M({ fn: true }), true)).toEqual({ kind: "command", command: { type: "prevTab" } });
+});
+
+test("selecting mode: non-arrow keys are unaffected", () => {
+  expect(resolveKey("a", M(), true)).toEqual({ kind: "bytes", text: "a" });
+  expect(resolveKey("Home", M(), true)).toEqual({ kind: "bytes", text: "\x1b[H" });
+});
+
+test("selecting defaults to false: bare arrow still sends bytes", () => {
+  expect(resolveKey("ArrowUp", M())).toEqual({ kind: "bytes", text: "\x1b[A" });
+});
