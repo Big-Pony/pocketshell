@@ -37,6 +37,7 @@
   let sel = $state<SelState>(reset());
   let selecting = $state(false);
   let selCount = $state(0);
+  let topEl: HTMLDivElement | null = null;
 
   // App owns settings so they actually apply: fontSize flows to every terminal
   // (reactive prop below), vibrate/layout flow to the keyboard.
@@ -87,7 +88,13 @@
         activeId: activeTopId,
       }),
     });
-    return unregisterDevHelpers;
+    topEl?.addEventListener("pointerdown", onTopPointerDown, { capture: true });
+    topEl?.addEventListener("pointerup", onTopPointerUp, { capture: true });
+    return () => {
+      unregisterDevHelpers();
+      topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
+      topEl?.removeEventListener("pointerup", onTopPointerUp, { capture: true });
+    };
   });
 
   // Top-tab list = live sessions minus the ones sent to background.
@@ -221,6 +228,7 @@
         const b = t.buffer.active;
         sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
         selecting = true;
+        t.focus();
         applySel(t);
         break;
       }
@@ -333,7 +341,7 @@
     <div class="banner">⚠ 连接已断开 · 会话由服务器托管，任务继续运行 · 正在重连…</div>
   {/if}
 
-  <div class="top" style="flex: {topFlex} 1 0;" role="application" aria-label="终端与文件预览" onpointerdown={onTopPointerDown} onpointerup={onTopPointerUp}>
+  <div class="top" style="flex: {topFlex} 1 0;" role="application" aria-label="终端与文件预览" bind:this={topEl}>
     {#each topSessions as s (s.name)}
       <TerminalView
         {conn}
