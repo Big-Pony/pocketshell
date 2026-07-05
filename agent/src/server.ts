@@ -4,7 +4,7 @@
 // S4a: wrapped in SecureChannel handshake — plaintext message loop unchanged.
 // S4b: in-channel pairing — pending state, pair verify, registry∪env authorize.
 import type { ServerWebSocket } from "bun";
-import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString } from "./config";
+import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise, advertiseToHttp } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
 import { fsTree, fsRead, fsDiff, fsOp } from "./fs-service";
@@ -14,6 +14,8 @@ import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
 import { resolveStatic } from "./static-serve";
 import { ASSETS } from "./embedded-manifest";
+import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
+import { buildReadiness, isNonLocalBind } from "./readiness";
 
 interface Deps {
   port?: number;
@@ -280,18 +282,26 @@ export function startServer(deps: Deps = {}) {
   };
 }
 
-// Allow `bun run src/server.ts` to boot directly.
+// Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
   const cfg = loadConfig();
-  const proto = cfg.tls.enabled ? "wss" : "ws";
-  const addr = `${proto}://${cfg.listen.host}:${cfg.listen.port}`;
-  const s = startServer({ config: cfg });
-  console.log(`[pocketshell] agent listening on ${addr}`);
-  console.log(`[pocketshell] TLS:`, cfg.tls.enabled ? "enabled" : "disabled");
-  console.log(`[pocketshell] pairing mode:`, cfg.pairingMode ? "on" : "off");
-  console.log(`[pocketshell] registered devices:`, cfg.registry.list().length);
-  console.log(`[pocketshell] agent public key:`, toB64(cfg.identity.publicKey));
-  if (cfg.pairingMode && cfg.pairing) {
-    console.log(`[pocketshell] pairing string:`, buildPairingString(cfg.identity.publicKey, addr, cfg.pairing.code));
-  }
+  ensureTmux(realTmuxDeps());
+  const advertise = resolveAdvertise(cfg);
+  const appUrl = advertiseToHttp(advertise);
+  startServer({ config: cfg });
+  const pairingString =
+    cfg.pairingMode && cfg.pairing
+      ? buildPairingString(cfg.identity.publicKey, advertise, cfg.pairing.code)
+      : undefined;
+  const lines = buildReadiness({
+    advertise,
+    appUrl,
+    pubKeyB64: toB64(cfg.identity.publicKey),
+    pairingString,
+    pairingTtlSec: 300,
+    advertiseExplicit: !!cfg.advertise,
+    bindNonLocal: isNonLocalBind(cfg.listen.host),
+  });
+  console.log(`[pocketshell] listening on ${cfg.listen.host}:${cfg.listen.port} (TLS ${cfg.tls.enabled ? "on" : "off"})`);
+  for (const l of lines) console.log(l);
 }
