@@ -92,26 +92,34 @@
       <div class="ops-mode">
         {#if selecting}选区中 · {selCount} 字 · 方向键扩选{:else}方向键发送到程序 · 点「选区」开始选择{/if}
       </div>
-      <div class="dpad">
-        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowUp"); }}>↑</button>
-        <div class="dpad-mid">
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowLeft"); }}>←</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowDown"); }}>↓</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("ArrowRight"); }}>→</button>
+      <div class="ops-main">
+        <div class="dpad">
+          <div></div>
+          <button class="key up" onpointerdown={(e) => { e.preventDefault(); press("ArrowUp"); }}>↑</button>
+          <div></div>
+          <button class="key left" onpointerdown={(e) => { e.preventDefault(); press("ArrowLeft"); }}>←</button>
+          <button class="act toggle" class:on={selecting}
+            onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? "取消" : "选区"}</button>
+          <button class="key right" onpointerdown={(e) => { e.preventDefault(); press("ArrowRight"); }}>→</button>
+          <div></div>
+          <button class="key down" onpointerdown={(e) => { e.preventDefault(); press("ArrowDown"); }}>↓</button>
+          <div></div>
+        </div>
+        <div class="ops-side">
+          <button class="act line" onclick={() => onCommand({ type: "lineUp" })}>上一行</button>
+          <button class="act line" onclick={() => onCommand({ type: "lineDown" })}>下一行</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("Home"); }}>Home</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("End"); }}>End</button>
         </div>
       </div>
-      <div class="ops-grid">
-        <button class="act" class:on={selecting}
-          onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? "取消" : "选区"}</button>
+      <div class="ops-bottom">
         <button class="act" onclick={() => onCommand({ type: "selCopy" })}>复制选区</button>
-        <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>复制后续内容</button>
-        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>全选并复制</button>
-        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>复制可见屏</button>
+        <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>复制后续</button>
+        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>全选复制</button>
+        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>复制可见</button>
         <button class="act" onclick={() => onCommand({ type: "paste" })}>粘贴</button>
       </div>
       <div class="ops-nav">
-        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("Home"); }}>Home</button>
-        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("End"); }}>End</button>
         <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgUp"); }}>PgUp</button>
         <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgDn"); }}>PgDn</button>
       </div>
@@ -273,41 +281,77 @@
   .ops {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 8px 10px;
+    gap: 6px;
+    padding: 6px 8px;
     flex: 1;
     overflow-y: auto;
   }
   .ops-mode {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--dim);
     text-align: center;
   }
-  .dpad {
+  .ops-main {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-  }
-  .dpad-mid { display: flex; gap: 3px; }
-  .dpad .key { min-width: 3em; }
-  .ops-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
     gap: 6px;
+    align-items: stretch;
+  }
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    grid-template-areas:
+      ". up ."
+      "left toggle right"
+      ". down .";
+    gap: 4px;
+    flex: 1 1 0;
+  }
+  .dpad .up { grid-area: up; }
+  .dpad .left { grid-area: left; }
+  .dpad .right { grid-area: right; }
+  .dpad .down { grid-area: down; }
+  .dpad .toggle { grid-area: toggle; }
+  .dpad .key,
+  .dpad .toggle {
+    min-height: 3em;
+    font-size: 0.8rem;
+    padding: 0 2px;
+  }
+  .ops-side {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 4px;
+    flex: 1 1 0;
+  }
+  .ops-side .act,
+  .ops-side .key {
+    min-height: 3em;
+    font-size: 0.75rem;
+    padding: 0 2px;
+  }
+  .ops-bottom {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+  }
+  .ops-bottom .act {
+    padding: 10px 0;
+    font-size: 0.72rem;
   }
   .ops-nav {
     display: flex;
-    gap: 6px;
+    gap: 4px;
   }
-  .ops-nav .key { flex: 1; }
+  .ops-nav .key { flex: 1; min-height: 2.6em; font-size: 0.72rem; }
   .act {
     background: var(--key);
     color: var(--text);
     border: 1px solid var(--key-line);
     border-radius: var(--radius-md);
-    padding: 10px 0;
-    font-size: 0.75rem;
+    padding: 6px 0;
+    font-size: 0.72rem;
   }
   .act.on {
     background: var(--teal);

@@ -26,11 +26,20 @@ test("ops sub-tab: paste / copyAfter / selectAllCopy buttons dispatch commands",
   const { onCommand } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
   await fireEvent.click(screen.getByText("粘贴"));
-  await fireEvent.click(screen.getByText("复制后续内容"));
-  await fireEvent.click(screen.getByText("全选并复制"));
+  await fireEvent.click(screen.getByText("复制后续"));
+  await fireEvent.click(screen.getByText("全选复制"));
   expect(onCommand).toHaveBeenCalledWith({ type: "paste" });
   expect(onCommand).toHaveBeenCalledWith({ type: "copyAfter" });
   expect(onCommand).toHaveBeenCalledWith({ type: "selectAllCopy" });
+});
+
+test("ops sub-tab: line up/down buttons dispatch cursor movement commands", async () => {
+  const { onCommand } = openOps();
+  await fireEvent.click(screen.getByText("✂ 快捷操作"));
+  await fireEvent.click(screen.getByText("上一行"));
+  await fireEvent.click(screen.getByText("下一行"));
+  expect(onCommand).toHaveBeenCalledWith({ type: "lineUp" });
+  expect(onCommand).toHaveBeenCalledWith({ type: "lineDown" });
 });
 
 test("ops sub-tab: D-pad up dispatches selMove when selecting", async () => {

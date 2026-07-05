@@ -39,6 +39,8 @@ export type AppCommand =
   | { type: "toggleFullscreen" } | { type: "copyVisible" } | { type: "renameSession" }
   | { type: "selBegin" }
   | { type: "selMove"; dir: "up" | "down" | "left" | "right" }
+  | { type: "lineUp" }
+  | { type: "lineDown" }
   | { type: "selCancel" }
   | { type: "selCopy" }
   | { type: "copyAfter" }

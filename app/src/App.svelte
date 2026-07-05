@@ -238,6 +238,12 @@
         applySel(t);
         break;
       }
+      case "lineUp":
+      case "lineDown": {
+        // Jump to the start of the previous/next text line, independent of selection arrows.
+        sendActive(c.type === "lineUp" ? "\x1b[A\x1b[H" : "\x1b[B\x1b[H");
+        break;
+      }
       case "selCancel": cancelSelection(); break;
       case "selCopy": {
         const t = activeTerm(); if (!t) break;
