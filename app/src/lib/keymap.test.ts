@@ -42,3 +42,10 @@ test("capFor relabels the Cmd key per layout, leaves others unchanged", () => {
   expect(capFor({ id: "Cmd", cap: "Cmd" }, "win")).toBe("Win");
   expect(capFor({ id: "a", cap: "A" }, "win")).toBe("A");
 });
+
+test("navigation keys map to escape sequences", () => {
+  expect(SEQ.Home).toBe("\x1b[H");
+  expect(SEQ.End).toBe("\x1b[F");
+  expect(SEQ.PgUp).toBe("\x1b[5~");
+  expect(SEQ.PgDn).toBe("\x1b[6~");
+});
