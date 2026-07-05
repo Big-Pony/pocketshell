@@ -23,7 +23,15 @@
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot } from "./lib/file-tree";
 
-  const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
+  function defaultAgentUrl(): string {
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    // In dev (vite), the page is on :5173 but the agent listens on :8722.
+    // In production (agent-embedded), the page and WebSocket share the same port.
+    const host = import.meta.env.DEV ? `${location.hostname}:8722` : location.host;
+    return `${scheme}://${host}`;
+  }
+
+  const wsUrl = getAgentAddr() ?? defaultAgentUrl();
 
   let sessions = $state<LocalSession[]>([]);
   let activeId = $state("");
