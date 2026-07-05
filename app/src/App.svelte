@@ -256,13 +256,16 @@
           const line = b.getLine(i)?.translateToString(true) ?? "";
           text += (i === startRow ? line.slice(startCol) : line) + "\n";
         }
+        t.select(startCol, startRow, (b.length - startRow) * t.cols); // highlight what was copied
         writeClip(text.replace(/\n+$/, "\n"), "已复制光标之后内容");
+        t.clearSelection();
         break;
       }
       case "selectAllCopy": {
         const t = activeTerm(); if (!t) break;
         t.selectAll();
         writeClip(t.getSelection(), "已全选并复制");
+        t.clearSelection();
         break;
       }
       case "paste": {
