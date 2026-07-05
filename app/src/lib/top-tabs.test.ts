@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { fileTabId, openFileTab, closeFileTab, cycle, type TopTab } from "./top-tabs";
+import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, type TopTab } from "./top-tabs";
 
 test("fileTabId is stable per path+mode", () => {
   expect(fileTabId("/a.ts", "code")).toBe("file:code:/a.ts");
@@ -25,4 +25,12 @@ test("cycle steps forward and wraps", () => {
   expect(cycle(order, "s1", 1)).toBe("s2");
   expect(cycle(order, "file:code:/a.ts", 1)).toBe("s1");
   expect(cycle(order, "s1", -1)).toBe("file:code:/a.ts");
+});
+
+test("stepClamp steps forward/back but does not wrap", () => {
+  const order = ["s1", "s2", "s3"];
+  expect(stepClamp(order, "s1", 1)).toBe("s2");
+  expect(stepClamp(order, "s3", 1)).toBe("s3");   // clamped at end, no wrap
+  expect(stepClamp(order, "s1", -1)).toBe("s1");  // clamped at start, no wrap
+  expect(stepClamp([], "s1", 1)).toBe("s1");      // empty -> unchanged
 });

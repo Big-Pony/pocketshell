@@ -30,3 +30,10 @@ export function cycle(order: string[], activeId: string, delta: number): string 
   const i = Math.max(0, order.indexOf(activeId));
   return order[(i + delta + order.length) % order.length];
 }
+
+export function stepClamp(order: string[], activeId: string, delta: number): string {
+  if (!order.length) return activeId;
+  const i = Math.max(0, order.indexOf(activeId));
+  const next = Math.max(0, Math.min(order.length - 1, i + delta));
+  return order[next];
+}
