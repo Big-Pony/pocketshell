@@ -268,6 +268,22 @@
     }
   }
 
+  // ---- Top-area swipe to switch tabs ----
+  let swipeStart: { x: number; y: number; t: number } | null = null;
+  function onTopPointerDown(e: PointerEvent) {
+    swipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+  }
+  function onTopPointerUp(e: PointerEvent) {
+    if (!swipeStart) return;
+    const g = { dx: e.clientX - swipeStart.x, dy: e.clientY - swipeStart.y, dt: e.timeStamp - swipeStart.t };
+    swipeStart = null;
+    const dir = detectSwipe(g);
+    if (!dir) return;
+    const delta = dir === "left" ? 1 : -1; // left swipe -> next tab
+    const next = stepClamp(topOrder, activeTopId, delta);
+    if (next && next !== activeTopId) selectTop(next);
+  }
+
   // ---- Toast ----
   let toastText = $state("");
   let toastVisible = $state(false);
@@ -317,7 +333,7 @@
     <div class="banner">⚠ 连接已断开 · 会话由服务器托管，任务继续运行 · 正在重连…</div>
   {/if}
 
-  <div class="top" style="flex: {topFlex} 1 0;">
+  <div class="top" style="flex: {topFlex} 1 0;" role="application" aria-label="终端与文件预览" onpointerdown={onTopPointerDown} onpointerup={onTopPointerUp}>
     {#each topSessions as s (s.name)}
       <TerminalView
         {conn}
