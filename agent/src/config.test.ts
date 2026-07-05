@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { loadConfig, buildPairingString, resolveTlsMaterial } from "./config";
+import { loadConfig, buildPairingString, resolveTlsMaterial, advertiseToHttp, resolveAdvertise } from "./config";
 import { toB64 } from "./bytes";
 import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,4 +95,16 @@ test("resolveTlsMaterial: disabled->null, present->contents, missing->throws (no
   // enabled but material absent must throw, not return null
   expect(() => resolveTlsMaterial(keyDir, { enabled: true })).toThrow(/TLS enabled/);
   rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("advertiseToHttp maps ws->http and wss->https", () => {
+  expect(advertiseToHttp("wss://pocket.example.com")).toBe("https://pocket.example.com");
+  expect(advertiseToHttp("ws://192.168.1.5:8722")).toBe("http://192.168.1.5:8722");
+  expect(advertiseToHttp("https://x")).toBe("https://x"); // passthrough
+});
+
+test("resolveAdvertise: explicit wins, else falls back to bind + tls scheme", () => {
+  expect(resolveAdvertise({ advertise: "wss://d", listen: { host: "0.0.0.0", port: 9 }, tls: { enabled: false } })).toBe("wss://d");
+  expect(resolveAdvertise({ listen: { host: "127.0.0.1", port: 8722 }, tls: { enabled: false } })).toBe("ws://127.0.0.1:8722");
+  expect(resolveAdvertise({ listen: { host: "10.0.0.1", port: 443 }, tls: { enabled: true } })).toBe("wss://10.0.0.1:443");
 });

@@ -47,6 +47,22 @@ export function buildPairingString(pub: Uint8Array, addr: string, code: string):
   return "pocketshell-pair:" + Buffer.from(json, "utf8").toString("base64url");
 }
 
+export function advertiseToHttp(wsUrl: string): string {
+  if (wsUrl.startsWith("wss://")) return "https://" + wsUrl.slice("wss://".length);
+  if (wsUrl.startsWith("ws://")) return "http://" + wsUrl.slice("ws://".length);
+  return wsUrl;
+}
+
+export function resolveAdvertise(cfg: {
+  advertise?: string;
+  listen: { host: string; port: number };
+  tls: { enabled: boolean };
+}): string {
+  if (cfg.advertise) return cfg.advertise;
+  const scheme = cfg.tls.enabled ? "wss" : "ws";
+  return `${scheme}://${cfg.listen.host}:${cfg.listen.port}`;
+}
+
 export function resolveTlsMaterial(
   keyDir: string,
   tls: { enabled: boolean; cert?: string; key?: string },
