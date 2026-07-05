@@ -36,6 +36,19 @@ test("gitLog returns commits newest-first with numstat", () => {
   rmSync(d, { recursive: true, force: true });
 });
 
+test("gitLog keeps commits around an empty/merge commit (no numstat block)", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "first");
+  runGit(d, ["commit", "-q", "--allow-empty", "-m", "empty"]);
+  commit(d, "a.txt", "one\ntwo\n", "third");
+  const r = gitLog(d, 10);
+  expect(r.commits.map((c) => c.msg)).toEqual(["third", "empty", "first"]);
+  // 'first's numstat must stay attributed to 'first', not leak onto the empty commit.
+  expect(r.commits.find((c) => c.msg === "first")!.files[0]).toMatchObject({ path: "a.txt", add: 1, del: 0 });
+  expect(r.commits.find((c) => c.msg === "empty")!.files).toEqual([]);
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("gitLog query filters by grep", () => {
   const d = repo();
   commit(d, "a.txt", "x", "alpha");

@@ -112,7 +112,13 @@
   }
   const rows = $derived(flatten(view));
 
-  $effect(() => { if (!nodes.length) void loadRoot(); });
+  // Load the root once on mount. A guard flag (not `!nodes.length`) is required:
+  // loadRoot's catch resets nodes=[], and setRoot/unsetRoot also clear it, so an
+  // `!nodes.length` effect would re-fire forever on a bad/deleted root or an
+  // offline rpc reject — an unbounded fs.tree storm. setRoot/unsetRoot call
+  // loadRoot() themselves, so the effect only needs to cover the initial mount.
+  let didLoad = false;
+  $effect(() => { if (!didLoad) { didLoad = true; void loadRoot(); } });
 </script>
 
 <div class="ft">

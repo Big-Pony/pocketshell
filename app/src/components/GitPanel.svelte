@@ -26,7 +26,12 @@
   }
   async function loadMore() { limit += 30; await loadAll(); }
 
-  $effect(() => { if (!noRoot && !commits.length && !notice) void loadAll(); });
+  // Load once on mount. Guarding on `!commits.length && !notice` would re-fire
+  // forever on a repo with zero commits / a clean tree (loadAll succeeds but
+  // leaves commits=[] and notice=""), producing an unbounded git.* rpc storm.
+  // loadMore() re-runs loadAll() explicitly, so the effect only covers mount.
+  let didLoad = false;
+  $effect(() => { if (!noRoot && !didLoad) { didLoad = true; void loadAll(); } });
 </script>
 
 <div class="git">

@@ -26,18 +26,20 @@ const RS = "\x1e"; // record separator
 export function gitLog(cwd: string, limit: number, query?: string): { commits: Commit[] } {
   if (!isRepo(cwd)) throw new Error("not_a_repo");
   const args = ["log", `--max-count=${limit}`, "--numstat", "--date=relative",
-    `--pretty=format:${US}%H${US}%an${US}%ad${US}%s`];
+    `--pretty=format:${RS}%H${US}%an${US}%ad${US}%s`];
   if (query) args.push(`--grep=${query}`);
   const r = runGit(cwd, args);
   if (!r.ok) throw new Error(r.stderr.trim() || "git log failed");
 
   const commits: Commit[] = [];
-  // Git outputs one commit block per double-newline: header line then numstat lines.
-  const blocks = r.stdout.split("\n\n");
-  for (const block of blocks) {
-    const lines = block.split("\n").filter((l) => l.trim() !== "");
+  // Each commit is prefixed with RS (record separator) via the pretty format, so
+  // a commit with no numstat block (empty/merge commit) still delimits cleanly.
+  // Splitting on blank lines instead would merge such a commit into the next
+  // commit's block — dropping it and misattributing its numstat rows.
+  for (const rec of r.stdout.split(RS)) {
+    const lines = rec.split("\n").filter((l) => l.trim() !== "");
     if (!lines.length) continue;
-    const [, hash, author, when, msg] = lines[0].split(US);
+    const [hash, author, when, msg] = lines[0].split(US);
     if (hash === undefined) continue;
     const files: Commit["files"] = [];
     for (let i = 1; i < lines.length; i++) {

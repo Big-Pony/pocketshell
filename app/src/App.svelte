@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { Terminal } from "@xterm/xterm";
+  import { onMount } from "svelte";
   import { Connection, type ConnStatus } from "./lib/connection";
+  import { registerDevHelpers, unregisterDevHelpers } from "./lib/dev-helpers";
   import { mergeSessions, tombstone, closeTab as closeTabFn, type LocalSession } from "./lib/session-view";
   import { clampSplit, type BottomPanel } from "./lib/shell";
   import TerminalView from "./components/Terminal.svelte";
@@ -17,6 +19,7 @@
   import type { AppCommand } from "./lib/input-router";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
+  import { loadProjectRoot } from "./lib/file-tree";
 
   const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
 
@@ -66,6 +69,21 @@
     setTimeout(() => (notice = ""), 4000);
   });
   conn.listSessions();
+
+  onMount(() => {
+    registerDevHelpers({
+      openFile,
+      openPanel,
+      getState: () => ({
+        status,
+        projectRoot: loadProjectRoot(),
+        activePanel: bottomPanel,
+        fileTabs: fileTabs.map((t) => t.id),
+        activeId: activeTopId,
+      }),
+    });
+    return unregisterDevHelpers;
+  });
 
   // Top-tab list = live sessions minus the ones sent to background.
   const topSessions = $derived(sessions.filter((s) => !backgrounded.has(s.name)));
