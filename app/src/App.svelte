@@ -11,12 +11,14 @@
   import FilePanel from "./components/FilePanel.svelte";
   import FilePreview from "./components/FilePreview.svelte";
   import BottomBar from "./components/BottomBar.svelte";
-  import { openFileTab, closeFileTab, fileTabId, cycle, type TopTab } from "./lib/top-tabs";
+  import { openFileTab, closeFileTab, fileTabId, cycle, stepClamp, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import type { AppCommand } from "./lib/input-router";
+  import { begin, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
+  import { detectSwipe } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot } from "./lib/file-tree";
@@ -32,6 +34,9 @@
   let settings = $state<Settings>(loadSettings());
   let fileTabs = $state<TopTab[]>([]);
   let activeTop = $state("");
+  let sel = $state<SelState>(reset());
+  let selecting = $state(false);
+  let selCount = $state(0);
 
   // App owns settings so they actually apply: fontSize flows to every terminal
   // (reactive prop below), vibrate/layout flow to the keyboard.
@@ -92,6 +97,7 @@
 
   function newSession(name: string) { conn.newSession(name); activeId = name; backgrounded.delete(name); backgrounded = new Set(backgrounded); }
   function selectSession(name: string) {
+    cancelSelection();
     activeId = name;
     if (backgrounded.has(name)) { backgrounded.delete(name); backgrounded = new Set(backgrounded); }
   }
@@ -100,7 +106,7 @@
     sessions = sessions.map((s) => (s.name === name ? { ...s, name: next } : s));
     if (activeId === name) activeId = next;
   }
-  function killSession(name: string) { conn.kill(name); }
+  function killSession(name: string) { cancelSelection(); conn.kill(name); }
   function closeTab(name: string) {
     conn.detach(name);
     sessions = closeTabFn(sessions, name);
@@ -153,6 +159,7 @@
     if (activeTop === id) activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
   }
   function selectTop(id: string) {
+    cancelSelection();
     if (id.startsWith("file:")) { activeTop = id; }
     else { activeTop = ""; selectSession(id); }
   }
@@ -165,9 +172,32 @@
 
   function toBackground() {
     if (!activeId) return;
+    cancelSelection();
     backgrounded.add(activeId);
     backgrounded = new Set(backgrounded);
     activeId = topSessions[0]?.name ?? "";
+  }
+
+  function activeTerm() { return terms.get(activeId); }
+
+  function applySel(t: import("@xterm/xterm").Terminal) {
+    const r = range(sel, t.cols);
+    t.select(r.col, r.row, r.length);
+    selCount = r.length;
+  }
+
+  function cancelSelection() {
+    if (!selecting) return;
+    activeTerm()?.clearSelection();
+    sel = reset();
+    selecting = false;
+    selCount = 0;
+  }
+
+  function writeClip(text: string, ok: string) {
+    const p = navigator.clipboard?.writeText?.(text);
+    if (p) p.then(() => showToast(ok)).catch(() => showToast("无法访问剪贴板"));
+    else showToast("无法访问剪贴板");
   }
 
   function runCommand(c: AppCommand) {
@@ -179,11 +209,60 @@
       case "toBackground": toBackground(); break;
       case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
       case "scrollDown": terms.get(activeId)?.scrollPages(1); break;
-      case "toggleFullscreen": fullscreen = !fullscreen; break;
+      case "toggleFullscreen": cancelSelection(); fullscreen = !fullscreen; break;
       case "copyVisible": copyOutput(activeId); break;
       case "renameSession": {
         const next = prompt("新的会话名称", activeId);
         if (next && next.trim() && next !== activeId) renameSession(activeId, next.trim());
+        break;
+      }
+      case "selBegin": {
+        const t = activeTerm(); if (!t) break;
+        const b = t.buffer.active;
+        sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
+        selecting = true;
+        applySel(t);
+        break;
+      }
+      case "selMove": {
+        const t = activeTerm(); if (!t || !selecting) break;
+        sel = moveFocus(sel, c.dir, { cols: t.cols, maxRow: t.buffer.active.length - 1 });
+        applySel(t);
+        break;
+      }
+      case "selCancel": cancelSelection(); break;
+      case "selCopy": {
+        const t = activeTerm(); if (!t) break;
+        const text = t.getSelection();
+        if (!text) { showToast("无选区"); break; }
+        writeClip(text, "已复制选区");
+        cancelSelection();
+        break;
+      }
+      case "copyAfter": {
+        const t = activeTerm(); if (!t) break;
+        const b = t.buffer.active;
+        const startRow = b.baseY + b.cursorY, startCol = b.cursorX;
+        let text = "";
+        for (let i = startRow; i < b.length; i++) {
+          const line = b.getLine(i)?.translateToString(true) ?? "";
+          text += (i === startRow ? line.slice(startCol) : line) + "\n";
+        }
+        writeClip(text.replace(/\n+$/, "\n"), "已复制光标之后内容");
+        break;
+      }
+      case "selectAllCopy": {
+        const t = activeTerm(); if (!t) break;
+        t.selectAll();
+        writeClip(t.getSelection(), "已全选并复制");
+        break;
+      }
+      case "paste": {
+        if (!activeId) break;
+        const rd = navigator.clipboard?.readText?.();
+        if (rd) rd.then((text) => { if (text) conn.sendInput(activeId, new TextEncoder().encode(text)); })
+                 .catch(() => showToast("无法访问剪贴板"));
+        else showToast("无法访问剪贴板");
         break;
       }
     }
@@ -279,7 +358,7 @@
       {:else if bottomPanel === "set"}
         <SettingsPanel {conn} {settings} onChange={applySettings} />
       {:else if bottomPanel === "kbd"}
-        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} />
+        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} />
       {:else if bottomPanel === "snip"}
         <SnippetPanel {conn} onInsert={sendActive} />
       {/if}
