@@ -12,6 +12,8 @@ import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
+import { resolveStatic } from "./static-serve";
+import { ASSETS } from "./embedded-manifest";
 
 interface Deps {
   port?: number;
@@ -20,6 +22,7 @@ interface Deps {
   replay?: ReplayService;
   channelFactory?: () => SecureChannel;
   pairTimeoutMs?: number;
+  assets?: Record<string, string>;
 }
 
 export function startServer(deps: Deps = {}) {
@@ -43,6 +46,8 @@ export function startServer(deps: Deps = {}) {
     (() => createResponderChannel({ identity: config.identity, authorize }));
 
   const pairTimeoutMs = deps.pairTimeoutMs ?? 10_000;
+  const assets = deps.assets ?? ASSETS;
+  const assetKeys = new Set(Object.keys(assets));
 
   interface Conn {
     ws: ServerWebSocket<unknown>;
@@ -246,7 +251,12 @@ export function startServer(deps: Deps = {}) {
     tls: tlsMaterial ?? undefined,
     fetch(req, srv) {
       if (srv.upgrade(req)) return;
-      return new Response("PocketShell agent — WebSocket only", { status: 426 });
+      const url = new URL(req.url);
+      const r = resolveStatic(url.pathname, req.headers.get("accept") ?? "", assetKeys);
+      if (r.status === 200 && r.assetKey) {
+        return new Response(Bun.file(assets[r.assetKey]), { headers: r.headers });
+      }
+      return new Response("Not found", { status: 404 });
     },
     websocket: {
       open(ws) { onOpen(ws, (ws as any).remoteAddress ?? ""); },
