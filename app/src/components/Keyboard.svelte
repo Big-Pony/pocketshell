@@ -3,9 +3,10 @@
   import { LAYOUT, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
 
-  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0 }: {
+  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle" }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
     vibrate?: boolean; layout?: "mac" | "win"; selecting?: boolean; selCount?: number;
+    selMode?: "idle" | "selecting" | "line";
   } = $props();
 
   let sub = $state<"keys" | "ime" | "ops">("keys");
@@ -90,7 +91,7 @@
   {:else}
     <div class="ops">
       <div class="ops-mode">
-        {#if selecting}选区中 · {selCount} 字 · 方向键扩选{:else}方向键发送到程序 · 点「选区」开始选择{/if}
+        {#if selMode === "line"}选行中 · {selCount} 行 · 上一行/下一行扩选{:else if selMode === "selecting"}选区中 · {selCount} 字 · 方向键扩选{:else}方向键发送到程序 · 点「选区」或「上/下一行」开始{/if}
       </div>
       <div class="ops-main">
         <div class="dpad">

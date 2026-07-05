@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { IDLE, begin, moveFocus, range, reset } from "./terminal-select";
+import { IDLE, begin, beginLine, moveFocus, range, reset } from "./terminal-select";
 
 test("begin snapshots anchor=focus at cursor and enters selecting", () => {
   const s = begin({ row: 10, col: 5 });
@@ -40,4 +40,35 @@ test("reverse selection: focus above/before anchor normalizes start=focus", () =
 
 test("reset returns idle", () => {
   expect(reset().mode).toBe("idle");
+});
+
+// ---- line ("hop") mode ----
+
+test("beginLine enters line mode selecting one full line", () => {
+  const s = beginLine(20);
+  expect(s.mode).toBe("line");
+  expect(s.anchor).toEqual({ row: 20, col: 0 });
+  expect(s.focus).toEqual({ row: 20, col: 0 });
+  expect(range(s, 80)).toEqual({ col: 0, row: 20, length: 80 });
+});
+
+test("line mode: up accumulates full lines upward, left/right no-op", () => {
+  let s = beginLine(20);
+  s = moveFocus(s, "up", { cols: 80, maxRow: 100 });   // focus 19
+  s = moveFocus(s, "up", { cols: 80, maxRow: 100 });   // focus 18
+  // lines 18..20 => 3 lines * 80 cols, starting (0,18)
+  expect(range(s, 80)).toEqual({ col: 0, row: 18, length: 240 });
+  expect(moveFocus(s, "left", { cols: 80, maxRow: 100 })).toEqual(s);  // horizontal ignored
+});
+
+test("line mode: down extends below anchor", () => {
+  let s = beginLine(20);
+  s = moveFocus(s, "down", { cols: 10, maxRow: 100 }); // focus 21
+  expect(range(s, 10)).toEqual({ col: 0, row: 20, length: 20 }); // lines 20..21
+});
+
+test("line mode: focus row clamps at buffer edges", () => {
+  let s = beginLine(0);
+  s = moveFocus(s, "up", { cols: 10, maxRow: 5 });
+  expect(s.focus.row).toBe(0);
 });

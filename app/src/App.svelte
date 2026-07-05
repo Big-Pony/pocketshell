@@ -17,7 +17,7 @@
   import SnippetPanel from "./components/SnippetPanel.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import type { AppCommand } from "./lib/input-router";
-  import { begin, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
+  import { begin, beginLine, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
   import { detectSwipe } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
@@ -35,9 +35,10 @@
   let fileTabs = $state<TopTab[]>([]);
   let activeTop = $state("");
   let sel = $state<SelState>(reset());
-  let selecting = $state(false);
   let selCount = $state(0);
   let topEl: HTMLDivElement | null = null;
+  let selecting = $derived(sel.mode !== "idle");
+  let selMode = $derived(sel.mode);
 
   // App owns settings so they actually apply: fontSize flows to every terminal
   // (reactive prop below), vibrate/layout flow to the keyboard.
@@ -190,14 +191,23 @@
   function applySel(t: import("@xterm/xterm").Terminal) {
     const r = range(sel, t.cols);
     t.select(r.col, r.row, r.length);
-    selCount = r.length;
+    selCount = sel.mode === "line" ? r.length / t.cols : r.length;
+  }
+
+  // Scroll the viewport so `row` stays visible — lets line/char selection reach
+  // scrolled-off history so it can be copied.
+  function revealRow(t: import("@xterm/xterm").Terminal, row: number) {
+    const b = t.buffer.active;
+    const top = b.viewportY;
+    const bot = top + t.rows - 1;
+    if (row < top) t.scrollToLine(row);
+    else if (row > bot) t.scrollToLine(Math.max(0, row - t.rows + 1));
   }
 
   function cancelSelection() {
-    if (!selecting) return;
+    if (sel.mode === "idle") return;
     activeTerm()?.clearSelection();
     sel = reset();
-    selecting = false;
     selCount = 0;
   }
 
@@ -227,21 +237,34 @@
         const t = activeTerm(); if (!t) break;
         const b = t.buffer.active;
         sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
-        selecting = true;
         t.focus();
         applySel(t);
         break;
       }
       case "selMove": {
-        const t = activeTerm(); if (!t || !selecting) break;
+        const t = activeTerm(); if (!t || sel.mode === "idle") break;
         sel = moveFocus(sel, c.dir, { cols: t.cols, maxRow: t.buffer.active.length - 1 });
         applySel(t);
+        revealRow(t, sel.focus.row);
         break;
       }
       case "lineUp":
       case "lineDown": {
-        // Jump to the start of the previous/next text line, independent of selection arrows.
-        sendActive(c.type === "lineUp" ? "\x1b[A\x1b[H" : "\x1b[B\x1b[H");
+        // Whole-line selection that hops through the buffer (incl. scrollback),
+        // scrolling the viewport to follow so historical lines can be copied.
+        const t = activeTerm(); if (!t) break;
+        const b = t.buffer.active;
+        const maxRow = b.length - 1;
+        if (sel.mode !== "line") {
+          // First hop grabs the last real output line (just above the prompt).
+          const startRow = Math.max(0, Math.min(maxRow, b.baseY + b.cursorY - 1));
+          sel = beginLine(startRow);
+          t.focus();
+        } else {
+          sel = moveFocus(sel, c.type === "lineUp" ? "up" : "down", { cols: t.cols, maxRow });
+        }
+        applySel(t);
+        revealRow(t, sel.focus.row);
         break;
       }
       case "selCancel": cancelSelection(); break;
@@ -262,9 +285,8 @@
           const line = b.getLine(i)?.translateToString(true) ?? "";
           text += (i === startRow ? line.slice(startCol) : line) + "\n";
         }
-        t.select(startCol, startRow, (b.length - startRow) * t.cols); // highlight what was copied
         writeClip(text.replace(/\n+$/, "\n"), "已复制光标之后内容");
-        t.clearSelection();
+        cancelSelection();
         break;
       }
       case "selectAllCopy": {
@@ -272,6 +294,8 @@
         t.selectAll();
         writeClip(t.getSelection(), "已全选并复制");
         t.clearSelection();
+        sel = reset();
+        selCount = 0;
         break;
       }
       case "paste": {
@@ -391,7 +415,7 @@
       {:else if bottomPanel === "set"}
         <SettingsPanel {conn} {settings} onChange={applySettings} />
       {:else if bottomPanel === "kbd"}
-        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} />
+        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} />
       {:else if bottomPanel === "snip"}
         <SnippetPanel {conn} onInsert={sendActive} />
       {/if}

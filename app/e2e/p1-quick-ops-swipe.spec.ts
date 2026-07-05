@@ -103,7 +103,7 @@ test.describe("P1 quick-ops + swipe", () => {
 
     // Open ops sub-tab and start selection.
     await page.locator('button:has-text("✂ 快捷操作")').click();
-    await expect(page.locator(".ops-mode")).toContainText("点「选区」开始选择");
+    await expect(page.locator(".ops-mode")).toContainText("点「选区」");
     await page.getByRole("button", { name: "选区", exact: true }).click();
     await expect(page.locator(".ops-mode")).toContainText("选区中");
     await expect(page.getByRole("button", { name: "取消", exact: true })).toBeVisible();
@@ -115,6 +115,36 @@ test.describe("P1 quick-ops + swipe", () => {
     // Copy selection (clipboard permission granted; just assert no crash + toast).
     await page.getByRole("button", { name: "复制选区", exact: true }).click();
     // After copy, selection resets back to idle label.
-    await expect(page.locator(".ops-mode")).toContainText("点「选区」开始选择", { timeout: 5_000 });
+    await expect(page.locator(".ops-mode")).toContainText("点「选区」", { timeout: 5_000 });
+  });
+
+  test("ops sub-tab: 上一行 enters line-hop mode and highlights whole lines", async ({ page }) => {
+    test.setTimeout(120_000);
+    await seedLocalStorage(page, agentInfo!);
+    await page.goto("/");
+    await expect(page.locator(".conn-dot.online")).toBeVisible({ timeout: 15_000 });
+    await newSession(page, "hist");
+    await expect(page.locator(".term:not(.hidden) .xterm")).toBeVisible({ timeout: 10_000 });
+
+    // Print a few output lines so there is history to hop through.
+    await page.locator('button:has-text("⌨")').first().click();
+    await page.locator('button:has-text("✎ 输入法缓冲")').click();
+    await page.locator(".ime textarea").fill("seq 40");
+    await page.locator("button:has-text('发送到终端')").click();
+    await expect(page.locator(".term:not(.hidden) .xterm-rows")).toContainText("40", { timeout: 10_000 });
+
+    // 上一行 enters whole-line ("选行") mode without a prior 选区 toggle.
+    await page.locator('button:has-text("✂ 快捷操作")').click();
+    await page.getByRole("button", { name: "上一行", exact: true }).click();
+    await expect(page.locator(".ops-mode")).toContainText("选行中");
+    await expect(page.locator(".term:not(.hidden) .xterm-selection div").first()).toBeVisible({ timeout: 5_000 });
+
+    // A second hop accumulates another line.
+    await page.getByRole("button", { name: "上一行", exact: true }).click();
+    await expect(page.locator(".ops-mode")).toContainText("2 行");
+
+    // Copy resets back to idle.
+    await page.getByRole("button", { name: "复制选区", exact: true }).click();
+    await expect(page.locator(".ops-mode")).toContainText("点「选区」", { timeout: 5_000 });
   });
 });
