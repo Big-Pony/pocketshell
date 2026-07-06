@@ -266,7 +266,7 @@ export class TerminalService {
       "-F",
       "#{session_name}\t#{session_created}\t#{window_width}\t#{window_height}",
     ]);
-    console.log("[pocketshell] roster tmux exitCode=", res.exitCode, "stdout=", new TextDecoder().decode(res.stdout), "stderr=", new TextDecoder().decode(res.stderr));
+    console.log("[pocketshell] roster tmux exitCode=", res.exitCode, "stdout JSON=", JSON.stringify(new TextDecoder().decode(res.stdout)), "stderr=", JSON.stringify(new TextDecoder().decode(res.stderr)));
     if (res.exitCode !== 0) return [];
     return new TextDecoder()
       .decode(res.stdout)
