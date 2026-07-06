@@ -13,12 +13,13 @@ export function fakeTmux(
 ): TmuxRunner {
   return (args) => {
     calls?.push(args);
-    if (args[0] === "list-sessions") return map.list != null ? ok(map.list) : fail();
-    if (args[0] === "capture-pane") {
+    // Match by subcommand, not args[0]: real calls prefix a global `-u` flag.
+    if (args.includes("list-sessions")) return map.list != null ? ok(map.list) : fail();
+    if (args.includes("capture-pane")) {
       const name = args[args.indexOf("-t") + 1];
       return ok(map.capture?.[name] ?? "");
     }
-    if (args[0] === "has-session") return ok();
+    if (args.includes("has-session")) return ok();
     return ok();
   };
 }
@@ -47,6 +48,20 @@ test("list() tolerates a missing/failing tmux (roster query) -> empty", () => {
   const term = new TerminalService({ tmux: () => fail() });
   expect(term.list()).toEqual([]);
   term.dispose();
+});
+
+test("roster + previews force tmux UTF-8 (-u) so launchd's C locale can't sanitize tab delimiters to _", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: fakeTmux({ list: "work\t1700000000\t80\t24\n", capture: { work: "hi" } }, calls),
+  });
+  term.list();
+  term.dispose();
+  // Both output-parsed commands must lead with the global -u flag.
+  const ls = calls.find((a) => a.includes("list-sessions"))!;
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(ls[0]).toBe("-u");
+  expect(cap[0]).toBe("-u");
 });
 
 test("rename() renames a foreign (non-owned) session instead of no-op", () => {

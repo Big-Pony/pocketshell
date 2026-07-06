@@ -31,15 +31,13 @@ interface TmuxRosterEntry {
 // tests without tmux still pass.
 const defaultTmux: TmuxRunner = (args) => {
   try {
-    console.log("[pocketshell] tmux spawn args=", args, "PATH=", process.env.PATH);
     const r = Bun.spawnSync(["tmux", ...args]);
     return {
       exitCode: r.exitCode ?? 0,
       stdout: r.stdout ?? new Uint8Array(),
       stderr: r.stderr ?? new Uint8Array(),
     };
-  } catch (e) {
-    console.log("[pocketshell] tmux spawn exception:", e);
+  } catch {
     return { exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() };
   }
 };
@@ -95,8 +93,11 @@ export class TerminalService {
   }
 
   // Grab the bottom-most non-empty line of the pane for the task-panel preview.
+  // `-u` forces UTF-8 output: under launchd (no LANG/LC_*) tmux runs in the C
+  // locale and sanitizes non-ASCII / control bytes to `_`, which would corrupt
+  // CJK previews. Same locale issue as attach()/roster(); keep `-u`.
   private captureLastLine(name: string): string {
-    const res = this.tmux(["capture-pane", "-p", "-t", name]);
+    const res = this.tmux(["-u", "capture-pane", "-p", "-t", name]);
     if (res.exitCode !== 0) return "";
     const lines = new TextDecoder()
       .decode(res.stdout)
@@ -260,13 +261,19 @@ export class TerminalService {
   // Whole-machine tmux roster (one spawn). Tab-separated; session names cannot
   // contain a tab in practice, so a plain split is safe. Degrades to [] when
   // tmux is absent or the query fails.
+  //
+  // `-u` is REQUIRED, not cosmetic: without it, tmux under launchd (no LANG/LC_*
+  // -> C locale) sanitizes the literal TAB delimiter in `-F` output to `_`, so
+  // every line fails the 4-field split and the whole roster comes back empty
+  // (the "task panel is empty in production" bug). Same root cause as the
+  // CJK-underscore fix on attach()/new-session. Do not remove `-u`.
   private roster(): TmuxRosterEntry[] {
     const res = this.tmux([
+      "-u",
       "list-sessions",
       "-F",
       "#{session_name}\t#{session_created}\t#{window_width}\t#{window_height}",
     ]);
-    console.log("[pocketshell] roster tmux exitCode=", res.exitCode, "stdout JSON=", JSON.stringify(new TextDecoder().decode(res.stdout)), "stderr=", JSON.stringify(new TextDecoder().decode(res.stderr)));
     if (res.exitCode !== 0) return [];
     return new TextDecoder()
       .decode(res.stdout)

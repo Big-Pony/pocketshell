@@ -332,8 +332,9 @@ test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", 
   const okr = (s = "") => ({ exitCode: 0, stdout: utf8b(s), stderr: new Uint8Array() });
   const terminal = new TerminalService({
     tmux: (args) => {
-      if (args[0] === "list-sessions") return okr("work\t1700000000\t80\t24\n");
-      if (args[0] === "capture-pane") return okr("$ vim\n");
+      // Match by subcommand: real calls prefix a global `-u` flag.
+      if (args.includes("list-sessions")) return okr("work\t1700000000\t80\t24\n");
+      if (args.includes("capture-pane")) return okr("$ vim\n");
       return okr();
     },
   });
