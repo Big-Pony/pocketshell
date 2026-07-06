@@ -3,8 +3,10 @@
 // handshake + pairing (an authorized device is the operator), so access is
 // bounded only by the agent process's own permissions.
 import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
-import { resolve, join, extname, dirname } from "node:path";
+import { resolve, join, extname, dirname, basename } from "node:path";
 import { runGit, isRepo } from "./git-service";
+import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 export interface TreeNode {
   name: string;
@@ -175,6 +177,22 @@ export function fsDownloadChunk(path: string, offset: number, len: number): { da
     try { readSync(fd, buf, 0, length, offset); } finally { closeSync(fd); }
   }
   return { dataB64: buf.toString("base64"), eof: end >= size, size };
+}
+
+export function fsArchive(tmpDir: string, path: string): { archivePath: string; size: number } {
+  const abs = resolve(path);
+  if (!statSync(abs).isDirectory()) throw new Error(`not a directory: ${abs}`);
+  const archivePath = join(resolve(tmpDir), `psarchive-${randomBytes(6).toString("hex")}.zip`);
+  // -r recurse, -q quiet; cwd = parent so the archive stores a single top folder.
+  const r = spawnSync("zip", ["-r", "-q", archivePath, basename(abs)], { cwd: dirname(abs) });
+  if (r.error) throw new Error(`zip unavailable: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`zip exited ${r.status}: ${r.stderr?.toString() ?? ""}`);
+  const size = statSync(archivePath).size;
+  if (size > MAX_TRANSFER_BYTES) {
+    try { unlinkSync(archivePath); } catch {}
+    throw new Error(`archive exceeds ${MAX_TRANSFER_BYTES} bytes`);
+  }
+  return { archivePath, size };
 }
 
 export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: string): { ok: true } {

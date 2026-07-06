@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk } from "./fs-service";
+import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive } from "./fs-service";
 import { runGit, isRepo } from "./git-service";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
@@ -248,6 +248,26 @@ test("fsDownloadChunk throws when file exceeds MAX_TRANSFER_BYTES", () => {
   // create a file just over the cap is too heavy for CI; instead assert guard via a wrapper.
   // Keep this test lightweight: a normal small file must NOT throw.
   expect(() => fsDownloadChunk(p, 0, 8)).not.toThrow();
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsArchive zips a directory into tmpDir (requires system zip)", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  const src = join(d, "proj"); mkdirSync(src);
+  writeFileSync(join(src, "a.txt"), "hello");
+  const r = fsArchive(tmpDir, src);
+  expect(existsSync(r.archivePath)).toBe(true);
+  expect(r.archivePath.startsWith(tmpDir)).toBe(true);
+  expect(r.size).toBeGreaterThan(0);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsArchive throws on a non-directory path", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  writeFileSync(join(d, "f.txt"), "x");
+  expect(() => fsArchive(tmpDir, join(d, "f.txt"))).toThrow();
   rmSync(d, { recursive: true, force: true });
 });
 
