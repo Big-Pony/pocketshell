@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES } from "./fs-service";
+import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk } from "./fs-service";
 import { runGit, isRepo } from "./git-service";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
@@ -189,6 +189,40 @@ test("fsResolveName handles no-extension names", () => {
   const d = tmp();
   writeFileSync(join(d, "README"), "x");
   expect(fsResolveName(d, "README").name).toBe("README(1)");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsUploadChunk streams via temp part then copies to destPath on last", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  const dest = join(d, "out.bin");
+  const b64 = (s: string) => Buffer.from(s).toString("base64");
+  fsUploadChunk(tmpDir, "u1", b64("hello "), { first: true });
+  const r = fsUploadChunk(tmpDir, "u1", b64("world"), { last: true, destPath: dest });
+  expect(r.written).toBe(11);
+  expect(rfSync(dest).toString()).toBe("hello world");
+  // temp part removed after copy
+  expect(existsSync(join(tmpDir, "psupload-u1.part"))).toBe(false);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsUploadChunk overwrites an existing dest file", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  const dest = join(d, "out.bin"); writeFileSync(dest, "OLD-LONG-CONTENT");
+  const b64 = (s: string) => Buffer.from(s).toString("base64");
+  fsUploadChunk(tmpDir, "u2", b64("new"), { first: true, last: true, destPath: dest });
+  expect(rfSync(dest).toString()).toBe("new");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsUploadChunk throws and cleans temp when exceeding MAX_TRANSFER_BYTES", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  // one byte over the cap, base64-encoded
+  const big = Buffer.alloc(MAX_TRANSFER_BYTES + 1).toString("base64");
+  expect(() => fsUploadChunk(tmpDir, "u3", big, { first: true })).toThrow();
+  expect(existsSync(join(tmpDir, "psupload-u3.part"))).toBe(false);
   rmSync(d, { recursive: true, force: true });
 });
 

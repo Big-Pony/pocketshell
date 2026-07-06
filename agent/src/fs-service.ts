@@ -2,7 +2,7 @@
 // reads the real filesystem. NO sandbox: the trust boundary is the Noise
 // handshake + pairing (an authorized device is the operator), so access is
 // bounded only by the agent process's own permissions.
-import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync } from "node:fs";
 import { resolve, join, extname, dirname } from "node:path";
 import { runGit, isRepo } from "./git-service";
 
@@ -140,6 +140,27 @@ export function fsResolveName(dir: string, name: string): { name: string } {
     const candidate = `${base}(${i})${ext}`;
     if (!existsSync(join(abs, candidate))) return { name: candidate };
   }
+}
+
+export function fsUploadChunk(
+  tmpDir: string, uploadId: string, dataB64: string,
+  opts: { first?: boolean; last?: boolean; destPath?: string } = {}
+): { written: number } {
+  const part = join(resolve(tmpDir), `psupload-${uploadId}.part`);
+  const buf = Buffer.from(dataB64, "base64");
+  if (opts.first) writeFileSync(part, buf);
+  else appendFileSync(part, buf);
+  const written = statSync(part).size;
+  if (written > MAX_TRANSFER_BYTES) {
+    try { unlinkSync(part); } catch {}
+    throw new Error(`upload exceeds ${MAX_TRANSFER_BYTES} bytes`);
+  }
+  if (opts.last) {
+    if (!opts.destPath) throw new Error("last chunk requires destPath");
+    copyFileSync(part, resolve(opts.destPath)); // local copy = network-断线-safe landing
+    unlinkSync(part);
+  }
+  return { written };
 }
 
 export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: string): { ok: true } {
