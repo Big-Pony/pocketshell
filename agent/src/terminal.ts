@@ -76,7 +76,12 @@ export class TerminalService {
   // can re-attach on detach without duplicating wiring. Slice-3 stays S1-style:
   // PTY exit deletes the session (real-vs-detach split lands in Task 5).
   private attach(name: string, cols: number, rows: number): PtyHandle {
-    const pty = spawnPty({ cmd: ["tmux", "attach", "-t", name], cols, rows });
+    // `-u` forces tmux into UTF-8 mode. Under launchd (and many service
+    // managers) LANG/LC_* are unset, so tmux would otherwise decide the client
+    // is non-UTF-8 and render every CJK cell as an underscore. The client is
+    // always xterm.js (UTF-8), so forcing it is correct and needs no installed
+    // locale. Must precede the `attach` subcommand (global flag).
+    const pty = spawnPty({ cmd: ["tmux", "-u", "attach", "-t", name], cols, rows });
     pty.onData((chunk) => {
       const live = this.sessions.get(name);
       if (live) live.lastOutputAt = Date.now();
@@ -125,7 +130,9 @@ export class TerminalService {
 
     const exists = this.hasSession(name);
     if (!exists) {
-      const args = ["tmux", "new-session", "-d", "-s", name];
+      // `-u`: create the tmux server in UTF-8 mode so panes store/parse CJK
+      // correctly regardless of the (often absent under launchd) locale. See attach().
+      const args = ["tmux", "-u", "new-session", "-d", "-s", name];
       if (opt.cwd) args.push("-c", opt.cwd);
       if (opt.cmd) args.push(opt.cmd);
       const res = Bun.spawnSync(args);

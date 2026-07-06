@@ -1,4 +1,7 @@
-/* Local JetBrains Mono for terminal box-drawing / powerline symbols */
+/* Local JetBrainsMono Nerd Font Mono (subset: Latin + box-drawing + block +
+   geometric + braille + Powerline U+E0A0..E0D7). Kept under the "JetBrains Mono"
+   family name so the terminal font chain is unchanged. Adds Powerline glyphs the
+   plain font lacked; CJK is not here (handled by OS fallback in the font chain). */
 @font-face {
   font-family: "JetBrains Mono";
   src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
@@ -63,7 +66,7 @@ body {
 }
 
 .mono {
-  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", monospace;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "Droid Sans Fallback", monospace;
 }
 
 /* Utility helpers */

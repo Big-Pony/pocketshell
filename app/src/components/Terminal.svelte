@@ -35,7 +35,14 @@
 
     term = new Terminal({
       fontSize,
-      fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
+      // Defensive CJK fallback: JetBrains Mono has no CJK glyphs, so name OS CJK
+      // fonts (PingFang SC / Noto Sans CJK / YaHei) so a device whose generic
+      // `monospace` lacks CJK still renders Chinese. Latin/box-drawing keep
+      // hitting JetBrains Mono first. NOTE: the actual "Chinese shows as an
+      // underscore on the phone" bug was NOT a font issue — it was tmux running
+      // without a UTF-8 locale under launchd; fixed by `tmux -u` in
+      // agent/src/terminal.ts. This chain is kept as a belt-and-suspenders.
+      fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
       unicodeVersion: "11",
       convertEol: false,
       cursorBlink: true,
