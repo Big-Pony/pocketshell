@@ -2,7 +2,7 @@
 // reads the real filesystem. NO sandbox: the trust boundary is the Noise
 // handshake + pairing (an authorized device is the operator), so access is
 // bounded only by the agent process's own permissions.
-import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync, utimesSync } from "node:fs";
 import { resolve, join, extname, dirname, basename } from "node:path";
 import { runGit, isRepo } from "./git-service";
 import { spawnSync } from "node:child_process";
@@ -193,6 +193,21 @@ export function fsArchive(tmpDir: string, path: string): { archivePath: string; 
     throw new Error(`archive exceeds ${MAX_TRANSFER_BYTES} bytes`);
   }
   return { archivePath, size };
+}
+
+export function sweepTmp(tmpDir: string, maxAgeMs: number, now: number): { removed: number } {
+  let entries: string[];
+  try { entries = readdirSync(resolve(tmpDir)); } catch { return { removed: 0 }; }
+  let removed = 0;
+  for (const name of entries) {
+    if (!name.startsWith("psupload-") && !name.startsWith("psarchive-")) continue;
+    const p = join(resolve(tmpDir), name);
+    try {
+      const st = statSync(p);
+      if (now - st.mtimeMs > maxAgeMs) { unlinkSync(p); removed++; }
+    } catch { /* vanished mid-sweep — ignore */ }
+  }
+  return { removed };
 }
 
 export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: string): { ok: true } {

@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive } from "./fs-service";
+import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp } from "./fs-service";
 import { runGit, isRepo } from "./git-service";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
@@ -269,6 +269,42 @@ test("fsArchive throws on a non-directory path", () => {
   writeFileSync(join(d, "f.txt"), "x");
   expect(() => fsArchive(tmpDir, join(d, "f.txt"))).toThrow();
   rmSync(d, { recursive: true, force: true });
+});
+
+test("sweepTmp removes only prefixed files older than maxAge", () => {
+  const d = tmp();
+  writeFileSync(join(d, "psupload-old.part"), "x");
+  writeFileSync(join(d, "psarchive-old.zip"), "x");
+  writeFileSync(join(d, "psupload-fresh.part"), "x");
+  writeFileSync(join(d, "unrelated.txt"), "x");
+  const now = Date.now();
+  const old = new Date(now - 7200_000);   // 2h old
+  const fresh = new Date(now - 60_000);    // 1min old
+  utimesSync(join(d, "psupload-old.part"), old, old);
+  utimesSync(join(d, "psarchive-old.zip"), old, old);
+  utimesSync(join(d, "psupload-fresh.part"), fresh, fresh);
+  const r = sweepTmp(d, 3_600_000, now); // 1h threshold
+  expect(r.removed).toBe(2);
+  expect(existsSync(join(d, "psupload-old.part"))).toBe(false);
+  expect(existsSync(join(d, "psarchive-old.zip"))).toBe(false);
+  expect(existsSync(join(d, "psupload-fresh.part"))).toBe(true);
+  expect(existsSync(join(d, "unrelated.txt"))).toBe(true); // never touched
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("sweepTmp with maxAge -1 clears all prefixed files (startup full clean)", () => {
+  const d = tmp();
+  writeFileSync(join(d, "psupload-a.part"), "x");
+  writeFileSync(join(d, "keep.txt"), "x");
+  const now = Date.now();
+  const r = sweepTmp(d, -1, now);
+  expect(r.removed).toBe(1);
+  expect(existsSync(join(d, "keep.txt"))).toBe(true);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("sweepTmp tolerates a missing directory", () => {
+  expect(sweepTmp("/no/such/tmp/xyz", 1000, 1).removed).toBe(0);
 });
 
 test("fsOp rename without target throws", () => {
