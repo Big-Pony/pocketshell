@@ -24,10 +24,19 @@
   let term: Terminal;
   let fit: FitAddon;
 
-  onMount(() => {
+  onMount(async () => {
+    // Ensure the bundled JetBrains Mono is ready before xterm measures cells.
+    // Falls back silently if the font is unavailable or the API is missing.
+    try {
+      await document.fonts.load(`${fontSize}px "JetBrains Mono"`);
+    } catch {
+      // ignore
+    }
+
     term = new Terminal({
       fontSize,
-      fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace',
+      fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
+      unicodeVersion: "11",
       convertEol: false,
       cursorBlink: true,
       disableStdin: true,

@@ -1,3 +1,20 @@
+/* Local JetBrains Mono for terminal box-drawing / powerline symbols */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Design tokens based on docs/需求/原型构想/remote-code-mockup.html */
 :root {
   --bg: #0f1317;
@@ -46,7 +63,7 @@ body {
 }
 
 .mono {
-  font-family: "SF Mono", ui-monospace, Menlo, Consolas, "Cascadia Mono", monospace;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", monospace;
 }
 
 /* Utility helpers */
