@@ -5,13 +5,38 @@ export interface LocalSession extends SessionMeta {
   closed?: boolean;
 }
 
-export function stateDotClass(state: SessionState): "dot-run" | "dot-wait" | "dot-done" {
-  return state === "run" ? "dot-run" : state === "wait" ? "dot-wait" : "dot-done";
+export function stateDotClass(state: SessionState): "dot-run" | "dot-wait" | "dot-done" | "dot-idle" {
+  return state === "run" ? "dot-run"
+    : state === "wait" ? "dot-wait"
+    : state === "idle" ? "dot-idle"
+    : "dot-done";
 }
 
-// A live session (run/wait) needs a confirm before kill; a done one does not.
+// Any non-terminated session needs a confirm before kill. For idle (foreign,
+// activity unknown) we cannot tell run vs wait, so confirm to be safe.
 export function needsKillConfirm(state: SessionState): boolean {
-  return state === "run" || state === "wait";
+  return state !== "done";
+}
+
+// Lowest free `sN` against ALL current session names (incl. foreign), so an
+// auto-created session never collides with (and silently attaches to) another.
+export function nextSessionName(existing: string[]): string {
+  const set = new Set(existing);
+  let n = 1;
+  while (set.has(`s${n}`)) n++;
+  return `s${n}`;
+}
+
+// Card action label. Un-adopted (foreign/idle) sessions are "打开" (tapping
+// attaches/adopts them); adopted ones are "进入"; tombstones are "关闭".
+export function actionLabel(s: LocalSession): "打开" | "进入" | "关闭" {
+  if (s.closed) return "关闭";
+  return s.attached ? "进入" : "打开";
+}
+
+// Whether selecting this session should trigger a backend adopt (attach).
+export function shouldAdopt(s: LocalSession): boolean {
+  return !s.closed && !s.attached;
 }
 
 // Merge local sessions with incoming from server: upsert active, tombstone absent, append new.
