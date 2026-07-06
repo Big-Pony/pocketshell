@@ -26,6 +26,7 @@ export interface AgentConfig {
   rateLimiter: RateLimiter;
   audit: Audit;
   snippets: SnippetStore;
+  tmpDir: string;
 }
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
@@ -137,6 +138,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const rateLimiter = createRateLimiter({ now: () => Date.now(), onLock: (ip) => audit.log({ event: "ratelimit_lock", ip }) });
   const identity = loadOrCreateIdentity(keyDir);
   const snippets = openSnippetStore(join(keyDir, "pocketshell.db"));
+  const tmpDir = join(keyDir, "tmp");
+  mkdirSync(tmpDir, { recursive: true });
 
   // First run: write a non-sensitive agent.json the operator can edit. Secrets
   // (Noise keys) never go here — they stay in agent_key (0600).
@@ -161,5 +164,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     rateLimiter,
     audit,
     snippets,
+    tmpDir,
   };
 }

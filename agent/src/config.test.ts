@@ -141,6 +141,14 @@ test("loadConfig priority: env > agent.json > default", () => {
   rmSync(keyDir, { recursive: true, force: true });
 });
 
+test("loadConfig exposes tmpDir under keyDir and creates it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-cfg-tmp-"));
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: dir } as any);
+  expect(cfg.tmpDir).toBe(join(dir, "tmp"));
+  expect(existsSync(cfg.tmpDir)).toBe(true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("POCKETSHELL_TLS=0 forces tls off even if agent.json enables it", () => {
   const keyDir = tmpKeyDir();
   loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
