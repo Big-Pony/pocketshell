@@ -31,13 +31,15 @@ interface TmuxRosterEntry {
 // tests without tmux still pass.
 const defaultTmux: TmuxRunner = (args) => {
   try {
+    console.log("[pocketshell] tmux spawn args=", args, "PATH=", process.env.PATH);
     const r = Bun.spawnSync(["tmux", ...args]);
     return {
       exitCode: r.exitCode ?? 0,
       stdout: r.stdout ?? new Uint8Array(),
       stderr: r.stderr ?? new Uint8Array(),
     };
-  } catch {
+  } catch (e) {
+    console.log("[pocketshell] tmux spawn exception:", e);
     return { exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() };
   }
 };
@@ -264,6 +266,7 @@ export class TerminalService {
       "-F",
       "#{session_name}\t#{session_created}\t#{window_width}\t#{window_height}",
     ]);
+    console.log("[pocketshell] roster tmux exitCode=", res.exitCode, "stdout=", new TextDecoder().decode(res.stdout), "stderr=", new TextDecoder().decode(res.stderr));
     if (res.exitCode !== 0) return [];
     return new TextDecoder()
       .decode(res.stdout)
