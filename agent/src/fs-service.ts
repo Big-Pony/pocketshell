@@ -2,7 +2,7 @@
 // reads the real filesystem. NO sandbox: the trust boundary is the Noise
 // handshake + pairing (an authorized device is the operator), so access is
 // bounded only by the agent process's own permissions.
-import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
 import { resolve, join, extname, dirname } from "node:path";
 import { runGit, isRepo } from "./git-service";
 
@@ -161,6 +161,20 @@ export function fsUploadChunk(
     unlinkSync(part);
   }
   return { written };
+}
+
+export function fsDownloadChunk(path: string, offset: number, len: number): { dataB64: string; eof: boolean; size: number } {
+  const abs = resolve(path);
+  const size = statSync(abs).size;
+  if (size > MAX_TRANSFER_BYTES) throw new Error(`file exceeds ${MAX_TRANSFER_BYTES} bytes`);
+  const end = Math.min(offset + len, size);
+  const length = Math.max(0, end - offset);
+  const buf = Buffer.alloc(length);
+  if (length > 0) {
+    const fd = openSync(abs, "r");
+    try { readSync(fd, buf, 0, length, offset); } finally { closeSync(fd); }
+  }
+  return { dataB64: buf.toString("base64"), eof: end >= size, size };
 }
 
 export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: string): { ok: true } {
