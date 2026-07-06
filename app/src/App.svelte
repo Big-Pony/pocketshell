@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { Connection, type ConnStatus } from "./lib/connection";
   import { registerDevHelpers, unregisterDevHelpers } from "./lib/dev-helpers";
-  import { mergeSessions, tombstone, closeTab as closeTabFn, type LocalSession } from "./lib/session-view";
+  import { mergeSessions, tombstone, closeTab as closeTabFn, nextSessionName, shouldAdopt, type LocalSession } from "./lib/session-view";
   import { clampSplit, type BottomPanel } from "./lib/shell";
   import TerminalView from "./components/Terminal.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
@@ -109,6 +109,11 @@
     cancelSelection();
     activeId = name;
     if (backgrounded.has(name)) { backgrounded.delete(name); backgrounded = new Set(backgrounded); }
+  }
+  function enterSession(name: string) {
+    const s = sessions.find((x) => x.name === name);
+    if (s && shouldAdopt(s)) { newSession(name); return; } // foreign/idle -> adopt (backend ensure attaches)
+    selectSession(name);
   }
   function renameSession(name: string, next: string) {
     conn.renameSession(name, next);
@@ -223,7 +228,7 @@
       case "prevTab": shiftTab(-1); break;
       case "nextTab": shiftTab(1); break;
       case "gotoTab": { const s = topSessions[c.index]; if (s) selectTop(s.name); break; }
-      case "newSession": { const n = `s${sessions.length + 1}`; newSession(n); break; }
+      case "newSession": { const n = nextSessionName(sessions.map((s) => s.name)); newSession(n); break; }
       case "toBackground": toBackground(); break;
       case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
       case "scrollDown": terms.get(activeId)?.scrollPages(1); break;
@@ -407,7 +412,7 @@
       {:else if bottomPanel === "task"}
         <TaskPanel
           {sessions}
-          onSelect={selectSession}
+          onSelect={enterSession}
           onRename={renameSession}
           onKill={killSession}
           onCopy={copyOutput}
