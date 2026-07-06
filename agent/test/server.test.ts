@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { startServer } from "../src/server";
 import { encode, decodeServer } from "../src/protocol";
 import { fromB64 } from "../src/bytes";
+import { TerminalService } from "../src/terminal";
 import type { SecureChannel } from "../src/secure-channel";
 
 // passthrough responder: identical to the one in src/server.test.ts
@@ -106,8 +107,11 @@ test.skipIf(!hasTmux)("newSession broadcasts a sessions frame including the sess
   }
 });
 
+const emptyTmux = () => ({ exitCode: 0, stdout: new Uint8Array(), stderr: new Uint8Array() });
+
 test("listSessions on an empty agent returns an empty sessions frame", async () => {
-  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const terminal = new TerminalService({ tmux: emptyTmux });
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
   const ws = await openHandshakedWs(srv.port);
   ws.binaryType = "arraybuffer";
   let got: string[] | null = null;

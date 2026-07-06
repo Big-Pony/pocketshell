@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { stateDotClass, needsKillConfirm } from "../lib/session-view";
+  import { stateDotClass, needsKillConfirm, actionLabel } from "../lib/session-view";
   import ContextMenu from "./ContextMenu.svelte";
 
   let {
@@ -40,7 +40,7 @@
     else onKill(s.name);
   }
 
-  const stateLabel: Record<string, string> = { run: "运行中", wait: "等待输入", done: "已结束" };
+  const stateLabel: Record<string, string> = { run: "运行中", wait: "等待输入", done: "已结束", idle: "后台运行" };
 </script>
 
 <div class="tp">
@@ -57,7 +57,7 @@
             <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{stateLabel[s.state]}</em></span>
             <span class="last mono">{s.lastLine}</span>
           </span>
-          <span class="act">{s.closed ? "关闭" : "切换"}</span>
+          <span class="act">{actionLabel(s)}</span>
         </button>
         <button class="more" aria-label="更多"
           onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget); }}>⋯</button>
@@ -81,7 +81,7 @@
         <div class="confirm-overlay" role="dialog" aria-modal="true">
           <div class="confirm-dlg">
             <div class="dlg-title">终止 {s.name}</div>
-            <div class="dlg-body">会话正在运行中，终止后任务将中断。确定要终止吗？</div>
+            <div class="dlg-body">{s.state === "idle" ? "无法确认该会话是否在运行，终止可能中断任务。" : "会话正在运行中，终止后任务将中断。"}确定要终止吗？</div>
             <div class="dlg-btns">
               <button onclick={() => (confirmKill = null)}>取消</button>
               <button class="danger" onclick={() => { onKill(s.name); confirmKill = null; }}>终止</button>
@@ -139,6 +139,7 @@
   .dot-run { background: var(--teal); animation: pulse 1.4s infinite; }
   .dot-wait { background: var(--amber); animation: pulse 0.9s infinite; }
   .dot-done { background: var(--dimmer); }
+  .dot-idle { background: #6597c9; }
   @keyframes pulse { 50% { opacity: 0.35; } }
 
   .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

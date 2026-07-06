@@ -82,6 +82,13 @@ export function startServer(deps: Deps = {}) {
   };
   terminal.onSessionsChange(pushSessions);
 
+  // Refresh the whole-machine roster + previews for connected clients. Skipped
+  // entirely when nobody is connected (pushSessions only targets live conns,
+  // but this also avoids the tmux spawns list() would do).
+  const periodicPush = () => { if (conns.size > 0) pushSessions(); };
+  const pushTimer = setInterval(periodicPush, 3000);
+  (pushTimer as unknown as { unref?: () => void }).unref?.();
+
   const pushSnippets = (target?: Conn) => {
     const items = config.snippets.list().map((r) => ({
       id: r.id, group: r.group, label: r.label, command: r.command, autoEnter: r.autoEnter,
@@ -279,6 +286,7 @@ export function startServer(deps: Deps = {}) {
   return {
     port: server.port,
     stop() {
+      clearInterval(pushTimer);
       terminal.dispose();
       server.stop(true);
     },
@@ -287,6 +295,7 @@ export function startServer(deps: Deps = {}) {
       openWith: (ws: any, ip: string, factory: () => SecureChannel) => onOpen(ws, ip, factory),
       message: onMessage,
       broadcastOutputForTest: () => { for (const conn of conns.values()) sendSecure(conn, { type: "pong" }); },
+      periodicPush,
     },
   };
 }

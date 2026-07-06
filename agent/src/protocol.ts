@@ -2,7 +2,8 @@
 // `data` fields carry base64-encoded bytes (see bytes.ts). All frames are JSON
 // text; switching output to binary WS frames is a later-slice optimization.
 
-export type SessionState = "run" | "wait" | "done";
+export type SessionState = "run" | "wait" | "done" | "idle";
+//  idle = 会话在 tmux 里存活，但本 Agent 未 attach（活动未知）
 
 export interface SessionMeta {
   name: string;
@@ -11,6 +12,7 @@ export interface SessionMeta {
   rows: number;
   lastLine: string;
   createdAt: number;
+  attached: boolean; // 本 Agent 是否已挂 PTY 纳管；外部会话为 false
 }
 
 export interface DeviceInfo {

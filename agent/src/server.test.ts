@@ -6,6 +6,7 @@ import { loadDeviceRegistry } from "./device-registry";
 import { createPairing } from "./pairing";
 import { createRateLimiter } from "./rate-limit";
 import { createAudit } from "./audit";
+import { TerminalService } from "./terminal";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -323,5 +324,32 @@ test("rpc git.status routes through server", () => {
   if (reply.type === "response" && reply.ok) {
     expect((reply.result as any).files.some((f: any) => f.path === "a.txt")).toBe(true);
   }
+  srv.stop();
+});
+
+test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", () => {
+  const utf8b = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
+  const okr = (s = "") => ({ exitCode: 0, stdout: utf8b(s), stderr: new Uint8Array() });
+  const terminal = new TerminalService({
+    tmux: (args) => {
+      if (args[0] === "list-sessions") return okr("work\t1700000000\t80\t24\n");
+      if (args[0] === "capture-pane") return okr("$ vim\n");
+      return okr();
+    },
+  });
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1); // marker handshake -> ready
+  ws.sent.length = 0;
+
+  srv.__test.periodicPush();
+
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8")) as any;
+  expect(reply.type).toBe("sessions");
+  const s = reply.sessions.find((x: any) => x.name === "work");
+  expect(s.state).toBe("idle");
+  expect(s.attached).toBe(false);
+  expect(s.lastLine).toBe("$ vim");
   srv.stop();
 });
