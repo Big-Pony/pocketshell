@@ -148,7 +148,8 @@ export function fsUploadChunk(
   tmpDir: string, uploadId: string, dataB64: string,
   opts: { first?: boolean; last?: boolean; destPath?: string } = {}
 ): { written: number } {
-  const part = join(resolve(tmpDir), `psupload-${uploadId}.part`);
+  const safeId = uploadId.replace(/[^a-z0-9-]/gi, "");
+  const part = join(resolve(tmpDir), `psupload-${safeId}.part`);
   const buf = Buffer.from(dataB64, "base64");
   if (opts.first) writeFileSync(part, buf);
   else appendFileSync(part, buf);
@@ -184,7 +185,8 @@ export function fsArchive(tmpDir: string, path: string): { archivePath: string; 
   if (!statSync(abs).isDirectory()) throw new Error(`not a directory: ${abs}`);
   const archivePath = join(resolve(tmpDir), `psarchive-${randomBytes(6).toString("hex")}.zip`);
   // -r recurse, -q quiet; cwd = parent so the archive stores a single top folder.
-  const r = spawnSync("zip", ["-r", "-q", archivePath, basename(abs)], { cwd: dirname(abs) });
+  // Prefix with "./" so names starting with "-" are not parsed as zip options.
+  const r = spawnSync("zip", ["-r", "-q", archivePath, "./" + basename(abs)], { cwd: dirname(abs) });
   if (r.error) throw new Error(`zip unavailable: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`zip exited ${r.status}: ${r.stderr?.toString() ?? ""}`);
   const size = statSync(archivePath).size;

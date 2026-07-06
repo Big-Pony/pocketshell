@@ -56,13 +56,17 @@ export async function uploadFiles(
 
 export function baseName(path: string): string {
   const i = path.lastIndexOf("/");
-  return i < 0 ? path : path.slice(i + 1);
+  return (i < 0 ? path : path.slice(i + 1)) || "root";
 }
 
 export async function downloadFileBlob(
   conn: RpcLike, path: string, opts: { chunkBytes?: number } = {},
 ): Promise<Blob> {
   const chunk = opts.chunkBytes ?? CHUNK_BYTES;
+  // Pre-check size so the user gets a localized error before any real bytes flow.
+  const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as { dataB64: string; eof: boolean; size: number };
+  if (probe.size > MAX_TRANSFER_BYTES) throw new Error("文件超过 200MB 上限");
+  if (probe.eof) return new Blob([]);
   const parts: BlobPart[] = [];
   let offset = 0;
   for (;;) {

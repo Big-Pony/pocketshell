@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync, utimesSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp } from "./fs-service";
@@ -260,6 +260,30 @@ test("fsArchive zips a directory into tmpDir (requires system zip)", () => {
   expect(existsSync(r.archivePath)).toBe(true);
   expect(r.archivePath.startsWith(tmpDir)).toBe(true);
   expect(r.size).toBeGreaterThan(0);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsArchive handles directory names starting with '-'", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  const src = join(d, "-weird"); mkdirSync(src);
+  writeFileSync(join(src, "a.txt"), "hello");
+  const r = fsArchive(tmpDir, src);
+  expect(existsSync(r.archivePath)).toBe(true);
+  expect(r.size).toBeGreaterThan(0);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsUploadChunk sanitizes uploadId to keep temp part under tmpDir", () => {
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  const dest = join(d, "out.bin");
+  const b64 = (s: string) => Buffer.from(s).toString("base64");
+  fsUploadChunk(tmpDir, "../../etc/passwd", b64("x"), { first: true, last: true, destPath: dest });
+  expect(rfSync(dest).toString()).toBe("x");
+  // the .part file must live inside tmpDir, not follow the malicious uploadId
+  const parts = readdirSync(tmpDir).filter((n) => n.startsWith("psupload-"));
+  expect(parts.length).toBe(0); // part removed after copy
   rmSync(d, { recursive: true, force: true });
 });
 

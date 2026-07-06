@@ -62,29 +62,37 @@ test("uploadFiles stops early when shouldCancel() turns true", async () => {
   expect(sent).toBeLessThan(5); // did not send all 5 chunks
 });
 
-test("baseName returns last segment", () => {
+test("baseName returns last segment, falls back to 'root' for '/'", () => {
   expect(baseName("/a/b/proj")).toBe("proj");
   expect(baseName("/x")).toBe("x");
+  expect(baseName("/")).toBe("root");
 });
 
-test("downloadFileBlob concatenates chunks until eof", async () => {
+test("downloadFileBlob probes size then concatenates chunks until eof", async () => {
   const parts = [toB64(new Uint8Array([1, 2])), toB64(new Uint8Array([3]))];
   let call = 0;
-  const rpc = vi.fn(async (_m: string, _p: any) => {
+  const rpc = vi.fn(async (_m: string, p: any) => {
+    if (p.len === 0) return { dataB64: "", eof: false, size: 3 }; // probe
     const dataB64 = parts[call]; const eof = call === parts.length - 1; call++;
     return { dataB64, eof, size: 3 };
   });
   const blob = await downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2 });
   const buf = new Uint8Array(await blob.arrayBuffer());
   expect([...buf]).toEqual([1, 2, 3]);
+  expect(rpc).toHaveBeenCalledTimes(3); // probe + 2 chunks
+});
+
+test("downloadFileBlob rejects files over MAX_TRANSFER_BYTES with a localized message", async () => {
+  const rpc = vi.fn(async () => ({ dataB64: "", eof: false, size: 200 * 1024 * 1024 + 1 }));
+  await expect(downloadFileBlob({ rpc } as any, "/huge.bin")).rejects.toThrow("文件超过 200MB 上限");
 });
 
 test("downloadFolder archives, downloads, then deletes the temp archive", async () => {
   const order: string[] = [];
-  const rpc = vi.fn(async (m: string, _p: any) => {
+  const rpc = vi.fn(async (m: string, p: any) => {
     order.push(m);
     if (m === "fs.archive") return { archivePath: "/tmp/psarchive-x.zip", size: 2 };
-    if (m === "fs.downloadChunk") return { dataB64: toB64(new Uint8Array([9, 9])), eof: true, size: 2 };
+    if (m === "fs.downloadChunk") return { dataB64: toB64(new Uint8Array([9, 9])), eof: p.len > 0, size: 2 };
     if (m === "fs.op") return { ok: true };
     return {};
   });
@@ -95,6 +103,6 @@ test("downloadFolder archives, downloads, then deletes the temp archive", async 
   const busy: boolean[] = [];
   await downloadFolder({ rpc } as any, "/a/proj", { onArchiving: (b) => busy.push(b) });
   (URL as any).createObjectURL = origCreate; (URL as any).revokeObjectURL = origRevoke;
-  expect(order).toEqual(["fs.archive", "fs.downloadChunk", "fs.op"]);
+  expect(order).toEqual(["fs.archive", "fs.downloadChunk", "fs.downloadChunk", "fs.op"]); // probe + single chunk
   expect(busy).toEqual([true, false]); // spinner on then off
 });
