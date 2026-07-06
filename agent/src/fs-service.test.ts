@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fsTree, fsRead, langForExt, fsDiff, fsOp } from "./fs-service";
+import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES } from "./fs-service";
 import { runGit, isRepo } from "./git-service";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
@@ -160,6 +160,35 @@ test("fsOp mkdir creates a dir when parent exists", () => {
 test("fsOp mkdir throws when parent missing", () => {
   const d = tmp();
   expect(() => fsOp("mkdir", join(d, "no", "deep"))).toThrow();
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsUploadCheck returns only existing names", () => {
+  const d = tmp();
+  writeFileSync(join(d, "a.txt"), "x");
+  const r = fsUploadCheck(d, ["a.txt", "b.txt"]);
+  expect(r.conflicts).toEqual(["a.txt"]);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsResolveName returns name unchanged when free", () => {
+  const d = tmp();
+  expect(fsResolveName(d, "a.txt").name).toBe("a.txt");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsResolveName suffixes (1),(2) on collision, keeping extension", () => {
+  const d = tmp();
+  writeFileSync(join(d, "a.txt"), "x");
+  writeFileSync(join(d, "a(1).txt"), "x");
+  expect(fsResolveName(d, "a.txt").name).toBe("a(2).txt");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsResolveName handles no-extension names", () => {
+  const d = tmp();
+  writeFileSync(join(d, "README"), "x");
+  expect(fsResolveName(d, "README").name).toBe("README(1)");
   rmSync(d, { recursive: true, force: true });
 });
 

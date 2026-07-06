@@ -2,7 +2,7 @@
 // reads the real filesystem. NO sandbox: the trust boundary is the Noise
 // handshake + pairing (an authorized device is the operator), so access is
 // bounded only by the agent process's own permissions.
-import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, join, extname, dirname } from "node:path";
 import { runGit, isRepo } from "./git-service";
 
@@ -121,6 +121,25 @@ export function fsDiff(path: string, cwd?: string): { path: string; hunks: DiffH
     else cur.lines.push({ kind: "ctx", text: line.startsWith(" ") ? line.slice(1) : line });
   }
   return { path: abs, hunks };
+}
+
+export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
+
+export function fsUploadCheck(dir: string, names: string[]): { conflicts: string[] } {
+  const abs = resolve(dir);
+  return { conflicts: names.filter((n) => existsSync(join(abs, n))) };
+}
+
+export function fsResolveName(dir: string, name: string): { name: string } {
+  const abs = resolve(dir);
+  if (!existsSync(join(abs, name))) return { name };
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  for (let i = 1; ; i++) {
+    const candidate = `${base}(${i})${ext}`;
+    if (!existsSync(join(abs, candidate))) return { name: candidate };
+  }
 }
 
 export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: string): { ok: true } {
