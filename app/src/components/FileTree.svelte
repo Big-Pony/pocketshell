@@ -6,6 +6,8 @@
   } from "../lib/file-tree";
   import { IDLE, press, type ArmState } from "../lib/confirm-armed";
   import ContextMenu from "./ContextMenu.svelte";
+  import UploadDialog from "./UploadDialog.svelte";
+  import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/transfer";
 
   let { conn, onOpenFile, onCd }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
@@ -19,6 +21,19 @@
   let menuAnchor = $state<HTMLElement | undefined>();
   let confirmDel = $state<FileNode | null>(null);
   let arm = $state<ArmState>(IDLE);
+  let uploadDir = $state<string | null>(null);
+  let archiving = $state(false);
+
+  async function doDownloadFile(n: FileNode) {
+    try {
+      const blob = await downloadFileBlob(conn, n.path);
+      triggerBrowserDownload(blob, n.name);
+    } catch (e: any) { notice = e?.message ?? "下载失败"; }
+  }
+  async function doDownloadDir(n: FileNode) {
+    try { await downloadFolder(conn, n.path, { onArchiving: (b) => (archiving = b) }); }
+    catch (e: any) { notice = e?.message ?? "打包下载失败"; }
+  }
 
   const view = $derived(filterTree(nodes, query));
 
@@ -149,16 +164,32 @@
         { label: "cd 到此处", icon: "⌘", onSelect: () => onCd(menuFor!.path) },
         { label: "重命名", icon: "✎", onSelect: () => doRename(menuFor!) },
         { label: "新建目录", icon: "＋", onSelect: () => doMkdir(menuFor!) },
+        { label: "上传文件", icon: "⬆", onSelect: () => { uploadDir = menuFor!.path; } },
+        { label: "下载", icon: "⬇", onSelect: () => doDownloadDir(menuFor!) },
         { label: "删除", icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
       ]} />
     {:else}
       <ContextMenu onClose={() => (menuFor = null)} anchor={menuAnchor} items={[
         { label: "打开预览", icon: "▤", onSelect: () => onOpenFile(menuFor!.path) },
         { label: "复制路径", icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
+        { label: "下载", icon: "⬇", onSelect: () => doDownloadFile(menuFor!) },
         { label: "重命名", icon: "✎", onSelect: () => doRename(menuFor!) },
         { label: "删除", icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
       ]} />
     {/if}
+  {/if}
+
+  {#if uploadDir}
+    <UploadDialog {conn} dir={uploadDir}
+      onClose={() => (uploadDir = null)}
+      onUploaded={(d) => { uploadDir = null; void refreshParent(childPath(d, "x")); }} />
+  {/if}
+
+  {#if archiving}
+    <div class="arch-overlay" role="status" aria-label="打包中">
+      <div class="spinner"></div>
+      <div class="arch-txt">正在打包…</div>
+    </div>
   {/if}
 
   {#if confirmDel}
@@ -211,4 +242,9 @@
   .dlg-btns button { flex: 1; padding: 9px 0; border-radius: var(--radius-md); border: 1px solid var(--line); font-size: 0.75rem; background: var(--key); color: var(--text); }
   .dlg-btns button.danger { background: var(--red); color: #fff; border-color: transparent; }
   .dlg-btns button.danger.armed { outline: 2px solid var(--amber); }
+
+  .arch-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(7,9,11,0.7); display: grid; place-items: center; gap: 10px; }
+  .arch-overlay .arch-txt { color: var(--text); font-size: 0.75rem; text-align: center; }
+  .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--teal); border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
