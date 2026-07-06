@@ -78,14 +78,16 @@ export function startServer(deps: Deps = {}) {
   });
 
   const pushSessions = () => {
-    for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions: terminal.list() });
+    const sessions = terminal.list();
+    console.log("[pocketshell] pushSessions ->", sessions.length, "sessions to", conns.size, "conns");
+    for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions });
   };
   terminal.onSessionsChange(pushSessions);
 
   // Refresh the whole-machine roster + previews for connected clients. Skipped
   // entirely when nobody is connected (pushSessions only targets live conns,
   // but this also avoids the tmux spawns list() would do).
-  const periodicPush = () => { if (conns.size > 0) pushSessions(); };
+  const periodicPush = () => { if (conns.size > 0) { console.log("[pocketshell] periodicPush firing"); pushSessions(); } };
   const pushTimer = setInterval(periodicPush, 3000);
   (pushTimer as unknown as { unref?: () => void }).unref?.();
 
@@ -116,9 +118,12 @@ export function startServer(deps: Deps = {}) {
         try { terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd }); }
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
         break;
-      case "listSessions":
-        sendSecure(conn, { type: "sessions", sessions: terminal.list() });
+      case "listSessions": {
+        const sessions = terminal.list();
+        console.log("[pocketshell] listSessions ->", sessions.length, "sessions");
+        sendSecure(conn, { type: "sessions", sessions });
         break;
+      }
       case "renameSession":
         try { terminal.rename(msg.sessionId, msg.name); }
         catch (e) { sendSecure(conn, { type: "error", code: "rename_failed", message: String(e) }); }
