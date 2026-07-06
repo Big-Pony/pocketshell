@@ -48,3 +48,11 @@ test("list() tolerates a missing/failing tmux (roster query) -> empty", () => {
   expect(term.list()).toEqual([]);
   term.dispose();
 });
+
+test("rename() renames a foreign (non-owned) session instead of no-op", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({ tmux: fakeTmux({ list: "" }, calls) });
+  term.rename("old", "shiny");
+  term.dispose();
+  expect(calls).toContainEqual(["rename-session", "-t", "old", "shiny"]);
+});

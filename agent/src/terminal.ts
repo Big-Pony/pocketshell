@@ -224,7 +224,17 @@ export class TerminalService {
 
   rename(name: string, newName: string): void {
     const live = this.sessions.get(name);
-    if (!live) return;
+    if (!live) {
+      // Foreign (non-owned) session: rename directly; next list() reflects it.
+      const res = this.tmux(["rename-session", "-t", name, newName]);
+      if (res.exitCode !== 0) {
+        throw new Error(
+          `tmux rename-session failed for "${name}": ${new TextDecoder().decode(res.stderr)}`,
+        );
+      }
+      this.emitSessionsChange();
+      return;
+    }
     const res = this.tmux(["rename-session", "-t", name, newName]);
     if (res.exitCode !== 0) {
       throw new Error(
