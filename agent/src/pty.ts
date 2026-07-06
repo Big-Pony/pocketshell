@@ -39,6 +39,13 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
 
   const proc = Bun.spawn(opts.cmd, {
     terminal,
+    // The PTY client (tmux attach) needs a TERM whose terminfo exists, or tmux
+    // aborts with "open terminal failed: terminal does not support clear". Under
+    // launchd there is no TERM in the environment, so set one explicitly. The
+    // frontend is xterm.js, so xterm-256color is the correct emulation (its
+    // terminfo ships with macOS/Linux). tmux still overrides TERM inside panes
+    // via its own default-terminal, so programs like Claude Code are unaffected.
+    env: { ...process.env, TERM: "xterm-256color" },
   });
 
   // Wire subprocess exit to exitCbs.
