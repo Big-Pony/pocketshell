@@ -22,8 +22,9 @@
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot } from "./lib/file-tree";
+  import { defaultAgentUrl } from "./lib/agent-url";
 
-  const wsUrl = getAgentAddr() ?? `ws://${location.hostname}:8722`;
+  const wsUrl = getAgentAddr() ?? defaultAgentUrl(import.meta.env.DEV, location);
 
   let sessions = $state<LocalSession[]>([]);
   let activeId = $state("");

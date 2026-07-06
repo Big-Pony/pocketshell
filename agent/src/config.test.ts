@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { loadConfig, buildPairingString, resolveTlsMaterial } from "./config";
+import { loadConfig, buildPairingString, resolveTlsMaterial, advertiseToHttp, resolveAdvertise } from "./config";
 import { toB64 } from "./bytes";
-import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync } from "node:fs";
+import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync, readFileSync as _rf } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -94,5 +94,58 @@ test("resolveTlsMaterial: disabled->null, present->contents, missing->throws (no
   expect(resolveTlsMaterial(keyDir, { enabled: true, cert, key })).toEqual({ cert: "CERTDATA", key: "KEYDATA" });
   // enabled but material absent must throw, not return null
   expect(() => resolveTlsMaterial(keyDir, { enabled: true })).toThrow(/TLS enabled/);
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("advertiseToHttp maps ws->http and wss->https", () => {
+  expect(advertiseToHttp("wss://pocket.example.com")).toBe("https://pocket.example.com");
+  expect(advertiseToHttp("ws://192.168.1.5:8722")).toBe("http://192.168.1.5:8722");
+  expect(advertiseToHttp("https://x")).toBe("https://x"); // passthrough
+});
+
+test("resolveAdvertise: explicit wins, else falls back to bind + tls scheme", () => {
+  expect(resolveAdvertise({ advertise: "wss://d", listen: { host: "0.0.0.0", port: 9 }, tls: { enabled: false } })).toBe("wss://d");
+  expect(resolveAdvertise({ listen: { host: "127.0.0.1", port: 8722 }, tls: { enabled: false } })).toBe("ws://127.0.0.1:8722");
+  expect(resolveAdvertise({ listen: { host: "10.0.0.1", port: 443 }, tls: { enabled: true } })).toBe("wss://10.0.0.1:443");
+});
+
+test("loadConfig writes agent.json on first run (non-sensitive only), reuses on next", () => {
+  const keyDir = tmpKeyDir();
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  const file = join(keyDir, "agent.json");
+  expect(existsSync(file)).toBe(true);
+  const j = JSON.parse(_rf(file, "utf8"));
+  expect(j.host).toBe("127.0.0.1");
+  expect(j.port).toBe(8722);
+  // must NOT leak secrets into agent.json
+  expect(JSON.stringify(j)).not.toContain("secretKey");
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("loadConfig priority: env > agent.json > default", () => {
+  const keyDir = tmpKeyDir();
+  // seed agent.json with a file-level host/port/advertise
+  loadConfig({ POCKETSHELL_KEY_DIR: keyDir }); // creates keyDir
+  writeFileSync(join(keyDir, "agent.json"),
+    JSON.stringify({ host: "10.0.0.9", port: 9001, advertise: "wss://from-file" }));
+  // no env override -> file wins
+  const fromFile = loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  expect(fromFile.listen.host).toBe("10.0.0.9");
+  expect(fromFile.listen.port).toBe(9001);
+  expect(fromFile.advertise).toBe("wss://from-file");
+  // env override -> env wins
+  const fromEnv = loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_HOST: "0.0.0.0", POCKETSHELL_ADVERTISE: "wss://from-env" });
+  expect(fromEnv.listen.host).toBe("0.0.0.0");
+  expect(fromEnv.advertise).toBe("wss://from-env");
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("POCKETSHELL_TLS=0 forces tls off even if agent.json enables it", () => {
+  const keyDir = tmpKeyDir();
+  loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  writeFileSync(join(keyDir, "agent.json"), JSON.stringify({ tls: true }));
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir }).tls.enabled).toBe(true);
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_TLS: "0" }).tls.enabled).toBe(false);
   rmSync(keyDir, { recursive: true, force: true });
 });
