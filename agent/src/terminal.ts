@@ -12,6 +12,36 @@ interface Live {
   lastReattachAt?: number;
 }
 
+export interface TmuxResult {
+  exitCode: number;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+}
+export type TmuxRunner = (args: string[]) => TmuxResult;
+
+interface TmuxRosterEntry {
+  name: string;
+  createdAt: number;
+  cols: number;
+  rows: number;
+}
+
+// Default runner: spawn real tmux. Resilient to a missing binary (returns a
+// non-zero result instead of throwing) so callers degrade gracefully and unit
+// tests without tmux still pass.
+const defaultTmux: TmuxRunner = (args) => {
+  try {
+    const r = Bun.spawnSync(["tmux", ...args]);
+    return {
+      exitCode: r.exitCode ?? 0,
+      stdout: r.stdout ?? new Uint8Array(),
+      stderr: r.stderr ?? new Uint8Array(),
+    };
+  } catch {
+    return { exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() };
+  }
+};
+
 const SCAN_INTERVAL_MS = 1000;
 
 export class TerminalService {
@@ -21,8 +51,10 @@ export class TerminalService {
   private sessionsChangeCbs: (() => void)[] = [];
   private lastStates = new Map<string, SessionState>();
   private scanTimer: ReturnType<typeof setInterval>;
+  private tmux: TmuxRunner;
 
-  constructor() {
+  constructor(deps: { tmux?: TmuxRunner } = {}) {
+    this.tmux = deps.tmux ?? defaultTmux;
     this.scanTimer = setInterval(() => this.scan(), SCAN_INTERVAL_MS);
     // Don't let the scanner keep the process (or `bun test`) alive on its own.
     (this.scanTimer as unknown as { unref?: () => void }).unref?.();
@@ -43,7 +75,7 @@ export class TerminalService {
   }
 
   private hasSession(name: string): boolean {
-    return Bun.spawnSync(["tmux", "has-session", "-t", name]).exitCode === 0;
+    return this.tmux(["has-session", "-t", name]).exitCode === 0;
   }
 
   // Recompute run/wait for live sessions; fire onSessionsChange only on change.
@@ -62,7 +94,7 @@ export class TerminalService {
 
   // Grab the bottom-most non-empty line of the pane for the task-panel preview.
   private captureLastLine(name: string): string {
-    const res = Bun.spawnSync(["tmux", "capture-pane", "-p", "-t", name]);
+    const res = this.tmux(["capture-pane", "-p", "-t", name]);
     if (res.exitCode !== 0) return "";
     const lines = new TextDecoder()
       .decode(res.stdout)
@@ -132,10 +164,10 @@ export class TerminalService {
     if (!exists) {
       // `-u`: create the tmux server in UTF-8 mode so panes store/parse CJK
       // correctly regardless of the (often absent under launchd) locale. See attach().
-      const args = ["tmux", "-u", "new-session", "-d", "-s", name];
+      const args = ["-u", "new-session", "-d", "-s", name];
       if (opt.cwd) args.push("-c", opt.cwd);
       if (opt.cmd) args.push(opt.cmd);
-      const res = Bun.spawnSync(args);
+      const res = this.tmux(args);
       if (res.exitCode !== 0) {
         throw new Error(
           `tmux new-session failed for "${name}": ${new TextDecoder().decode(res.stderr)}`,
@@ -151,7 +183,7 @@ export class TerminalService {
     // `status-interval` (15s default) — the only idle output tmux emits — which
     // periodically nudged the cursor down a row. With status off the window is a
     // clean 1:1 with xterm's rows and there is no periodic redraw.
-    Bun.spawnSync(["tmux", "set-option", "-g", "status", "off"]);
+    this.tmux(["set-option", "-g", "status", "off"]);
 
     const meta: SessionMeta = {
       name,
@@ -160,6 +192,7 @@ export class TerminalService {
       rows,
       lastLine: "",
       createdAt: Date.now(),
+      attached: true,
     };
     const pty = this.attach(name, cols, rows);
     this.sessions.set(name, { pty, meta, lastOutputAt: Date.now() });
@@ -177,7 +210,7 @@ export class TerminalService {
     live.meta.cols = cols;
     live.meta.rows = rows;
     live.pty.resize(cols, rows);
-    Bun.spawnSync(["tmux", "resize-window", "-t", name, "-x", String(cols), "-y", String(rows)]);
+    this.tmux(["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)]);
   }
 
   async kill(name: string): Promise<void> {
@@ -185,14 +218,14 @@ export class TerminalService {
     live?.pty.kill();
     this.sessions.delete(name);
     this.lastStates.delete(name);
-    Bun.spawnSync(["tmux", "kill-session", "-t", name]);
+    this.tmux(["kill-session", "-t", name]);
     this.emitSessionsChange();
   }
 
   rename(name: string, newName: string): void {
     const live = this.sessions.get(name);
     if (!live) return;
-    const res = Bun.spawnSync(["tmux", "rename-session", "-t", name, newName]);
+    const res = this.tmux(["rename-session", "-t", name, newName]);
     if (res.exitCode !== 0) {
       throw new Error(
         `tmux rename-session failed for "${name}": ${new TextDecoder().decode(res.stderr)}`,
@@ -212,13 +245,55 @@ export class TerminalService {
     this.emitSessionsChange();
   }
 
+  // Whole-machine tmux roster (one spawn). Tab-separated; session names cannot
+  // contain a tab in practice, so a plain split is safe. Degrades to [] when
+  // tmux is absent or the query fails.
+  private roster(): TmuxRosterEntry[] {
+    const res = this.tmux([
+      "list-sessions",
+      "-F",
+      "#{session_name}\t#{session_created}\t#{window_width}\t#{window_height}",
+    ]);
+    if (res.exitCode !== 0) return [];
+    return new TextDecoder()
+      .decode(res.stdout)
+      .split("\n")
+      .map((l) => l.replace(/\s+$/, ""))
+      .filter((l) => l.length > 0)
+      .map((l): TmuxRosterEntry | null => {
+        const parts = l.split("\t");
+        if (parts.length < 4) return null;
+        const [name, created, width, height] = parts;
+        return {
+          name,
+          createdAt: (Number(created) || 0) * 1000,
+          cols: Number(width) || 80,
+          rows: Number(height) || 24,
+        };
+      })
+      .filter((e): e is TmuxRosterEntry => e !== null);
+  }
+
   list(): SessionMeta[] {
     const now = Date.now();
-    return [...this.sessions.values()].map((l) => ({
+    const owned: SessionMeta[] = [...this.sessions.values()].map((l) => ({
       ...l.meta,
       state: inferState({ hasSession: this.hasSession(l.meta.name), lastOutputAt: l.lastOutputAt, now }),
       lastLine: this.captureLastLine(l.meta.name),
+      attached: true,
     }));
+    const foreign: SessionMeta[] = this.roster()
+      .filter((r) => !this.sessions.has(r.name))
+      .map((r) => ({
+        name: r.name,
+        state: "idle" as const,
+        cols: r.cols,
+        rows: r.rows,
+        lastLine: this.captureLastLine(r.name),
+        createdAt: r.createdAt,
+        attached: false,
+      }));
+    return [...owned, ...foreign];
   }
 
   dispose(): void {
