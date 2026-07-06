@@ -143,6 +143,16 @@ export class TerminalService {
       }
     }
 
+    // Disable tmux's default status line (server-wide, idempotent). Two mobile
+    // bugs both trace to it: (1) its green bar occupies the window's bottom row
+    // and visually covers the shell prompt/input on the phone — and the app
+    // already renders its own session tabs + connection status, so tmux's status
+    // line is redundant; (2) its right side shows a clock that tmux redraws every
+    // `status-interval` (15s default) — the only idle output tmux emits — which
+    // periodically nudged the cursor down a row. With status off the window is a
+    // clean 1:1 with xterm's rows and there is no periodic redraw.
+    Bun.spawnSync(["tmux", "set-option", "-g", "status", "off"]);
+
     const meta: SessionMeta = {
       name,
       state: "run",
