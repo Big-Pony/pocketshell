@@ -7,7 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise, advertiseToHttp } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
-import { fsTree, fsRead, fsDiff, fsOp } from "./fs-service";
+import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp } from "./fs-service";
 import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
@@ -88,6 +88,11 @@ export function startServer(deps: Deps = {}) {
   const periodicPush = () => { if (conns.size > 0) pushSessions(); };
   const pushTimer = setInterval(periodicPush, 3000);
   (pushTimer as unknown as { unref?: () => void }).unref?.();
+
+  // Transfer temp cleanup: startup full clean + periodic age-scoped sweep.
+  sweepTmp(config.tmpDir, -1, Date.now());
+  const sweepTimer = setInterval(() => sweepTmp(config.tmpDir, 3_600_000, Date.now()), 1_800_000);
+  (sweepTimer as unknown as { unref?: () => void }).unref?.();
 
   const pushSnippets = (target?: Conn) => {
     const items = config.snippets.list().map((r) => ({
@@ -182,6 +187,11 @@ export function startServer(deps: Deps = {}) {
             case "fs.read": result = fsRead(String(p.path)); break;
             case "fs.diff": result = fsDiff(String(p.path), p.cwd ? String(p.cwd) : undefined); break;
             case "fs.op": result = fsOp(p.op, String(p.path), p.to ? String(p.to) : undefined); break;
+            case "fs.uploadCheck": result = fsUploadCheck(String(p.dir), (p.names ?? []) as string[]); break;
+            case "fs.resolveName": result = fsResolveName(String(p.dir), String(p.name)); break;
+            case "fs.uploadChunk": result = fsUploadChunk(config.tmpDir, String(p.uploadId), String(p.dataB64), { first: !!p.first, last: !!p.last, destPath: p.destPath ? String(p.destPath) : undefined }); break;
+            case "fs.downloadChunk": result = fsDownloadChunk(String(p.path), Number(p.offset), Number(p.len)); break;
+            case "fs.archive": result = fsArchive(config.tmpDir, String(p.path)); break;
             case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
             case "git.branches": result = gitBranches(String(p.cwd)); break;
             case "git.status": result = gitStatus(String(p.cwd)); break;
@@ -287,6 +297,7 @@ export function startServer(deps: Deps = {}) {
     port: server.port,
     stop() {
       clearInterval(pushTimer);
+      clearInterval(sweepTimer);
       terminal.dispose();
       server.stop(true);
     },

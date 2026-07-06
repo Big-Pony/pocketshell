@@ -286,6 +286,28 @@ test("rpc fs.tree routes to fs-service and replies directly with id", () => {
   srv.stop();
 });
 
+test("rpc fs.uploadCheck routes to fs-service and replies with conflicts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-rpc-up-"));
+  writeFileSync(join(dir, "exists.txt"), "x");
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({
+    type: "rpc", id: "42", method: "fs.uploadCheck",
+    params: { dir, names: ["exists.txt", "nope.txt"] },
+  })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  expect(reply.type).toBe("response");
+  if (reply.type === "response" && reply.ok) {
+    expect(reply.id).toBe("42");
+    expect((reply.result as any).conflicts).toEqual(["exists.txt"]);
+  }
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("rpc unknown method replies ok:false", () => {
   const srv = startServer({ port: 0, channelFactory: passthroughResponder });
   const ws = fakeWs();
