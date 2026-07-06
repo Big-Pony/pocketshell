@@ -65,7 +65,7 @@
   conn.onStatus((s) => (status = s));
   conn.onSessions((list) => {
     sessions = mergeSessions(sessions, list);
-    if (!activeId && sessions.length) activeId = sessions[0].name;
+    if (!activeId) activeId = sessions.find((s) => s.attached && !s.closed)?.name ?? "";
   });
   conn.onExit((f) => { sessions = tombstone(sessions, f.sessionId); });
   conn.onResync(() => {
@@ -99,8 +99,11 @@
     };
   });
 
-  // Top-tab list = live sessions minus the ones sent to background.
-  const topSessions = $derived(sessions.filter((s) => !backgrounded.has(s.name)));
+  // Top-tab list = adopted/live sessions plus tombstones, excluding backgrounded
+  // and foreign idle sessions (those only appear in the task panel).
+  const topSessions = $derived(
+    sessions.filter((s) => !backgrounded.has(s.name) && (s.attached || s.closed))
+  );
   const topOrder = $derived([...topSessions.map((s) => s.name), ...fileTabs.map((t) => t.id)]);
   const activeTopId = $derived(activeTop && topOrder.includes(activeTop) ? activeTop : (activeId || topOrder[0] || ""));
 
