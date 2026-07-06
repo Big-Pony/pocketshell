@@ -9,3 +9,5 @@ dist/
 bun.lockb
 .playwright-mcp
 docs/tmp
+deploy-info
+docs/superpowers/test-reports/*/*.png

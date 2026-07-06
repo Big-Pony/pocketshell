@@ -151,6 +151,34 @@ test("authorized: listDevices returns registry + env with self flag", () => {
   rmSync(file, { force: true });
 });
 
+test("authorized: a redundant pair (stale pendingPair after a dropped 'paired') is answered idempotently", () => {
+  // Repro of the reconnect loop: the phone paired once (device registered) but
+  // the 'paired' reply was lost in a drop, so its pendingPair was never cleared.
+  // Every authorized reconnect then re-sends 'pair'. The server must treat this
+  // as an idempotent success (device already trusted) and reply 'paired', not a
+  // "unknown_type" error — otherwise the client stays stuck reconnecting.
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  registry.add("PHONEPUB", "iPhone");
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry, pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(),
+  };
+  const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", false) });
+  const ws = fakeWs();
+  srv.__test.open(ws as any, "1.2.3.4");
+  srv.__test.message(ws as any, M1); // handshake -> authorized (not pending)
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "pair", code: "STALECODE", deviceName: "iPhone" })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  expect(reply).toEqual({ type: "paired", ok: true });
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
 test("transport-phase channel fail on an established conn is NOT counted toward rate limit", () => {
   const recorded: string[] = [];
   const spyLimiter = { record: (ip: string) => recorded.push(ip), isLocked: () => false };

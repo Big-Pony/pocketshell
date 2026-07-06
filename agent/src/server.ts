@@ -122,6 +122,15 @@ export function startServer(deps: Deps = {}) {
         for (const f of frames) sendSecure(conn, { type: "output", sessionId: f.sessionId, seq: f.seq, data: toB64(f.data) });
         break;
       }
+      case "pair":
+        // Reaching handleClient means this conn is already authorized (its device
+        // is registered) — the pending-pairing path is handled earlier in
+        // onMessage. A 'pair' here is a redundant re-send from a client whose
+        // pendingPair was never cleared (its original 'paired' reply was lost in
+        // a reconnect drop). Answer idempotently so the client clears pendingPair
+        // and goes online, instead of looping on an "unknown_type" error.
+        sendSecure(conn, { type: "paired", ok: true });
+        break;
       case "input": terminal.write(msg.sessionId, fromB64(msg.data)); break;
       case "resize": terminal.resize(msg.sessionId, msg.cols, msg.rows); break;
       case "kill": void terminal.kill(msg.sessionId); break;
