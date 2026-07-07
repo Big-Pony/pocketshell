@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from "vitest";
-import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, type FileNode } from "./file-tree";
+import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, type FileNode } from "./file-tree";
 
 beforeEach(() => localStorage.clear());
 
@@ -41,4 +41,22 @@ test("filterTree keeps matches and their ancestors", () => {
   expect(out.map((n) => n.name)).toContain("src");
   expect(out.find((n) => n.name === "src")!.children!.map((c) => c.name)).toEqual(["app.ts"]);
   expect(out.find((n) => n.name === "readme.md")).toBeUndefined();
+});
+
+test("root history dedups, most-recent-first, capped at 10", () => {
+  expect(loadRootHistory()).toEqual([]);
+  pushRootHistory("/a");
+  pushRootHistory("/b");
+  pushRootHistory("/a"); // moves /a back to front, no duplicate
+  expect(loadRootHistory()).toEqual(["/a", "/b"]);
+  for (let i = 0; i < 12; i++) pushRootHistory("/p" + i);
+  const h = loadRootHistory();
+  expect(h).toHaveLength(10);
+  expect(h[0]).toBe("/p11");
+  expect(h).not.toContain("/a");
+});
+
+test("loadRootHistory tolerates corrupt storage", () => {
+  localStorage.setItem("pocketshell.projectRootHistory", "{not json");
+  expect(loadRootHistory()).toEqual([]);
 });

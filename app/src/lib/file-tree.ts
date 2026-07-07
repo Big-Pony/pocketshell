@@ -1,5 +1,7 @@
 // P1 project-root bookmark + immutable tree ops. No DOM beyond localStorage.
 const ROOT_KEY = "pocketshell.projectRoot";
+const ROOT_HISTORY_KEY = "pocketshell.projectRootHistory";
+const ROOT_HISTORY_MAX = 10;
 
 export interface FileNode {
   name: string; path: string; type: "dir" | "file";
@@ -15,6 +17,19 @@ export function saveProjectRoot(path: string): void {
 }
 export function clearProjectRoot(): void {
   try { localStorage.removeItem(ROOT_KEY); } catch {}
+}
+
+export function loadRootHistory(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(ROOT_HISTORY_KEY) || "[]");
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+  } catch { return []; }
+}
+export function pushRootHistory(path: string): void {
+  try {
+    const next = [path, ...loadRootHistory().filter((p) => p !== path)].slice(0, ROOT_HISTORY_MAX);
+    localStorage.setItem(ROOT_HISTORY_KEY, JSON.stringify(next));
+  } catch {}
 }
 
 function joinPath(parent: string, name: string): string {
