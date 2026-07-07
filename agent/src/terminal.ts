@@ -3,6 +3,7 @@
 // capture, and a rename hook. Emits raw bytes only — seq/buffer is A4.
 import { spawnPty, type PtyHandle } from "./pty";
 import { inferState } from "./state";
+import { toB64 } from "./bytes";
 import type { SessionMeta, SessionState } from "./protocol";
 
 interface Live {
@@ -105,6 +106,22 @@ export class TerminalService {
       .map((l) => l.replace(/\s+$/, ""))
       .filter((l) => l.length > 0);
     return lines.length ? lines[lines.length - 1] : "";
+  }
+
+  // Export the pane's scrollback (history ABOVE the visible area) as raw bytes
+  // with SGR colours preserved, so the frontend can seed xterm's scrollback on
+  // attach. `-e` keeps colours, `-J` unwraps tmux-folded long lines, `-S -`
+  // starts at the top of history, `-E -<belowRows>` ends just above the visible
+  // screen (the live stream paints the visible area — don't duplicate it).
+  // Full-screen apps use the alternate buffer, which has no real scrollback;
+  // return empty there so we never seed an alt frame as "history".
+  history(name: string, belowRows = 1): { data: string } {
+    const alt = this.tmux(["display-message", "-p", "-t", name, "#{alternate_on}"]);
+    if (new TextDecoder().decode(alt.stdout).trim() === "1") return { data: "" };
+    const end = -Math.max(1, Math.floor(belowRows));
+    const res = this.tmux(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", String(end), "-t", name]);
+    if (res.exitCode !== 0) return { data: "" };
+    return { data: toB64(res.stdout) };
   }
 
   // Create the attach PTY and wire byte + exit callbacks. Extracted so Task 5

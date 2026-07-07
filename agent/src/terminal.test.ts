@@ -71,3 +71,28 @@ test("rename() renames a foreign (non-owned) session instead of no-op", () => {
   term.dispose();
   expect(calls).toContainEqual(["rename-session", "-t", "old", "shiny"]);
 });
+
+test("history() exports scrollback above the visible area with colours (base64)", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("0\n"); // alternate_on = 0
+      if (args.includes("capture-pane")) return ok("\x1b[36mLINE_1\x1b[39m\nLINE_2");
+      return ok();
+    },
+  });
+  const r = term.history("work");
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("\x1b[36mLINE_1\x1b[39m\nLINE_2");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-1", "-t", "work"]);
+  term.dispose();
+});
+
+test("history() returns empty for an alternate-screen (full-screen app) pane", () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("1\n") : ok("SHOULD_NOT_CAPTURE")),
+  });
+  expect(term.history("vim").data).toBe("");
+  term.dispose();
+});
