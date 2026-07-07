@@ -29,6 +29,10 @@
   // Assigned in onMount; callable from $effect blocks that react to active/font.
   let refit: () => void = () => {};
 
+  // The pane's current command maps to one of two display modes; classifyPane
+  // drives xterm's buffer to match (shell → normal buffer, app → alternate).
+  type AltMode = "shell" | "app";
+
   onMount(async () => {
     // Ensure the bundled JetBrains Mono is ready before xterm measures cells.
     // Falls back silently if the font is unavailable or the API is missing.
@@ -65,15 +69,15 @@
     term.open(host);
     fit.fit();
 
-    // --- display mode: normal (shell) vs alternate (full-screen app) ---
+    // --- display mode: normal (shell scrollback) vs alternate (full-screen app) ---
     let currentBuffer: BufferType = "normal";
     let followBottom = true;
 
     const dims = () => fit.proposeDimensions() ?? { cols: term.cols, rows: term.rows };
 
-    // Recompute rows/cols for the current buffer and push to xterm + PTY.
-    // normal → visible rows; alternate → visible rows x3 (content overflows the
-    // viewport and the outer container scrolls to reveal it).
+    // Recompute rows/cols for the current buffer and push to xterm + PTY. Normal
+    // (shell) → visible rows; alternate (full-screen app) → visible rows x3 so the
+    // app draws content that overflows the viewport and the outer container scrolls.
     refit = () => {
       const d = dims();
       const rows = virtualRows(d.rows, currentBuffer);
@@ -101,16 +105,9 @@
       });
     });
 
-    // Switch policy when the app enters/leaves the alternate screen.
-    term.buffer.onBufferChange((buf) => {
-      currentBuffer = (buf.type as BufferType) === "alternate" ? "alternate" : "normal";
-      followBottom = true;
-      refit();
-      if (currentBuffer === "normal") void reloadHistory(); // back to shell → re-seed
-    });
-
-    // Re-seed history (used on cols change and on returning to the shell). xterm
-    // wraps history to the current cols, so a width change invalidates it.
+    // Seed tmux history into the shell's normal buffer, replacing what xterm
+    // holds. Called once when the pane (re)enters shell mode and on a cols change
+    // (xterm wraps history to the current width, so a resize invalidates it).
     let lastCols = term.cols;
     const reloadHistory = async () => {
       if (currentBuffer !== "normal") return;
@@ -121,11 +118,50 @@
       } catch { /* best-effort */ }
     };
 
-    // Seed history BEFORE live attach (moved here from Task 3's inline block).
-    try {
-      const h0 = (await conn.rpc("term.history", { session: sessionId })) as { data: string };
-      if (h0?.data) term.write(fromB64(h0.data));
-    } catch { /* ignore */ }
+    // Decide whether the pane is a shell or a full-screen app by polling the
+    // agent, and switch xterm's buffer to match ONLY when the mode actually
+    // changes (edge-triggered). tmux does not forward 1049h/1049l to an attach
+    // client, so we drive the buffer ourselves — but tmux emits 1049h exactly
+    // once on the first attach frame and never toggles it for ordinary shell
+    // output, so a single explicit 1049l stays stable. Re-seeding history on
+    // every poll would clear+redraw the whole screen every 2s and race the live
+    // stream, so history is (re)seeded only on the shell edge and on cols change.
+    let paneInfoSeq = 0;
+    let appliedMode: AltMode | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    const stopPoll = () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+    };
+    const classifyPane = async () => {
+      const seq = ++paneInfoSeq;
+      try {
+        const info = (await conn.rpc("term.paneInfo", { session: sessionId })) as {
+          currentCommand: string;
+          alternateOn: boolean;
+          isShell: boolean;
+        };
+        if (seq !== paneInfoSeq) return; // stale response superseded by a newer poll
+        if (typeof info.isShell !== "boolean") return; // malformed → keep current mode
+        const mode: AltMode = info.isShell ? "shell" : "app";
+        if (mode === appliedMode) return; // edge-triggered: unchanged → leave the screen alone
+        appliedMode = mode;
+        if (mode === "shell") {
+          // Leave the alternate buffer tmux forced us into; seed history once the
+          // switch has been parsed. The write callback fires after onBufferChange
+          // has set currentBuffer = "normal", so reloadHistory won't early-return.
+          term.write("\x1b[?1049l", () => { void reloadHistory(); });
+        } else {
+          term.write("\x1b[?1049h");
+        }
+      } catch { /* keep current mode */ }
+    };
+
+    // Track xterm buffer state so classifyPane knows whether to push it.
+    term.buffer.onBufferChange((buf) => {
+      currentBuffer = (buf.type as BufferType) === "alternate" ? "alternate" : "normal";
+      followBottom = true;
+      refit();
+    });
 
     // Session is created by App (SessionTabs "new"); here we only attach + size.
     // Input is routed by the custom keyboard (S5b) through conn.sendInput —
@@ -133,6 +169,9 @@
     conn.attach(sessionId);
     refit();
     onReady?.(sessionId, term);
+    // Poll tmux pane state to keep xterm's buffer/layout in sync.
+    void classifyPane();
+    pollTimer = setInterval(() => void classifyPane(), 2000);
 
     const onResize = () => {
       if (!active) return;
@@ -144,6 +183,7 @@
     return () => {
       window.removeEventListener("resize", onResize);
       unsubscribeOutput?.();
+      stopPoll();
       term?.dispose();
     };
   });

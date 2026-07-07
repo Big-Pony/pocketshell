@@ -108,20 +108,32 @@ export class TerminalService {
     return lines.length ? lines[lines.length - 1] : "";
   }
 
-  // Export the pane's scrollback (history ABOVE the visible area) as raw bytes
-  // with SGR colours preserved, so the frontend can seed xterm's scrollback on
+  // Export the pane's full scrollback + current visible content as raw bytes
+  // with SGR colours preserved, so the frontend can seed xterm's buffer on
   // attach. `-e` keeps colours, `-J` unwraps tmux-folded long lines, `-S -`
-  // starts at the top of history, `-E -<belowRows>` ends just above the visible
-  // screen (the live stream paints the visible area — don't duplicate it).
-  // Full-screen apps use the alternate buffer, which has no real scrollback;
-  // return empty there so we never seed an alt frame as "history".
-  history(name: string, belowRows = 1): { data: string } {
-    const alt = this.tmux(["display-message", "-p", "-t", name, "#{alternate_on}"]);
-    if (new TextDecoder().decode(alt.stdout).trim() === "1") return { data: "" };
-    const end = -Math.max(1, Math.floor(belowRows));
-    const res = this.tmux(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", String(end), "-t", name]);
+  // starts at the top of history, `-E -` ends at the bottom of the visible
+  // screen. The frontend clears its own buffer before writing, so the entire
+  // captured pane is reproduced without duplication.
+  history(name: string): { data: string } {
+    const res = this.tmux(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", name]);
     if (res.exitCode !== 0) return { data: "" };
     return { data: toB64(res.stdout) };
+  }
+
+  // Snapshot of the tmux pane's current state. Used by the frontend to decide
+  // whether an alternate-screen buffer is a shell (stay in normal scrollback,
+  // seed history) or a full-screen app (3x virtual rows + outer scrolling).
+  paneInfo(name: string): { currentCommand: string; alternateOn: boolean; isShell: boolean } {
+    const res = this.tmux(["display-message", "-p", "-t", name, "#{pane_current_command}|#{alternate_on}"]);
+    if (res.exitCode !== 0) return { currentCommand: "", alternateOn: false, isShell: false };
+    const [cmd = "", alt = ""] = new TextDecoder().decode(res.stdout).trim().split("|");
+    const command = cmd.trim();
+    const shellNames = new Set(["zsh", "bash", "fish", "sh", "csh", "ksh", "tcsh", "dash"]);
+    return {
+      currentCommand: command,
+      alternateOn: alt.trim() === "1",
+      isShell: shellNames.has(command),
+    };
   }
 
   // Create the attach PTY and wire byte + exit callbacks. Extracted so Task 5

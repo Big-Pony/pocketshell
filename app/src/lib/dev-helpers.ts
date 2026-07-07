@@ -20,6 +20,7 @@ export const DEV_HELPERS_ENABLED =
 export interface DevHelperOpts {
   openFile: (path: string, mode?: "code" | "diff") => void;
   openPanel: (panel: BottomPanel) => void;
+  sendInput: (text: string) => void;
   getState: () => {
     status: string;
     projectRoot: string;
@@ -129,6 +130,10 @@ export function registerDevHelpers(opts: DevHelperOpts) {
     openFile,
     openDiff,
     openPanel,
+    sendInput: (text: string) => {
+      ensureEnabled();
+      appHelpers?.sendInput(text);
+    },
     getState,
   };
   (window as any).pocketshell = api;

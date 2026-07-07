@@ -82,6 +82,7 @@
     registerDevHelpers({
       openFile,
       openPanel,
+      sendInput: sendActive,
       getState: () => ({
         status,
         projectRoot: loadProjectRoot(),

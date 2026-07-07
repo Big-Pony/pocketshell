@@ -72,7 +72,7 @@ test("rename() renames a foreign (non-owned) session instead of no-op", () => {
   expect(calls).toContainEqual(["rename-session", "-t", "old", "shiny"]);
 });
 
-test("history() exports scrollback above the visible area with colours (base64)", () => {
+test("history() exports full pane scrollback + visible area with colours (base64)", () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => {
@@ -85,14 +85,38 @@ test("history() exports scrollback above the visible area with colours (base64)"
   const r = term.history("work");
   expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("\x1b[36mLINE_1\x1b[39m\nLINE_2");
   const cap = calls.find((a) => a.includes("capture-pane"))!;
-  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-1", "-t", "work"]);
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
   term.dispose();
 });
 
-test("history() returns empty for an alternate-screen (full-screen app) pane", () => {
+test("history() captures the pane even when alternate_on is set", () => {
   const term = new TerminalService({
-    tmux: (args) => (args[0] === "display-message" ? ok("1\n") : ok("SHOULD_NOT_CAPTURE")),
+    tmux: (args) => (args.includes("capture-pane") ? ok("ALT_LINE") : ok("1")),
   });
-  expect(term.history("vim").data).toBe("");
+  expect(term.history("vim").data).toBe(Buffer.from("ALT_LINE").toString("base64"));
+  term.dispose();
+});
+
+test("paneInfo() reports current command and alternate-screen state", () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("vim|1") : ok()),
+  });
+  expect(term.paneInfo("vim")).toEqual({ currentCommand: "vim", alternateOn: true, isShell: false });
+  term.dispose();
+});
+
+test("paneInfo() recognizes common shells", () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("zsh|1") : ok()),
+  });
+  expect(term.paneInfo("shell")).toEqual({ currentCommand: "zsh", alternateOn: true, isShell: true });
+  term.dispose();
+});
+
+test("paneInfo() returns a complete shape (incl. isShell) when tmux fails", () => {
+  // A failing display-message must NOT drop isShell: the frontend reads it as a
+  // boolean and an undefined would falsy-misclassify a shell as a full-screen app.
+  const term = new TerminalService({ tmux: () => fail() });
+  expect(term.paneInfo("gone")).toEqual({ currentCommand: "", alternateOn: false, isShell: false });
   term.dispose();
 });
