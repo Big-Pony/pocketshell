@@ -49,6 +49,9 @@
   {/if}
 
   <div class="groups">
+    {#if groups.length === 0}
+      <div class="sp-empty">还没有自定义指令，点右上角 ＋ 添加</div>
+    {/if}
     {#each groups as g (g.group)}
       <div class="sp-group">{g.group}</div>
       <div class="sp-items">
@@ -64,7 +67,7 @@
     {/each}
   </div>
 
-  <div class="hint">带 <b>⏎</b> 标记的指令插入后自动回车；不带的只插入文本。自定义指令会同步到同一 Agent 下的所有设备。</div>
+  <div class="hint">自定义指令会同步到同一 Agent 下的所有设备。</div>
 </div>
 
 <style>
@@ -131,6 +134,12 @@
   }
 
   .groups { flex: 1; overflow-y: auto; }
+  .sp-empty {
+    color: var(--dim);
+    font-size: 0.72rem;
+    text-align: center;
+    padding: 20px 8px;
+  }
   .sp-group {
     color: var(--dim);
     font-size: 0.66rem;
@@ -178,5 +187,4 @@
     margin-top: 12px;
     flex: 0 0 auto;
   }
-  .hint b { color: var(--teal); }
 </style>

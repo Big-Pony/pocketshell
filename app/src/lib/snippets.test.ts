@@ -2,22 +2,20 @@
 import { test, expect } from "vitest";
 import { BUILTIN_SNIPPETS, mergeSnippets } from "./snippets";
 
-test("builtins are non-empty and id-prefixed", () => {
-  expect(BUILTIN_SNIPPETS.length).toBeGreaterThan(0);
-  expect(BUILTIN_SNIPPETS.every((s) => s.id.startsWith("builtin:"))).toBe(true);
+test("no built-in snippets ship by default", () => {
+  expect(BUILTIN_SNIPPETS).toHaveLength(0);
 });
 
-test("mergeSnippets groups builtins then customs under the same group", () => {
-  const customs = [{ id: "c1", group: "Git", label: "amend", command: "git commit --amend", autoEnter: false }];
-  const groups = mergeSnippets(customs);
-  const git = groups.find((g) => g.group === "Git")!;
-  expect(git.items.some((i) => i.id === "c1")).toBe(true);
-  // builtin git items precede the custom one
-  const idx = git.items.findIndex((i) => i.id === "c1");
-  expect(git.items.slice(0, idx).every((i) => i.id.startsWith("builtin:"))).toBe(true);
+test("mergeSnippets groups customs by their group in first-seen order", () => {
+  const groups = mergeSnippets([
+    { id: "c1", group: "Git", label: "amend", command: "git commit --amend", autoEnter: false },
+    { id: "c2", group: "Mine", label: "x", command: "echo x", autoEnter: true },
+    { id: "c3", group: "Git", label: "status", command: "git status", autoEnter: true },
+  ]);
+  expect(groups.map((g) => g.group)).toEqual(["Git", "Mine"]);
+  expect(groups.find((g) => g.group === "Git")!.items.map((i) => i.id)).toEqual(["c1", "c3"]);
 });
 
-test("a custom group not present in builtins still appears", () => {
-  const groups = mergeSnippets([{ id: "c2", group: "Mine", label: "x", command: "echo x", autoEnter: true }]);
-  expect(groups.find((g) => g.group === "Mine")?.items).toHaveLength(1);
+test("empty customs yields no groups", () => {
+  expect(mergeSnippets([])).toEqual([]);
 });

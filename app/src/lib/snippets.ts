@@ -1,25 +1,10 @@
 // app/src/lib/snippets.ts
-// Built-in snippets are a frontend constant (never stored server-side). The
-// backend syncs only user-added custom snippets; the panel shows builtins ∪ customs.
+// Built-in snippets were removed by product decision (2026-07-07). The panel now
+// shows only user-added custom snippets, which the backend persists and syncs.
+// mergeSnippets stays as the single place that groups the panel's rows.
 import type { Snippet } from "./protocol";
 
-const b = (id: string, group: string, label: string, command: string, autoEnter = true): Snippet =>
-  ({ id: `builtin:${id}`, group, label, command, autoEnter });
-
-export const BUILTIN_SNIPPETS: Snippet[] = [
-  b("claude", "Claude Code", "claude", "claude"),
-  b("claude-cont", "Claude Code", "继续", "claude --continue"),
-  b("claude-resume", "Claude Code", "恢复", "claude --resume"),
-  b("git-status", "Git", "status", "git status"),
-  b("git-add", "Git", "add -A", "git add -A"),
-  b("git-commit", "Git", "commit", "git commit", false),
-  b("git-push", "Git", "push", "git push"),
-  b("git-log", "Git", "log", "git log --oneline -20"),
-  b("git-diff", "Git", "diff", "git diff"),
-  b("proj-test", "项目", "bun test", "bun test"),
-  b("proj-dev", "项目", "dev", "npm run dev"),
-  b("proj-ls", "项目", "ls -la", "ls -la"),
-];
+export const BUILTIN_SNIPPETS: Snippet[] = [];
 
 export interface SnippetGroup { group: string; items: Snippet[] }
 
