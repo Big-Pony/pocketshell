@@ -30,7 +30,9 @@
   let archiving = $state(false);
   let historyOpen = $state(false);
   let historyList = $state<string[]>([]);
+  let historyDlg = $state<HTMLElement | null>(null);
   function openHistory() { historyList = loadRootHistory(); historyOpen = true; }
+  $effect(() => { if (historyOpen && historyDlg) historyDlg.focus(); });
 
   async function doDownloadFile(n: FileNode) {
     try {
@@ -112,11 +114,16 @@
     try { await conn.rpc("fs.op", { op: "delete", path: n.path }); await refreshParent(n.path); }
     catch (e: any) { notice = e?.message ?? "删除失败"; }
   }
+  function resetScroll() {
+    setBrowseCache({ scrollTop: 0 });
+    if (treeEl) treeEl.scrollTop = 0;
+  }
   function applyRoot(path: string) {
     saveProjectRoot(path);
     pushRootHistory(path);
     root = path;
     nodes = [];
+    resetScroll();
     void loadRoot();
   }
   function setRoot(n: FileNode) { applyRoot(n.path); }
@@ -124,6 +131,7 @@
     clearProjectRoot();
     root = "/";
     nodes = [];
+    resetScroll();
     void loadRoot();
   }
 
@@ -154,13 +162,15 @@
     setBrowseCache({ loaded: true });
   });
 
-  // Save the scroll position on every genuine scroll. Ignore scroll events that
-  // fire while the component is being torn down (the element may report 0 after
-  // layout changes during destruction).
+  // Save the scroll position on every genuine scroll. Capture the value into a
+  // closure variable immediately so a rapid panel switch can still flush the last
+  // known position during onDestroy (the element's live scrollTop may be 0 by then).
   let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
   let destroying = false;
+  let lastScrollTop = 0;
   function onScroll() {
     if (!treeEl || destroying) return;
+    lastScrollTop = treeEl.scrollTop;
     if (scrollTimeout) clearTimeout(scrollTimeout);
     scrollTimeout = setTimeout(() => {
       if (treeEl && !destroying) setBrowseCache({ scrollTop: treeEl.scrollTop });
@@ -169,6 +179,7 @@
   onDestroy(() => {
     destroying = true;
     if (scrollTimeout) clearTimeout(scrollTimeout);
+    setBrowseCache({ scrollTop: lastScrollTop });
   });
 </script>
 
@@ -248,13 +259,13 @@
   {/if}
 
   {#if historyOpen}
-    <div class="confirm-overlay" role="dialog" tabindex="-1" aria-modal="true"
-      onclick={() => (historyOpen = false)}
-      onkeydown={(e) => e.key === 'Escape' && (historyOpen = false)}>
-      <div class="confirm-dlg" role="button" tabindex="-1" aria-label="历史项目根"
+    <div class="confirm-overlay" role="presentation"
+      onclick={() => (historyOpen = false)}>
+      <div class="confirm-dlg" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="history-title"
+        bind:this={historyDlg}
         onclick={(e) => e.stopPropagation()}
-        onkeydown={(e) => e.stopPropagation()}>
-        <div class="dlg-title">切换项目根</div>
+        onkeydown={(e) => e.key === 'Escape' && (historyOpen = false)}>
+        <div class="dlg-title" id="history-title">切换项目根</div>
         {#if historyList.length === 0}
           <div class="hist-empty">暂无历史</div>
         {:else}
