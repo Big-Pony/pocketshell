@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onMount, onDestroy, tick } from "svelte";
   import { Connection } from "../lib/connection";
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
     toFileNodes, setChildren, collapse, filterTree, type FileNode
   } from "../lib/file-tree";
+  import { getBrowseCache, setBrowseCache } from "../lib/file-tree-cache";
   import { IDLE, press, type ArmState } from "../lib/confirm-armed";
   import ContextMenu from "./ContextMenu.svelte";
   import UploadDialog from "./UploadDialog.svelte";
@@ -13,9 +15,11 @@
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
   } = $props();
 
-  let root = $state(loadProjectRoot());
-  let nodes = $state<FileNode[]>([]);
-  let query = $state("");
+  const cached0 = getBrowseCache();
+  let root = $state(cached0.root);
+  let nodes = $state<FileNode[]>(cached0.nodes);
+  let query = $state(cached0.query);
+  let treeEl = $state<HTMLElement | null>(null);
   let notice = $state("");
   let menuFor = $state<FileNode | null>(null);
   let menuAnchor = $state<HTMLElement | undefined>();
@@ -127,20 +131,32 @@
   }
   const rows = $derived(flatten(view));
 
-  // Load the root once on mount. A guard flag (not `!nodes.length`) is required:
-  // loadRoot's catch resets nodes=[], and setRoot/unsetRoot also clear it, so an
-  // `!nodes.length` effect would re-fire forever on a bad/deleted root or an
-  // offline rpc reject — an unbounded fs.tree storm. setRoot/unsetRoot call
-  // loadRoot() themselves, so the effect only needs to cover the initial mount.
-  let didLoad = false;
-  $effect(() => { if (!didLoad) { didLoad = true; void loadRoot(); } });
+  // Persist browse state to the module cache on every change so a remount (panel
+  // switch / fullscreen toggle) can restore it verbatim.
+  $effect(() => { setBrowseCache({ root, nodes, query }); });
+
+  // First mount does the fs.tree load; later remounts reuse the cached tree (no
+  // request, no flicker) and just restore the scroll position. onMount runs once
+  // per mount (not reactively), so there is no fs.tree storm risk.
+  onMount(async () => {
+    if (getBrowseCache().loaded && nodes.length) {
+      await tick();
+      if (treeEl) treeEl.scrollTop = getBrowseCache().scrollTop;
+      return;
+    }
+    await loadRoot();
+    setBrowseCache({ loaded: true });
+  });
+
+  // Save the scroll position when this instance is torn down.
+  onDestroy(() => { if (treeEl) setBrowseCache({ scrollTop: treeEl.scrollTop }); });
 </script>
 
 <div class="ft">
   <div class="pathbar mono">{root}</div>
   <input class="filter" bind:value={query} placeholder="过滤当前已加载节点…" />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
-  <ul class="tree">
+  <ul class="tree" bind:this={treeEl}>
     {#each rows as { n, depth } (n.path)}
       <li class="row-wrap">
         <button class="row" style="padding-left: {6 + depth * 14}px"
