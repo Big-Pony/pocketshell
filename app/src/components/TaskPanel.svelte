@@ -94,12 +94,10 @@
   {#if sessions.length === 0}
     <li class="empty">No sessions. Tap ＋ to create one.</li>
   {/if}
+  <li class="pnote">
+    <b>断线保护</b>：以上会话全部由服务器端 Agent（tmux）托管，App 只是 attach 上去的窗口。
+  </li>
 </ul>
-
-<div class="pnote">
-  <b>长按会话</b>：重命名、复制输出、终止、关闭标签。<br>
-  <b>断线保护</b>：以上会话全部由服务器端 Agent（tmux）托管，App 只是 attach 上去的窗口。
-</div>
 
 </div>
 
@@ -214,8 +212,7 @@
     border-radius: var(--radius-lg);
     padding: 9px 12px;
     line-height: 1.7;
-    margin: 0 8px 8px;
-    flex: 0 0 auto;
+    margin-top: 4px;
   }
   .pnote b { color: var(--teal); font-weight: 600; }
 </style>

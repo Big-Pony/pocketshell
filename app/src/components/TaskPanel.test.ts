@@ -27,3 +27,9 @@ test("adopted running session shows 进入", () => {
   const { getByText } = renderPanel([sess({ name: "s1", state: "run", attached: true })]);
   expect(getByText("进入")).toBeInTheDocument();
 });
+
+test("keeps the disconnect note but drops the long-press hint", () => {
+  const { getByText, queryByText } = renderPanel([]);
+  expect(getByText(/断线保护/)).toBeInTheDocument();
+  expect(queryByText(/长按会话/)).toBeNull();
+});
