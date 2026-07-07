@@ -3,6 +3,7 @@
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { Connection } from "../lib/connection";
+  import { fromB64 } from "../lib/bytes";
 
   let {
     conn,
@@ -43,6 +44,7 @@
       // without a UTF-8 locale under launchd; fixed by `tmux -u` in
       // agent/src/terminal.ts. This chain is kept as a belt-and-suspenders.
       fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
+      scrollback: 5000,
       unicodeVersion: "11",
       convertEol: false,
       cursorBlink: true,
@@ -62,6 +64,18 @@
     const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId === sessionId) term.write(f.data);
     });
+
+    // Seed xterm's scrollback with the tmux session's history BEFORE subscribing
+    // to the live stream, so history lands ABOVE the current screen. xterm is
+    // append-only (no prepend) — write ordering IS the mechanism. Backend
+    // returns empty for alternate-screen panes (full-screen apps have no real
+    // scrollback). Best-effort: never block attach on it.
+    try {
+      const h = (await conn.rpc("term.history", { session: sessionId })) as { data: string };
+      if (h?.data) term.write(fromB64(h.data));
+    } catch {
+      // ignore; continue to live attach
+    }
 
     // Session is created by App (SessionTabs "new"); here we only attach + size.
     // Input is routed by the custom keyboard (S5b) through conn.sendInput —
