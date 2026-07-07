@@ -3,6 +3,7 @@
   import { Connection } from "../lib/connection";
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
+    loadRootHistory, pushRootHistory,
     toFileNodes, setChildren, collapse, filterTree, type FileNode
   } from "../lib/file-tree";
   import { getBrowseCache, setBrowseCache } from "../lib/file-tree-cache";
@@ -27,6 +28,9 @@
   let arm = $state<ArmState>(IDLE);
   let uploadDir = $state<string | null>(null);
   let archiving = $state(false);
+  let historyOpen = $state(false);
+  let historyList = $state<string[]>([]);
+  function openHistory() { historyList = loadRootHistory(); historyOpen = true; }
 
   async function doDownloadFile(n: FileNode) {
     try {
@@ -108,12 +112,14 @@
     try { await conn.rpc("fs.op", { op: "delete", path: n.path }); await refreshParent(n.path); }
     catch (e: any) { notice = e?.message ?? "删除失败"; }
   }
-  function setRoot(n: FileNode) {
-    saveProjectRoot(n.path);
-    root = n.path;
+  function applyRoot(path: string) {
+    saveProjectRoot(path);
+    pushRootHistory(path);
+    root = path;
     nodes = [];
     void loadRoot();
   }
+  function setRoot(n: FileNode) { applyRoot(n.path); }
   function unsetRoot() {
     clearProjectRoot();
     root = "/";
@@ -153,7 +159,10 @@
 </script>
 
 <div class="ft">
-  <div class="pathbar mono">{root}</div>
+  <div class="pathbar">
+    <button class="root-switch" aria-label="切换项目根" onclick={openHistory}>⇄</button>
+    <span class="path-text mono">{root}</span>
+  </div>
   <input class="filter" bind:value={query} placeholder="过滤当前已加载节点…" />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
   <ul class="tree" bind:this={treeEl}>
@@ -223,11 +232,41 @@
       </div>
     </div>
   {/if}
+
+  {#if historyOpen}
+    <div class="confirm-overlay" role="dialog" tabindex="-1" aria-modal="true"
+      onclick={() => (historyOpen = false)}
+      onkeydown={(e) => e.key === 'Escape' && (historyOpen = false)}>
+      <div class="confirm-dlg" role="button" tabindex="-1" aria-label="历史项目根"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}>
+        <div class="dlg-title">切换项目根</div>
+        {#if historyList.length === 0}
+          <div class="hist-empty">暂无历史</div>
+        {:else}
+          <ul class="hist-list">
+            {#each historyList as p (p)}
+              <li>
+                <button class="hist-item mono" class:cur={p === root} disabled={p === root}
+                  onclick={() => { applyRoot(p); historyOpen = false; }}>{p}</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <div class="dlg-btns">
+          <button onclick={() => (historyOpen = false)}>取消</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
   .ft { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
-  .pathbar { font-size: 0.68rem; color: var(--dim); padding: 6px 10px; overflow-x: auto; white-space: nowrap; }
+  .pathbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
+  .root-switch { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
+  .root-switch:active { background: var(--key); }
+  .path-text { flex: 1; min-width: 0; font-size: 0.68rem; color: var(--dim); overflow-x: auto; white-space: nowrap; }
   .filter { margin: 0 8px 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 6px 8px; font-size: 0.72rem; }
   .ft-notice { font-size: 0.68rem; color: var(--amber); padding: 2px 10px; }
   .tree { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
@@ -263,4 +302,11 @@
   .arch-overlay .arch-txt { color: var(--text); font-size: 0.75rem; text-align: center; }
   .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--teal); border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hist-list { list-style: none; margin: 0 0 14px; padding: 0; max-height: 44vh; overflow-y: auto; text-align: left; }
+  .hist-list li { margin-bottom: 5px; }
+  .hist-item { width: 100%; text-align: left; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 8px 10px; font-size: 0.7rem; word-break: break-all; }
+  .hist-item.cur { border-color: var(--teal); color: var(--teal); }
+  .hist-item:disabled { opacity: 0.7; }
+  .hist-empty { color: var(--dim); font-size: 0.72rem; margin-bottom: 14px; }
 </style>
