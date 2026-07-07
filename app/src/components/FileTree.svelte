@@ -154,8 +154,22 @@
     setBrowseCache({ loaded: true });
   });
 
-  // Save the scroll position when this instance is torn down.
-  onDestroy(() => { if (treeEl) setBrowseCache({ scrollTop: treeEl.scrollTop }); });
+  // Save the scroll position on every genuine scroll. Ignore scroll events that
+  // fire while the component is being torn down (the element may report 0 after
+  // layout changes during destruction).
+  let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
+  let destroying = false;
+  function onScroll() {
+    if (!treeEl || destroying) return;
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      if (treeEl && !destroying) setBrowseCache({ scrollTop: treeEl.scrollTop });
+    }, 150);
+  }
+  onDestroy(() => {
+    destroying = true;
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+  });
 </script>
 
 <div class="ft">
@@ -165,7 +179,7 @@
   </div>
   <input class="filter" bind:value={query} placeholder="过滤当前已加载节点…" />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
-  <ul class="tree" bind:this={treeEl}>
+  <ul class="tree" bind:this={treeEl} onscroll={onScroll}>
     {#each rows as { n, depth } (n.path)}
       <li class="row-wrap">
         <button class="row" style="padding-left: {6 + depth * 14}px"
