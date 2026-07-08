@@ -197,6 +197,14 @@ export class TerminalService {
       // `-u`: create the tmux server in UTF-8 mode so panes store/parse CJK
       // correctly regardless of the (often absent under launchd) locale. See attach().
       const args = ["-u", "new-session", "-d", "-s", name];
+      // `-e`: seed the session environment so the shell (and any `claude` it
+      // launches) inherit CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1. This forces
+      // Claude Code into its classic renderer, which keeps the full transcript in
+      // the NORMAL buffer (native scrollback) instead of a scrollback-less
+      // alternate screen — so a long plan (hundreds of lines) is scrollable on the
+      // phone and the input line stays visible. Also dodges the fullscreen
+      // renderer's CJK-copy-corruption bug. (tmux 3.0+; `-e` before the command.)
+      args.push("-e", "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1");
       if (opt.cwd) args.push("-c", opt.cwd);
       if (opt.cmd) args.push(opt.cmd);
       const res = this.tmux(args);

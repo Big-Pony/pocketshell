@@ -58,7 +58,22 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
       if (!killed) terminal.write(data);
     },
     resize(cols, rows) {
-      if (!killed) terminal.resize(cols, rows);
+      if (killed) return;
+      terminal.resize(cols, rows);
+      // Bun.Terminal.resize updates the PTY winsize (TIOCSWINSZ) but does NOT
+      // deliver SIGWINCH to the child (verified: bash sees the new `stty size`
+      // because it re-reads live, but a SIGWINCH trap never fires). tmux and
+      // other TUIs only re-read their size on SIGWINCH, so without this the
+      // tmux attach client stays pinned at its spawn size (80x24) while the
+      // window is resized independently. The size mismatch makes tmux paint the
+      // client's overflow area with `·` fill chars ("session-attach dots"),
+      // which stream into xterm and look like "Chinese turned into dots" on the
+      // phone. Nudge the child with SIGWINCH so it renegotiates to the new size.
+      try {
+        proc.kill("SIGWINCH");
+      } catch {
+        // child already exited — nothing to notify
+      }
     },
     kill() {
       killed = true;

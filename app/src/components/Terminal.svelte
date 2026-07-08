@@ -4,7 +4,6 @@
   import { FitAddon } from "@xterm/addon-fit";
   import { Connection } from "../lib/connection";
   import { fromB64 } from "../lib/bytes";
-  import { virtualRows, scrollMode, type BufferType } from "../lib/terminal-view";
 
   let {
     conn,
@@ -29,9 +28,14 @@
   // Assigned in onMount; callable from $effect blocks that react to active/font.
   let refit: () => void = () => {};
 
-  // The pane's current command maps to one of two display modes; classifyPane
-  // drives xterm's buffer to match (shell → normal buffer, app → alternate).
-  type AltMode = "shell" | "app";
+  // Which tmux buffer the pane is in, driven by tmux's real alternate_on state.
+  // Shells AND classic-renderer Claude Code live in the normal buffer (native
+  // scrollback); only genuine full-screen apps (vim/htop) use the alternate
+  // buffer. Claude Code is forced into its classic renderer via
+  // CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 (agent-side), so its long output
+  // lands in scrollback that the phone can scroll natively.
+  type PaneMode = "normal" | "alt";
+  type BufferType = "normal" | "alternate";
 
   onMount(async () => {
     // Ensure the bundled JetBrains Mono is ready before xterm measures cells.
@@ -67,42 +71,39 @@
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays
+    // editable the phone keyboard pops up (and, because our on-screen keys
+    // preventDefault focus-steal, never leaves). xterm is display-only here
+    // (disableStdin:true), so make the helper textarea non-editable + inputmode
+    // none so tapping the terminal never raises the system IME.
+    const helper = host.querySelector("textarea.xterm-helper-textarea") as HTMLTextAreaElement | null;
+    if (helper) {
+      helper.readOnly = true;
+      helper.setAttribute("inputmode", "none");
+      helper.setAttribute("tabindex", "-1");
+      helper.blur();
+    }
     fit.fit();
 
-    // --- display mode: normal (shell scrollback) vs alternate (full-screen app) ---
+    // Buffer the pane is in; gates history seeding (only in the normal buffer).
     let currentBuffer: BufferType = "normal";
-    let followBottom = true;
 
     const dims = () => fit.proposeDimensions() ?? { cols: term.cols, rows: term.rows };
 
-    // Recompute rows/cols for the current buffer and push to xterm + PTY. Normal
-    // (shell) → visible rows; alternate (full-screen app) → visible rows x3 so the
-    // app draws content that overflows the viewport and the outer container scrolls.
+    // Size xterm + the PTY 1:1 with the visible viewport. Long output is handled
+    // by the normal buffer's native scrollback (Claude Code runs in its classic
+    // renderer, so its transcript accumulates in scrollback instead of a fixed
+    // alt-screen). No virtual-row inflation → the input line stays the last row
+    // and the cursor stays visible (no scroll-to-find-the-cursor).
     refit = () => {
       const d = dims();
-      const rows = virtualRows(d.rows, currentBuffer);
-      if (term.cols !== d.cols || term.rows !== rows) term.resize(d.cols, rows);
-      conn.resize(sessionId, d.cols, rows);
-      const container = scrollMode(currentBuffer) === "container";
-      host.classList.toggle("alt-scroll", container);
-      if (container && followBottom) host.scrollTop = host.scrollHeight;
+      if (term.cols !== d.cols || term.rows !== d.rows) term.resize(d.cols, d.rows);
+      conn.resize(sessionId, d.cols, d.rows);
     };
-
-    // In the alternate buffer xterm converts wheel events into arrow keys; return
-    // false so the event bubbles to the outer container and scrolls it instead.
-    term.attachCustomWheelEventHandler(() => currentBuffer !== "alternate");
-
-    // Keep the alt-mode container pinned to the bottom unless the user scrolled up.
-    host.addEventListener("scroll", () => {
-      if (currentBuffer !== "alternate") return;
-      followBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 4;
-    });
 
     const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId !== sessionId) return;
-      term.write(f.data, () => {
-        if (currentBuffer === "alternate" && followBottom) host.scrollTop = host.scrollHeight;
-      });
+      term.write(f.data);
     });
 
     // Seed tmux history into the shell's normal buffer, replacing what xterm
@@ -118,16 +119,14 @@
       } catch { /* best-effort */ }
     };
 
-    // Decide whether the pane is a shell or a full-screen app by polling the
-    // agent, and switch xterm's buffer to match ONLY when the mode actually
-    // changes (edge-triggered). tmux does not forward 1049h/1049l to an attach
-    // client, so we drive the buffer ourselves — but tmux emits 1049h exactly
-    // once on the first attach frame and never toggles it for ordinary shell
-    // output, so a single explicit 1049l stays stable. Re-seeding history on
+    // Poll tmux's real alternate_on state and switch xterm's buffer to match,
+    // ONLY on an actual change (edge-triggered). tmux does not forward 1049h/1049l
+    // to an attach client, so we drive the buffer ourselves. Re-seeding history on
     // every poll would clear+redraw the whole screen every 2s and race the live
-    // stream, so history is (re)seeded only on the shell edge and on cols change.
+    // stream, so history is (re)seeded only on the edge into the normal buffer and
+    // on a cols change.
     let paneInfoSeq = 0;
-    let appliedMode: AltMode | null = null;
+    let appliedMode: PaneMode | null = null;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
     const stopPoll = () => {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
@@ -141,14 +140,15 @@
           isShell: boolean;
         };
         if (seq !== paneInfoSeq) return; // stale response superseded by a newer poll
-        if (typeof info.isShell !== "boolean") return; // malformed → keep current mode
-        const mode: AltMode = info.isShell ? "shell" : "app";
+        if (typeof info.alternateOn !== "boolean") return; // malformed → keep current mode
+        const mode: PaneMode = info.alternateOn ? "alt" : "normal";
         if (mode === appliedMode) return; // edge-triggered: unchanged → leave the screen alone
         appliedMode = mode;
-        if (mode === "shell") {
-          // Leave the alternate buffer tmux forced us into; seed history once the
-          // switch has been parsed. The write callback fires after onBufferChange
-          // has set currentBuffer = "normal", so reloadHistory won't early-return.
+        if (mode === "normal") {
+          // Back to the normal buffer: leave any alt buffer and reseed history so
+          // prior scrollback (incl. Claude Code's classic-renderer transcript) is
+          // visible. The write callback fires after onBufferChange has set
+          // currentBuffer = "normal", so reloadHistory won't early-return.
           term.write("\x1b[?1049l", () => { void reloadHistory(); });
         } else {
           term.write("\x1b[?1049h");
@@ -156,11 +156,9 @@
       } catch { /* keep current mode */ }
     };
 
-    // Track xterm buffer state so classifyPane knows whether to push it.
+    // Track xterm's buffer so reloadHistory knows it's in the normal buffer.
     term.buffer.onBufferChange((buf) => {
       currentBuffer = (buf.type as BufferType) === "alternate" ? "alternate" : "normal";
-      followBottom = true;
-      refit();
     });
 
     // Session is created by App (SessionTabs "new"); here we only attach + size.
@@ -214,13 +212,6 @@
     padding: 6px 8px;
   }
   .term :global(.xterm-viewport) {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
-  /* Alternate-screen (full-screen app): xterm overflows the viewport at 3x rows;
-     let the outer container scroll to reveal content above/below the fold. */
-  .term:global(.alt-scroll) {
-    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
   }
