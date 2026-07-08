@@ -111,6 +111,8 @@
           <button class="act line" onclick={() => onCommand({ type: "lineDown" })}>下一行</button>
           <button class="key" onpointerdown={(e) => { e.preventDefault(); press("Home"); }}>Home</button>
           <button class="key" onpointerdown={(e) => { e.preventDefault(); press("End"); }}>End</button>
+          <button class="enter-fab" aria-label="确认（回车）"
+            onpointerdown={(e) => { e.preventDefault(); press("Enter"); }}>确认</button>
         </div>
       </div>
       <div class="ops-bottom">
@@ -325,7 +327,29 @@
     grid-template-rows: 1fr 1fr;
     gap: 4px;
     flex: 1 1 0;
+    position: relative;
   }
+  .enter-fab {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 3em;
+    height: 3em;
+    border-radius: 50%;
+    background: var(--teal);
+    color: var(--teal-dark);
+    border: 2px solid var(--bg);
+    font-size: 0.72rem;
+    font-weight: 600;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+    user-select: none;
+  }
+  .enter-fab:active { filter: brightness(0.92); }
   .ops-side .act,
   .ops-side .key {
     min-height: 3em;
