@@ -61,13 +61,25 @@
   function autoFocus(node: HTMLElement) { node.focus(); }
 
   let strip = $state<HTMLElement | null>(null);
+  // First scroll (e.g. a restored far-right active tab on mount) jumps instantly;
+  // later scrolls animate.
+  let firstScroll = true;
   // When the active tab changes, scroll it flush-left so it's always visible.
   // Ordering is NOT changed — this is scroll-only (requirement 6).
   $effect(() => {
     const id = activeId; // track
     if (!strip) return;
     const el = strip.querySelector<HTMLElement>(".tab.active");
-    if (el) strip.scrollTo({ left: el.offsetLeft, behavior: "smooth" });
+    if (el) {
+      // Use bounding-rect deltas rather than el.offsetLeft: offsetLeft is
+      // relative to the offsetParent (.tabs-wrap, position:relative in
+      // App.svelte), not to .strip itself, so it includes that ancestor's
+      // padding and overshoots the scroll. Rect deltas are relative to the
+      // viewport, so they're correct regardless of offsetParent/CSS position.
+      const delta = el.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+      strip.scrollTo({ left: strip.scrollLeft + delta, behavior: firstScroll ? "auto" : "smooth" });
+      firstScroll = false;
+    }
   });
 </script>
 
