@@ -247,7 +247,6 @@
         const t = activeTerm(); if (!t) break;
         const b = t.buffer.active;
         sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
-        t.focus();
         applySel(t);
         break;
       }
@@ -269,7 +268,6 @@
           // First hop grabs the last real output line (just above the prompt).
           const startRow = Math.max(0, Math.min(maxRow, b.baseY + b.cursorY - 1));
           sel = beginLine(startRow);
-          t.focus();
         } else {
           sel = moveFocus(sel, c.type === "lineUp" ? "up" : "down", { cols: t.cols, maxRow });
         }
