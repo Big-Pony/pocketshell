@@ -136,6 +136,15 @@ export class TerminalService {
     };
   }
 
+  // The focused pane's real working directory (tmux #{pane_current_path}).
+  // Used by the file panel's "set project root to focused tab" button. `-u`
+  // forces UTF-8 so CJK path segments aren't sanitized under a C locale.
+  pwd(name: string): { pwd: string } {
+    const res = this.tmux(["-u", "display-message", "-p", "-t", name, "#{pane_current_path}"]);
+    if (res.exitCode !== 0) return { pwd: "" };
+    return { pwd: new TextDecoder().decode(res.stdout).trim() };
+  }
+
   // Create the attach PTY and wire byte + exit callbacks. Extracted so Task 5
   // can re-attach on detach without duplicating wiring. Slice-3 stays S1-style:
   // PTY exit deletes the session (real-vs-detach split lands in Task 5).

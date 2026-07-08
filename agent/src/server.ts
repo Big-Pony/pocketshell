@@ -197,6 +197,7 @@ export function startServer(deps: Deps = {}) {
             case "git.status": result = gitStatus(String(p.cwd)); break;
             case "term.history": result = terminal.history(String(p.session)); break;
             case "term.paneInfo": result = terminal.paneInfo(String(p.session)); break;
+            case "terminal.pwd": result = terminal.pwd(String(p.session)); break;
             default:
               sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
               return;
