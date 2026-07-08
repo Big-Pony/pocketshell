@@ -7,7 +7,10 @@ export interface Commit {
 }
 
 export function runGit(cwd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
-  const res = Bun.spawnSync(["git", "-C", cwd, ...args]);
+  // core.quotepath=false: keep non-ASCII (CJK) paths verbatim in UTF-8 instead
+  // of git's default C-style octal escaping ("\346..."), which the file/git
+  // panel would otherwise render as mojibake.
+  const res = Bun.spawnSync(["git", "-c", "core.quotepath=false", "-C", cwd, ...args]);
   return {
     ok: res.exitCode === 0,
     stdout: new TextDecoder().decode(res.stdout),
