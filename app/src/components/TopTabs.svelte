@@ -59,10 +59,20 @@
   }
 
   function autoFocus(node: HTMLElement) { node.focus(); }
+
+  let strip = $state<HTMLElement | null>(null);
+  // When the active tab changes, scroll it flush-left so it's always visible.
+  // Ordering is NOT changed — this is scroll-only (requirement 6).
+  $effect(() => {
+    const id = activeId; // track
+    if (!strip) return;
+    const el = strip.querySelector<HTMLElement>(".tab.active");
+    if (el) strip.scrollTo({ left: el.offsetLeft, behavior: "smooth" });
+  });
 </script>
 
 <div class="toptabs">
-  <nav class="strip">
+  <nav class="strip" bind:this={strip}>
     {#each tabs as t (t.id)}
       <button
         class="tab"
