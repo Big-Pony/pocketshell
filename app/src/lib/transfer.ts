@@ -4,7 +4,14 @@
 import { toB64, fromB64 } from "./bytes";
 
 export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
-export const CHUNK_BYTES = 512 * 1024;
+
+// Chunk size is bounded by the Noise transport: SecureChannel encrypts each RPC
+// as ONE ChaChaPoly message, and noise-handshake hard-caps ciphertext at 65535
+// bytes (plaintext ≤ 65519). A chunk travels as base64 in dataB64 (×4/3) inside
+// a small JSON envelope, so the raw chunk must stay well under ~48KB. 45KB keeps
+// base64 (~61.4KB) + envelope + 16B MAC comfortably below the cap. Do NOT raise
+// this without adding transport-level framing (see spec non-goals).
+export const CHUNK_BYTES = 45 * 1024;
 
 export type RpcLike = { rpc(method: string, params?: unknown): Promise<unknown> };
 export type UploadItem = { name: string; size: number; blob: Blob; destName: string };

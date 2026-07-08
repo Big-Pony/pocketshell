@@ -1,5 +1,5 @@
-import { test, expect, vi, beforeAll } from "vitest";
-import { humanSize, chunkOffsets, childPath, uploadFiles, baseName, downloadFileBlob, downloadFolder } from "./transfer";
+import { test, expect, vi, beforeAll, describe } from "vitest";
+import { humanSize, chunkOffsets, childPath, uploadFiles, baseName, downloadFileBlob, downloadFolder, CHUNK_BYTES } from "./transfer";
 import { toB64 } from "./bytes";
 
 beforeAll(() => {
@@ -85,6 +85,19 @@ test("downloadFileBlob probes size then concatenates chunks until eof", async ()
 test("downloadFileBlob rejects files over MAX_TRANSFER_BYTES with a localized message", async () => {
   const rpc = vi.fn(async () => ({ dataB64: "", eof: false, size: 200 * 1024 * 1024 + 1 }));
   await expect(downloadFileBlob({ rpc } as any, "/huge.bin")).rejects.toThrow("文件超过 200MB 上限");
+});
+
+describe("chunk size stays under the Noise message ceiling", () => {
+  test("base64 + json envelope + MAC fits in one Noise message (<65535)", () => {
+    const b64 = Math.ceil(CHUNK_BYTES / 3) * 4;
+    const envelope = 300;
+    const mac = 16;
+    expect(b64 + envelope + mac).toBeLessThan(65535);
+  });
+  test("splits a 700KB file into multiple chunks", () => {
+    const windows = chunkOffsets(700 * 1024, CHUNK_BYTES);
+    expect(windows.length).toBeGreaterThan(1);
+  });
 });
 
 test("downloadFolder archives, downloads, then deletes the temp archive", async () => {
