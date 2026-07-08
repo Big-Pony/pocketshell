@@ -119,7 +119,7 @@
         <button class="act" onclick={() => onCommand({ type: "selCopy" })}>复制选区</button>
         <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>复制后续</button>
         <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>全选复制</button>
-        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>复制可见</button>
+        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>复制输出</button>
         <button class="act" onclick={() => onCommand({ type: "paste" })}>粘贴</button>
       </div>
       <div class="ops-nav">
