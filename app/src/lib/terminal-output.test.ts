@@ -31,3 +31,10 @@ test("collapses trailing blank lines to a single newline-free string", () => {
   const b = buf(["❯ echo hi", "hi", "", "", "❯ "]);
   expect(lastOutput(b, 5)).toBe("hi");
 });
+
+test("ignores mid-line prompt-like chars (PROMPT_RE anchored to line start)", () => {
+  // "building 50% done" contains "% " but is output, not a prompt line. Without
+  // the ^ anchor it would be mis-detected as the command boundary and truncate.
+  const b = buf(["❯ make", "building 50% done", "linking", "❯ "]);
+  expect(lastOutput(b, 4)).toBe("building 50% done\nlinking");
+});

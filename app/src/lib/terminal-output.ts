@@ -3,7 +3,9 @@
 // shell prompt line, take everything after it. If the current prompt is an empty
 // waiting prompt, walk up to the previous command. With no prompt at all (Claude
 // Code's full-screen TUI has none) fall back to the visible viewport.
-export const PROMPT_RE = /[❯➜$#%]\s/;
+// Anchored to line start: real shell prompts sit at column 0 (after trim), so
+// output like "building 50% done" or "$ x" mid-line isn't mis-read as a boundary.
+export const PROMPT_RE = /^[❯➜$#%]\s/;
 
 export interface BufferLike {
   length: number;
