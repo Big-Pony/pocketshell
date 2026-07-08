@@ -3,7 +3,7 @@
   import { Connection } from "../lib/connection";
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
-    loadRootHistory, pushRootHistory,
+    loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow,
     toFileNodes, setChildren, collapse, filterTree, type FileNode
   } from "../lib/file-tree";
   import { getBrowseCache, setBrowseCache } from "../lib/file-tree-cache";
@@ -12,8 +12,11 @@
   import UploadDialog from "./UploadDialog.svelte";
   import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/transfer";
 
-  let { conn, onOpenFile, onCd }: {
+  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, onToast }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
+    getFocusedPwd: () => Promise<{ pwd: string } | { error: string }>;
+    rootTick: number;
+    onToast: (msg: string) => void;
   } = $props();
 
   const cached0 = getBrowseCache();
@@ -33,6 +36,43 @@
   let historyDlg = $state<HTMLElement | null>(null);
   function openHistory() { historyList = loadRootHistory(); historyOpen = true; }
   $effect(() => { if (historyOpen && historyDlg) historyDlg.focus(); });
+
+  let following = $state(loadRootFollow());
+  let anchorTapTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function setRootFromFocus() {
+    const r = await getFocusedPwd();
+    if ("error" in r) { onToast(r.error); return; }
+    applyRoot(r.pwd);
+    onToast("项目根已设为 " + r.pwd);
+  }
+  async function toggleFollow() {
+    const next = !following;
+    if (next) {
+      const r = await getFocusedPwd();
+      if ("error" in r) { onToast("没有活跃终端，无法绑定项目根跟随"); return; }
+      applyRoot(r.pwd);
+    }
+    following = next;
+    saveRootFollow(next);
+    onToast(next ? "项目根开始跟随聚焦终端" : "已取消项目根跟随");
+  }
+  // Single tap sets root once; double tap toggles follow (cancels the pending single).
+  function onAnchorPointer() {
+    if (anchorTapTimer) { clearTimeout(anchorTapTimer); anchorTapTimer = null; void toggleFollow(); return; }
+    anchorTapTimer = setTimeout(() => { anchorTapTimer = null; void setRootFromFocus(); }, 230);
+  }
+
+  // React to App bumping rootTick (follow re-pointed the bookmark): re-read + reload.
+  let lastTick = -1;
+  $effect(() => {
+    const tick = rootTick;
+    if (tick === lastTick) return;
+    lastTick = tick;
+    if (tick === 0) return; // initial mount, nothing to reload
+    const r = loadProjectRoot();
+    if (r !== root) { root = r; nodes = []; resetScroll(); void loadRoot(); }
+  });
 
   async function doDownloadFile(n: FileNode) {
     try {
@@ -185,8 +225,10 @@
 
 <div class="ft">
   <div class="pathbar">
-    <button class="root-switch" aria-label="切换项目根" onclick={openHistory}>⇄</button>
+    <button class="root-anchor" class:on={following} aria-label="设为/跟随项目根"
+      onpointerdown={onAnchorPointer}><span class="ring"></span></button>
     <span class="path-text mono">{root}</span>
+    <button class="root-switch" aria-label="切换项目根" onclick={openHistory}>⇄</button>
   </div>
   <input class="filter" bind:value={query} placeholder="过滤当前已加载节点…" />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
@@ -292,6 +334,12 @@
   .root-switch { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
   .root-switch:active { background: var(--key); }
   .path-text { flex: 1; min-width: 0; font-size: 0.68rem; color: var(--dim); overflow-x: auto; white-space: nowrap; }
+  .root-anchor { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; }
+  .root-anchor .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }
+  .root-anchor .ring::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--dim); }
+  .root-anchor.on { border-color: var(--teal); }
+  .root-anchor.on .ring { border-color: var(--teal); }
+  .root-anchor.on .ring::after { background: var(--teal); }
   .filter { margin: 0 8px 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 6px 8px; font-size: 0.72rem; }
   .ft-notice { font-size: 0.68rem; color: var(--amber); padding: 2px 10px; }
   .tree { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }

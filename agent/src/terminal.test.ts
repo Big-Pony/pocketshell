@@ -120,3 +120,17 @@ test("paneInfo() returns a complete shape (incl. isShell) when tmux fails", () =
   expect(term.paneInfo("gone")).toEqual({ currentCommand: "", alternateOn: false, isShell: false });
   term.dispose();
 });
+
+test("pwd() returns the pane_current_path from tmux", () => {
+  const term = new TerminalService({
+    tmux: (args) => (args.includes("display-message") ? ok("/Users/me/proj\n") : ok()),
+  });
+  expect(term.pwd("s1")).toEqual({ pwd: "/Users/me/proj" });
+  term.dispose();
+});
+
+test("pwd() returns empty pwd when tmux fails", () => {
+  const term = new TerminalService({ tmux: () => fail() });
+  expect(term.pwd("s1")).toEqual({ pwd: "" });
+  term.dispose();
+});

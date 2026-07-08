@@ -37,3 +37,22 @@ export function stepClamp(order: string[], activeId: string, delta: number): str
   const next = Math.max(0, Math.min(order.length - 1, i + delta));
   return order[next];
 }
+
+export function appendOrder(order: string[], id: string): string[] {
+  return order.includes(id) ? order : [...order, id];
+}
+
+export function removeOrder(order: string[], id: string): string[] {
+  return order.filter((x) => x !== id);
+}
+
+// Filter `order` to ids that are still valid, then append any `extras` (e.g.
+// live session names that were never recorded in order — external/adopted
+// sessions) that are valid and not already placed. Dedups, preserves order.
+export function visibleOrder(order: string[], valid: Set<string>, extras: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of order) if (valid.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  for (const id of extras) if (valid.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  return out;
+}

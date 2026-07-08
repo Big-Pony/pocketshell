@@ -157,3 +157,15 @@ test("POCKETSHELL_TLS=0 forces tls off even if agent.json enables it", () => {
   expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_TLS: "0" }).tls.enabled).toBe(false);
   rmSync(keyDir, { recursive: true, force: true });
 });
+
+test("adminEnabled defaults to true", () => {
+  const keyDir = tmpKeyDir();
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir }).adminEnabled).toBe(true);
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("adminEnabled is false when POCKETSHELL_ADMIN=0", () => {
+  const keyDir = tmpKeyDir();
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_ADMIN: "0" }).adminEnabled).toBe(false);
+  rmSync(keyDir, { recursive: true, force: true });
+});

@@ -6,12 +6,12 @@
   import { mergeSessions, tombstone, closeTab as closeTabFn, nextSessionName, shouldAdopt, type LocalSession } from "./lib/session-view";
   import { clampSplit, type BottomPanel } from "./lib/shell";
   import TerminalView from "./components/Terminal.svelte";
-  import SessionTabs from "./components/SessionTabs.svelte";
+  import TopTabs from "./components/TopTabs.svelte";
   import TaskPanel from "./components/TaskPanel.svelte";
   import FilePanel from "./components/FilePanel.svelte";
   import FilePreview from "./components/FilePreview.svelte";
   import BottomBar from "./components/BottomBar.svelte";
-  import { openFileTab, closeFileTab, fileTabId, cycle, stepClamp, type TopTab } from "./lib/top-tabs";
+  import { openFileTab, closeFileTab, fileTabId, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -20,8 +20,9 @@
   import { begin, beginLine, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
   import { detectSwipe } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+  import { loadTabs, saveTabs } from "./lib/tab-store";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
-  import { loadProjectRoot } from "./lib/file-tree";
+  import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
   import { defaultAgentUrl } from "./lib/agent-url";
 
   const wsUrl = getAgentAddr() ?? defaultAgentUrl(import.meta.env.DEV, location);
@@ -34,9 +35,11 @@
   let fullscreen = $state(false);
   let settings = $state<Settings>(loadSettings());
   let fileTabs = $state<TopTab[]>([]);
+  let tabOrder = $state<string[]>([]);
   let activeTop = $state("");
   let sel = $state<SelState>(reset());
   let selCount = $state(0);
+  let rootTick = $state(0);
   let topEl: HTMLDivElement | null = null;
   let selecting = $derived(sel.mode !== "idle");
   let selMode = $derived(sel.mode);
@@ -63,8 +66,24 @@
   const terms = new Map<string, Terminal>();
 
   conn.onStatus((s) => (status = s));
+  // Guard so restored session tabs are re-attached exactly once (on the first
+  // sessions snapshot after a reload). `sessions` is re-broadcast every ~3s, and
+  // TerminalView attaches on its own mount + Connection re-attaches on reconnect,
+  // so repeating the loop each broadcast would only send redundant attach frames.
+  let restoredReattachDone = false;
   conn.onSessions((list) => {
     sessions = mergeSessions(sessions, list);
+    // Drop dead sessions from the order + focus so the strip only shows sessions
+    // the server still has; re-attach any restored-but-alive session tabs once.
+    const alive = new Set(sessions.map((s) => s.name));
+    if (!restoredReattachDone) {
+      restoredReattachDone = true;
+      for (const id of tabOrder) {
+        if (!id.startsWith("file:") && alive.has(id)) conn.attach(id);
+      }
+    }
+    tabOrder = tabOrder.filter((id) => id.startsWith("file:") || alive.has(id));
+    if (activeId && !alive.has(activeId)) activeId = "";
     if (!activeId) activeId = sessions.find((s) => s.attached && !s.closed)?.name ?? "";
   });
   conn.onExit((f) => { sessions = tombstone(sessions, f.sessionId); });
@@ -79,6 +98,15 @@
   conn.listSessions();
 
   onMount(() => {
+    const saved = loadTabs();
+    if (saved) {
+      fileTabs = saved.fileTabs;
+      tabOrder = saved.tabOrder;
+      activeTop = saved.activeTop;
+      backgrounded = new Set(saved.backgrounded);
+      // activeId is re-validated against live sessions once onSessions arrives.
+      if (saved.activeId) activeId = saved.activeId;
+    }
     registerDevHelpers({
       openFile,
       openPanel,
@@ -105,10 +133,29 @@
   const topSessions = $derived(
     sessions.filter((s) => !backgrounded.has(s.name) && (s.attached || s.closed))
   );
-  const topOrder = $derived([...topSessions.map((s) => s.name), ...fileTabs.map((t) => t.id)]);
+  const topOrder = $derived(
+    visibleOrder(
+      tabOrder,
+      new Set([...topSessions.map((s) => s.name), ...fileTabs.map((t) => t.id)]),
+      topSessions.map((s) => s.name),
+    )
+  );
   const activeTopId = $derived(activeTop && topOrder.includes(activeTop) ? activeTop : (activeId || topOrder[0] || ""));
+  const topTabsView = $derived(topOrder.map((id) => {
+    if (id.startsWith("file:")) {
+      const f = fileTabs.find((t) => t.id === id)!;
+      return { kind: "file" as const, id, title: f.title };
+    }
+    const s = sessions.find((x) => x.name === id);
+    return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false };
+  }));
 
-  function newSession(name: string) { conn.newSession(name); activeId = name; backgrounded.delete(name); backgrounded = new Set(backgrounded); }
+  function newSession(name: string) {
+    conn.newSession(name);
+    activeId = name;
+    backgrounded.delete(name); backgrounded = new Set(backgrounded);
+    tabOrder = appendOrder(tabOrder, name);
+  }
   function selectSession(name: string) {
     cancelSelection();
     activeId = name;
@@ -169,18 +216,56 @@
 
   function openFile(path: string, mode: "code" | "diff" = "code") {
     fileTabs = openFileTab(fileTabs, path, mode);
-    activeTop = fileTabId(path, mode);
+    const id = fileTabId(path, mode);
+    tabOrder = appendOrder(tabOrder, id);
+    activeTop = id;
     if (fullscreen) fullscreen = false;
   }
   function closeFile(id: string) {
     fileTabs = closeFileTab(fileTabs, id);
+    tabOrder = removeOrder(tabOrder, id);
     if (activeTop === id) activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
+  }
+  // Close from the top strip's double-tap dialog. File tabs are removed; term
+  // tabs are only backgrounded (the tmux session keeps running and reappears in
+  // the task panel) — never killed here.
+  function closeTopTab(id: string) {
+    if (id.startsWith("file:")) { closeFile(id); return; }
+    cancelSelection();
+    backgrounded.add(id);
+    backgrounded = new Set(backgrounded);
+    tabOrder = removeOrder(tabOrder, id);
+    if (activeId === id) activeId = topSessions.filter((s) => s.name !== id)[0]?.name ?? "";
+    if (activeTop === id) activeTop = "";
   }
   function selectTop(id: string) {
     cancelSelection();
     if (id.startsWith("file:")) { activeTop = id; }
     else { activeTop = ""; selectSession(id); }
   }
+
+  // Read the focused tab's real cwd for the file panel's root buttons.
+  async function getFocusedPwd(): Promise<{ pwd: string } | { error: string }> {
+    if (!activeTopId || activeTopId.startsWith("file:")) return { error: "当前聚焦不是终端，无法获取工作目录" };
+    try {
+      const r = (await conn.rpc("terminal.pwd", { session: activeTopId })) as { pwd: string };
+      if (!r.pwd) return { error: "无法获取该会话的工作目录" };
+      return { pwd: r.pwd };
+    } catch {
+      return { error: "无法获取该会话的工作目录" };
+    }
+  }
+
+  // Project-root-follow: when enabled, switching to a terminal tab re-points the
+  // bookmark at that session's cwd and signals FileTree to reload.
+  $effect(() => {
+    const id = activeTopId;
+    if (!loadRootFollow()) return;
+    if (!id || id.startsWith("file:")) return;
+    void getFocusedPwd().then((r) => {
+      if ("pwd" in r) { saveProjectRoot(r.pwd); pushRootHistory(r.pwd); rootTick++; }
+    });
+  });
 
   function shiftTab(delta: number) {
     if (!topOrder.length) return;
@@ -231,7 +316,7 @@
     switch (c.type) {
       case "prevTab": shiftTab(-1); break;
       case "nextTab": shiftTab(1); break;
-      case "gotoTab": { const s = topSessions[c.index]; if (s) selectTop(s.name); break; }
+      case "gotoTab": { const id = topOrder[c.index]; if (id) selectTop(id); break; }
       case "newSession": { const n = nextSessionName(sessions.map((s) => s.name)); newSession(n); break; }
       case "toBackground": toBackground(); break;
       case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
@@ -247,7 +332,6 @@
         const t = activeTerm(); if (!t) break;
         const b = t.buffer.active;
         sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
-        t.focus();
         applySel(t);
         break;
       }
@@ -269,7 +353,6 @@
           // First hop grabs the last real output line (just above the prompt).
           const startRow = Math.max(0, Math.min(maxRow, b.baseY + b.cursorY - 1));
           sel = beginLine(startRow);
-          t.focus();
         } else {
           sel = moveFocus(sel, c.type === "lineUp" ? "up" : "down", { cols: t.cols, maxRow });
         }
@@ -346,6 +429,21 @@
     toastTimer = setTimeout(() => (toastVisible = false), 1800);
   }
 
+  // Persist the open tabs whenever they change (debounced) so a PWA suspend +
+  // resume restores the strip instead of falling back to the task panel.
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const snapshot = {
+      tabOrder,
+      fileTabs,
+      activeTop,
+      activeId,
+      backgrounded: [...backgrounded],
+    };
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveTabs(snapshot), 200);
+  });
+
   const statusText: Record<ConnStatus, string> = {
     online: "已连接",
     connecting: "连接中…",
@@ -364,19 +462,7 @@
   </div>
 
   <div class="tabs-wrap">
-    <SessionTabs sessions={topSessions} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onClose={closeTab} />
-    {#if fileTabs.length}
-      <nav class="file-tabs">
-        {#each fileTabs as t (t.id)}
-          <button class="ftab" class:active={activeTopId === t.id} onclick={() => selectTop(t.id)}>
-            <span class="ft-name">{t.title}</span>
-            <span class="ft-x" role="button" tabindex="0"
-              onclick={(e) => { e.stopPropagation(); closeFile(t.id); }}
-              onkeydown={(e) => { if (e.key === "Enter") { e.stopPropagation(); closeFile(t.id); } }}>×</span>
-          </button>
-        {/each}
-      </nav>
-    {/if}
+    <TopTabs tabs={topTabsView} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onCloseTab={closeTopTab} />
   </div>
 
   {#if notice}<div class="notice">{notice}</div>{/if}
@@ -412,7 +498,7 @@
     </div>
     <div class="bottom" style="flex: {1 - topFlex} 1 0;">
       {#if bottomPanel === "file"}
-        <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} />
+        <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} />
       {:else if bottomPanel === "task"}
         <TaskPanel
           {sessions}
@@ -499,29 +585,6 @@
     gap: 4px;
     padding: 0 8px;
   }
-  .file-tabs {
-    display: flex;
-    gap: 4px;
-    flex: 1;
-    min-width: 0;
-    overflow-x: auto;
-  }
-  .ftab {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    color: var(--dim);
-    padding: 4px 6px;
-    font-size: 0.68rem;
-    white-space: nowrap;
-  }
-  .ftab.active { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
-  .ft-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-  .ft-x { padding: 0 2px; color: var(--dimmer); }
-
   .banner {
     background: var(--red-dark);
     color: var(--amber);

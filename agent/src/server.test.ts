@@ -8,6 +8,7 @@ import { createRateLimiter } from "./rate-limit";
 import { createAudit } from "./audit";
 import { TerminalService } from "./terminal";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { loadConfig } from "./config";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -375,4 +376,91 @@ test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", 
   expect(s.attached).toBe(false);
   expect(s.lastLine).toBe("$ vim");
   srv.stop();
+});
+
+
+function buildUrl(srv: ReturnType<typeof startServer>, path: string) {
+  const u = new URL(srv.url);
+  return `http://${u.hostname}:${u.port}${path}`;
+}
+
+function realServer(extraConfig: any = {}) {
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  const base = loadConfig({ registryFile: file });
+  const cfg: any = {
+    ...base,
+    ...extraConfig,
+    registry,
+    pairing: null,
+    pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 },
+    tls: { enabled: false },
+    rateLimiter: noopLimiter(),
+    audit: noopAudit(),
+  };
+  return { srv: startServer({ port: 0, config: cfg }), file };
+}
+
+test("admin page is served on /admin from loopback when enabled", async () => {
+  const { srv, file } = realServer({ adminEnabled: true });
+  const res = await fetch(buildUrl(srv, "/admin"));
+  expect(res.status).toBe(200);
+  const text = await res.text();
+  expect(text).toContain("PocketShell 本地管理");
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("admin endpoints return 404 when adminEnabled=false", async () => {
+  const { srv, file } = realServer({ adminEnabled: false });
+  expect((await fetch(buildUrl(srv, "/admin"))).status).toBe(404);
+  expect((await fetch(buildUrl(srv, "/admin-api/devices"))).status).toBe(404);
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("admin-api/devices reflects registry devices and online IPs", async () => {
+  const { srv, file } = realServer({ adminEnabled: true });
+  const reg = srv.__test.config.registry;
+  reg.add("PUB1", "iPhone");
+  reg.touch("PUB1", "127.0.0.1");
+  const res = await fetch(buildUrl(srv, "/admin-api/devices"));
+  expect(res.status).toBe(200);
+  const rows = await res.json();
+  expect(rows.length).toBe(1);
+  expect(rows[0]).toMatchObject({ pubKey: "PUB1", name: "iPhone", online: false, ip: "127.0.0.1" });
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("admin-api/revoke removes a device", async () => {
+  const { srv, file } = realServer({ adminEnabled: true });
+  const reg = srv.__test.config.registry;
+  reg.add("PUB2", "Pixel");
+  let deleted = false;
+  const res = await fetch(buildUrl(srv, "/admin-api/revoke"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pubKey: "PUB2" }),
+  });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.ok).toBe(true);
+  expect(reg.has("PUB2")).toBe(false);
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("admin-api/pair generates a new pairing code", async () => {
+  const { srv, file } = realServer({ adminEnabled: true, pairingMode: true });
+  const res = await fetch(buildUrl(srv, "/admin-api/pair"), { method: "POST" });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(typeof body.code).toBe("string");
+  expect(body.code.length).toBe(8);
+  expect(typeof body.pairString).toBe("string");
+  expect(body.pairString.length).toBeGreaterThan(0);
+  srv.stop();
+  rmSync(file, { force: true });
 });

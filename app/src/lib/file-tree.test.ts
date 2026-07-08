@@ -1,5 +1,5 @@
-import { test, expect, beforeEach } from "vitest";
-import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, type FileNode } from "./file-tree";
+import { test, expect, beforeEach, describe } from "vitest";
+import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow, type FileNode } from "./file-tree";
 
 beforeEach(() => localStorage.clear());
 
@@ -59,4 +59,16 @@ test("root history dedups, most-recent-first, capped at 10", () => {
 test("loadRootHistory tolerates corrupt storage", () => {
   localStorage.setItem("pocketshell.projectRootHistory", "{not json");
   expect(loadRootHistory()).toEqual([]);
+});
+
+describe("root follow flag", () => {
+  test("defaults to false", () => {
+    expect(loadRootFollow()).toBe(false);
+  });
+  test("round-trips true/false", () => {
+    saveRootFollow(true);
+    expect(loadRootFollow()).toBe(true);
+    saveRootFollow(false);
+    expect(loadRootFollow()).toBe(false);
+  });
 });

@@ -27,6 +27,7 @@ export interface AgentConfig {
   audit: Audit;
   snippets: SnippetStore;
   tmpDir: string;
+  adminEnabled: boolean;
 }
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
@@ -128,6 +129,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     env.POCKETSHELL_TLS === "1" ? true :
     env.POCKETSHELL_TLS === "0" ? false :
     (file.tls ?? false);
+  const adminEnabled = env.POCKETSHELL_ADMIN === "0" ? false : true;
   const tls = {
     enabled: tlsEnabled,
     cert: env.POCKETSHELL_TLS_CERT ?? file.tlsCert,
@@ -165,5 +167,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     audit,
     snippets,
     tmpDir,
+    adminEnabled,
   };
 }

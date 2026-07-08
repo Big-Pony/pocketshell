@@ -4,13 +4,13 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export interface DeviceRecord { pubKey: string; name: string; addedAt: string; lastSeen: string | null; }
+export interface DeviceRecord { pubKey: string; name: string; addedAt: string; lastSeen: string | null; lastIp?: string; }
 export interface DeviceRegistry {
   list(): DeviceRecord[];
   has(pub: string): boolean;
   add(pub: string, name: string): void;
   remove(pub: string): boolean;
-  touch(pub: string): void;
+  touch(pub: string, ip?: string): void;
 }
 
 export function loadDeviceRegistry(file: string, now: () => number = () => Date.now()): DeviceRegistry {
@@ -43,9 +43,9 @@ export function loadDeviceRegistry(file: string, now: () => number = () => Date.
       persist();
       return true;
     },
-    touch: (pub) => {
+    touch: (pub, ip) => {
       const d = devices.find((x) => x.pubKey === pub);
-      if (d) { d.lastSeen = iso(); persist(); }
+      if (d) { d.lastSeen = iso(); if (ip) d.lastIp = ip; persist(); }
     },
   };
 }

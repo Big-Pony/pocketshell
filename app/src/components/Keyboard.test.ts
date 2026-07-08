@@ -55,3 +55,10 @@ test("ops sub-tab: Home button sends escape sequence via onText", async () => {
   await fireEvent.pointerDown(screen.getByText("Home"));
   expect(onText).toHaveBeenCalledWith("\x1b[H");
 });
+
+test("ops sub-tab: circular Enter button sends carriage return", async () => {
+  const { onText } = openOps();
+  await fireEvent.click(screen.getByText("✂ 快捷操作"));
+  await fireEvent.pointerDown(screen.getByText("确认"));
+  expect(onText).toHaveBeenCalledWith("\r");
+});
