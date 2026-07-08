@@ -16,6 +16,8 @@ import { resolveStatic } from "./static-serve";
 import { ASSETS } from "./embedded-manifest";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 import { buildReadiness, isNonLocalBind } from "./readiness";
+import { createPairing } from "./pairing";
+import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
 
 interface Deps {
   port?: number;
@@ -105,6 +107,7 @@ export function startServer(deps: Deps = {}) {
 
   const finishPairing = (conn: Conn, deviceName: string) => {
     config.registry.add(conn.remoteStatic!, deviceName || "device");
+    config.registry.touch(conn.remoteStatic!, conn.ip);
     conn.pending = false;
     conn.ready = true;
     if (conn.pairTimer) clearTimeout(conn.pairTimer);
@@ -249,7 +252,7 @@ export function startServer(deps: Deps = {}) {
           console.log("[pocketshell] pending device awaiting pair");
         } else {
           conn.ready = true;
-          if (conn.remoteStatic) config.registry.touch(conn.remoteStatic);
+          if (conn.remoteStatic) config.registry.touch(conn.remoteStatic, conn.ip);
           config.audit.log({ event: "handshake_ok", pub: conn.remoteStatic, ip: conn.ip });
           console.log("[pocketshell] connect (authorized)");
         }
@@ -275,14 +278,54 @@ export function startServer(deps: Deps = {}) {
     handleClient(conn, text);
   };
 
+  const onlineIpByPub = () => {
+    const m = new Map<string, string>();
+    for (const c of conns.values()) if (c.ready && c.remoteStatic) m.set(c.remoteStatic, c.ip);
+    return m;
+  };
+
+  const handleAdmin = async (url: URL, req: Request): Promise<Response> => {
+    if (url.pathname === "/admin") {
+      return new Response(ADMIN_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+    if (url.pathname === "/admin-api/devices") {
+      return Response.json(deviceRows(config.registry.list(), onlineIpByPub()));
+    }
+    if (url.pathname === "/admin-api/pair" && req.method === "POST") {
+      config.pairing = createPairing({ now: () => Date.now() });
+      config.pairingMode = true;
+      const pairString = buildPairingString(config.identity.publicKey, resolveAdvertise(config), config.pairing.code);
+      config.audit.log({ event: "admin_pair_new" });
+      return Response.json({ code: config.pairing.code, pairString });
+    }
+    if (url.pathname === "/admin-api/revoke" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { pubKey?: string };
+      const pub = String(body.pubKey ?? "");
+      if (envKeys.has(pub)) return new Response("env keys are read-only", { status: 400 });
+      const removed = config.registry.remove(pub);
+      if (removed) {
+        config.audit.log({ event: "revoke", pub, ip: "admin" });
+        for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
+      }
+      return Response.json({ ok: removed });
+    }
+    return new Response("Not found", { status: 404 });
+  };
+
   const tlsMaterial = resolveTlsMaterial(config.keyDir, config.tls);
   const server = Bun.serve({
     hostname: config.listen.host,
     port: deps.port ?? config.listen.port,
     tls: tlsMaterial ?? undefined,
-    fetch(req, srv) {
+    async fetch(req, srv) {
       if (srv.upgrade(req)) return;
       const url = new URL(req.url);
+      if (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin-api/")) {
+        if (!config.adminEnabled) return new Response("Not found", { status: 404 });
+        const ip = srv.requestIP(req)?.address ?? "";
+        if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
+        return handleAdmin(url, req);
+      }
       const r = resolveStatic(url.pathname, req.headers.get("accept") ?? "", assetKeys);
       if (r.status === 200 && r.assetKey) {
         return new Response(Bun.file(assets[r.assetKey]), { headers: r.headers });
@@ -298,6 +341,7 @@ export function startServer(deps: Deps = {}) {
 
   return {
     port: server.port,
+    url: server.url,
     stop() {
       clearInterval(pushTimer);
       clearInterval(sweepTimer);
@@ -310,6 +354,7 @@ export function startServer(deps: Deps = {}) {
       message: onMessage,
       broadcastOutputForTest: () => { for (const conn of conns.values()) sendSecure(conn, { type: "pong" }); },
       periodicPush,
+      config,
     },
   };
 }

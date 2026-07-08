@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect, describe } from "bun:test";
 import { loadDeviceRegistry } from "./device-registry";
 import { mkdtempSync, rmSync, statSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,4 +36,29 @@ test("add is idempotent on name update; remove deletes; touch sets lastSeen", ()
   expect(reg.has("PUBA")).toBe(false);
   expect(reg.remove("PUBA")).toBe(false);
   rmSync(file, { force: true });
+});
+
+describe("device lastIp", () => {
+  test("touch(pub, ip) records lastIp and lastSeen", () => {
+    const file = tmpFile();
+    try {
+      let t = 1000;
+      const reg = loadDeviceRegistry(file, () => t);
+      reg.add("PUB", "phone");
+      t = 2000;
+      reg.touch("PUB", "203.0.113.7");
+      const d = reg.list().find((x) => x.pubKey === "PUB")!;
+      expect(d.lastIp).toBe("203.0.113.7");
+      expect(d.lastSeen).toBe(new Date(2000).toISOString());
+    } finally { rmSync(file, { force: true }); }
+  });
+  test("touch without ip leaves lastIp unset", () => {
+    const file = tmpFile();
+    try {
+      const reg = loadDeviceRegistry(file, () => 1000);
+      reg.add("PUB", "phone");
+      reg.touch("PUB");
+      expect(reg.list().find((x) => x.pubKey === "PUB")!.lastIp).toBeUndefined();
+    } finally { rmSync(file, { force: true }); }
+  });
 });
