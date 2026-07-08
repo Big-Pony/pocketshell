@@ -66,13 +66,21 @@
   const terms = new Map<string, Terminal>();
 
   conn.onStatus((s) => (status = s));
+  // Guard so restored session tabs are re-attached exactly once (on the first
+  // sessions snapshot after a reload). `sessions` is re-broadcast every ~3s, and
+  // TerminalView attaches on its own mount + Connection re-attaches on reconnect,
+  // so repeating the loop each broadcast would only send redundant attach frames.
+  let restoredReattachDone = false;
   conn.onSessions((list) => {
     sessions = mergeSessions(sessions, list);
-    // Re-attach restored session tabs that are still alive; drop dead ones from
-    // the order + focus so the strip only shows sessions the server still has.
+    // Drop dead sessions from the order + focus so the strip only shows sessions
+    // the server still has; re-attach any restored-but-alive session tabs once.
     const alive = new Set(sessions.map((s) => s.name));
-    for (const id of tabOrder) {
-      if (!id.startsWith("file:") && alive.has(id)) conn.attach(id);
+    if (!restoredReattachDone) {
+      restoredReattachDone = true;
+      for (const id of tabOrder) {
+        if (!id.startsWith("file:") && alive.has(id)) conn.attach(id);
+      }
     }
     tabOrder = tabOrder.filter((id) => id.startsWith("file:") || alive.has(id));
     if (activeId && !alive.has(activeId)) activeId = "";

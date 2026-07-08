@@ -30,12 +30,25 @@
     closing = null;
   }
 
-  // Single vs double tap: a lone tap selects after a short delay; a second tap
-  // within the window cancels the pending select and opens the close dialog.
-  let tapTimer: ReturnType<typeof setTimeout> | null = null;
-  function onTabPointer(t: TabView) {
-    if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; closing = t; return; }
-    tapTimer = setTimeout(() => { tapTimer = null; onSelect(t.id); }, 230);
+  // Single tap selects immediately (no latency); double tap on the SAME tab
+  // opens the close dialog. Track the pointer-down position so a horizontal
+  // scroll/drag of the strip is not mistaken for a tap. Keyed by tab id so
+  // tapping two different tabs quickly is two selects, not a false "close".
+  let downId = "";
+  let downX = 0;
+  let downY = 0;
+  let lastTapId = "";
+  let lastTapAt = 0;
+  function onTabDown(e: PointerEvent, t: TabView) { downId = t.id; downX = e.clientX; downY = e.clientY; }
+  function onTabUp(e: PointerEvent, t: TabView) {
+    if (downId !== t.id) return; // released off the tab it started on
+    downId = "";
+    if (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8) { lastTapId = ""; return; } // a scroll/drag, not a tap
+    const now = e.timeStamp;
+    if (lastTapId === t.id && now - lastTapAt < 300) { lastTapId = ""; lastTapAt = 0; closing = t; return; }
+    lastTapId = t.id;
+    lastTapAt = now;
+    onSelect(t.id);
   }
 
   function autoFocus(node: HTMLElement) { node.focus(); }
@@ -49,7 +62,8 @@
         class:file={t.kind === "file"}
         class:active={t.id === activeId}
         class:closed={t.kind === "term" && t.closed}
-        onpointerdown={() => onTabPointer(t)}
+        onpointerdown={(e) => onTabDown(e, t)}
+        onpointerup={(e) => onTabUp(e, t)}
       >
         {#if t.kind === "term"}<span class="dot {stateDotClass(t.state)}"></span>{/if}
         <span class="name">{t.title}</span>
