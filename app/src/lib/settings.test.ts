@@ -30,5 +30,15 @@ test("loadSettings fills missing keys with defaults", () => {
   const s = loadSettings(store);
   expect(s.vibrate).toBe(false);
   expect(s.layout).toBe("mac"); // default
-  expect(s.fontSize).toBe(14);  // default
+  expect(s.fontSize).toBe(10);  // default
+});
+
+test("default fontSize is 10", () => {
+  expect(DEFAULT_SETTINGS.fontSize).toBe(10);
+});
+
+test("loadSettings falls back to 10 when stored fontSize is not a number", () => {
+  const store = memStore();
+  store.setItem("ps.settings", JSON.stringify({ fontSize: "big" }));
+  expect(loadSettings(store).fontSize).toBe(10);
 });

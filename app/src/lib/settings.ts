@@ -13,7 +13,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   layout: "mac",
-  fontSize: 14,
+  fontSize: 10,
   vibrate: true,
 };
 
