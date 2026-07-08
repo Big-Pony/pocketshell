@@ -25,8 +25,15 @@
 
   // Close-confirm modal
   let closing = $state<TabView | null>(null);
+  let closingAt = 0; // when the modal opened; ignore the ghost click double-tap synthesizes
   function confirmClose() {
     if (closing) onCloseTab(closing.id);
+    closing = null;
+  }
+  function dismissClose(e: Event) {
+    // The double-tap that opened this modal synthesizes a trailing mouse click
+    // on the overlay (~<350ms later). Ignore it so the modal doesn't vanish.
+    if (e.timeStamp - closingAt < 350) return;
     closing = null;
   }
 
@@ -45,7 +52,7 @@
     downId = "";
     if (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8) { lastTapId = ""; return; } // a scroll/drag, not a tap
     const now = e.timeStamp;
-    if (lastTapId === t.id && now - lastTapAt < 300) { lastTapId = ""; lastTapAt = 0; closing = t; return; }
+    if (lastTapId === t.id && now - lastTapAt < 300) { lastTapId = ""; lastTapAt = 0; closing = t; closingAt = now; return; }
     lastTapId = t.id;
     lastTapAt = now;
     onSelect(t.id);
@@ -92,7 +99,7 @@
 {/if}
 
 {#if closing}
-  <div class="overlay" role="presentation" onclick={() => (closing = null)}>
+  <div class="overlay" role="presentation" onclick={dismissClose}>
     <div class="dlg" role="dialog" aria-modal="true" aria-label="关闭标签" tabindex="-1"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (e.key === "Escape") closing = null; }}>
