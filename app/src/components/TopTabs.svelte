@@ -109,7 +109,10 @@
 {/if}
 
 <style>
-  .toptabs { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 0 8px 8px; }
+  /* flex:1 + min-width:0 so this fills .tabs-wrap and lets .strip actually
+     overflow-scroll; without it the content width pushes .ops (the +) past the
+     parent's overflow:hidden edge and off-screen. */
+  .toptabs { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 0 8px 8px; flex: 1; min-width: 0; width: 100%; }
   .strip { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
   .strip::-webkit-scrollbar { display: none; }
   .ops { flex: 0 0 auto; }
