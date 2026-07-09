@@ -88,7 +88,6 @@
     {#each tabs as t (t.id)}
       <button
         class="tab"
-        class:file={t.kind === "file"}
         class:active={t.id === activeId}
         class:closed={t.kind === "term" && t.closed}
         onpointerdown={(e) => onTabDown(e, t)}
@@ -153,9 +152,6 @@
     transition: background 0.15s, color 0.15s;
   }
   .tab.active { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
-  /* File tabs share the tmux tab shape but get a distinct border colour. */
-  .tab.file { border-color: var(--teal); }
-  .tab.file.active { border-color: var(--teal); color: var(--teal); }
   .tab.closed { opacity: 0.7; }
   .dot { width: 6px; height: 6px; border-radius: 50%; }
   .dot-run { background: var(--teal); animation: pulse 1.4s infinite; }
