@@ -93,3 +93,13 @@ test("gitStatus lists working-tree changes", () => {
   expect(byPath["new.txt"]).toBe("?");
   rmSync(d, { recursive: true, force: true });
 });
+
+test("gitStatus keeps CJK filenames unescaped (core.quotepath=false)", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "init");
+  writeFileSync(join(d, "中文文件.txt"), "hi"); // untracked, non-ASCII name
+  const r = gitStatus(d);
+  const paths = r.files.map((f) => f.path);
+  expect(paths).toContain("中文文件.txt"); // not the octal-escaped "\344\270..."
+  rmSync(d, { recursive: true, force: true });
+});

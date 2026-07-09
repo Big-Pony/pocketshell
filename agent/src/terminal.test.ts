@@ -134,3 +134,39 @@ test("pwd() returns empty pwd when tmux fails", () => {
   expect(term.pwd("s1")).toEqual({ pwd: "" });
   term.dispose();
 });
+
+test("ensure() injects LANG at new-session when a locale fallback is configured", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("has-session")) return fail(); // no existing session -> must create
+      return ok();
+    },
+    langFallback: "en_US.UTF-8",
+  });
+  term.ensure("t-lang-fallback");
+  term.dispose();
+
+  const created = calls.find((a) => a.includes("new-session"))!;
+  const eIdx = created.indexOf("LANG=en_US.UTF-8");
+  expect(eIdx).toBeGreaterThan(0);
+  expect(created[eIdx - 1]).toBe("-e"); // must be preceded by its own -e flag
+});
+
+test("ensure() does not inject LANG at new-session when there is no locale fallback", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("has-session")) return fail();
+      return ok();
+    },
+    langFallback: null,
+  });
+  term.ensure("t-lang-none");
+  term.dispose();
+
+  const created = calls.find((a) => a.includes("new-session"))!;
+  expect(created.some((a) => a.startsWith("LANG="))).toBe(false);
+});

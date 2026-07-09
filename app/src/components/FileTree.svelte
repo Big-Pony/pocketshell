@@ -4,7 +4,7 @@
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
     loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow,
-    toFileNodes, setChildren, collapse, filterTree, type FileNode
+    toFileNodes, setChildren, collapse, filterTree, collectExpandedPaths, type FileNode
   } from "../lib/file-tree";
   import { getBrowseCache, setBrowseCache } from "../lib/file-tree-cache";
   import { IDLE, press, type ArmState } from "../lib/confirm-armed";
@@ -12,11 +12,12 @@
   import UploadDialog from "./UploadDialog.svelte";
   import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/transfer";
 
-  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, onToast }: {
+  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, onToast, onRefresh }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
     getFocusedPwd: () => Promise<{ pwd: string } | { error: string }>;
     rootTick: number;
     onToast: (msg: string) => void;
+    onRefresh?: () => void;
   } = $props();
 
   const cached0 = getBrowseCache();
@@ -93,13 +94,41 @@
     return toFileNodes(path, r.nodes);
   }
 
+  // Display name for the synthetic root node (keep "/" as-is, else basename).
+  function rootLabel(p: string): string {
+    return p === "/" ? "/" : p.slice(p.lastIndexOf("/") + 1);
+  }
+
   async function loadRoot() {
     notice = "";
     try {
       const kids = await loadLevel(root);
-      const rootName = root === "/" ? "/" : root.slice(root.lastIndexOf("/") + 1);
-      nodes = [{ name: rootName, path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
+      nodes = [{ name: rootLabel(root), path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
     } catch (e: any) { notice = e?.message ?? "加载失败"; nodes = []; }
+  }
+
+  // Refresh the tree in place: re-fetch the root level and every level that was
+  // expanded, keeping the same expansion so newly-created files (e.g. from AI)
+  // appear without collapsing the user's view.
+  async function reloadKeepingExpanded() {
+    notice = "";
+    const expanded = collectExpandedPaths(nodes);
+    const rebuild = async (path: string): Promise<FileNode[]> => {
+      const kids = await loadLevel(path);
+      for (const k of kids) {
+        if (k.type === "dir" && expanded.has(k.path)) {
+          k.expanded = true;
+          k.children = await rebuild(k.path);
+          k.hasChildren = k.children.length > 0;
+        }
+      }
+      return kids;
+    };
+    try {
+      const kids = await rebuild(root);
+      nodes = [{ name: rootLabel(root), path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
+      onRefresh?.();
+    } catch (e: any) { notice = e?.message ?? "刷新失败"; }
   }
 
   async function toggle(n: FileNode) {
@@ -165,6 +194,7 @@
     nodes = [];
     resetScroll();
     void loadRoot();
+    onRefresh?.();
   }
   function setRoot(n: FileNode) { applyRoot(n.path); }
   function unsetRoot() {
@@ -173,6 +203,7 @@
     nodes = [];
     resetScroll();
     void loadRoot();
+    onRefresh?.();
   }
 
   function flatten(list: FileNode[], depth = 0): { n: FileNode; depth: number }[] {
@@ -229,6 +260,7 @@
       onpointerdown={onAnchorPointer}><span class="ring"></span></button>
     <span class="path-text mono">{root}</span>
     <button class="root-switch" aria-label="切换项目根" onclick={openHistory}>⇄</button>
+    <button class="root-refresh" aria-label="刷新目录" onclick={reloadKeepingExpanded}>⟳</button>
   </div>
   <input class="filter" bind:value={query} placeholder="过滤当前已加载节点…" />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
@@ -331,8 +363,8 @@
 <style>
   .ft { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
   .pathbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
-  .root-switch { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
-  .root-switch:active { background: var(--key); }
+  .root-switch, .root-refresh { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
+  .root-switch:active, .root-refresh:active { background: var(--key); }
   .path-text { flex: 1; min-width: 0; font-size: 0.68rem; color: var(--dim); overflow-x: auto; white-space: nowrap; }
   .root-anchor { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; }
   .root-anchor .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }

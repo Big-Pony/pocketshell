@@ -24,6 +24,7 @@
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
   import { defaultAgentUrl } from "./lib/agent-url";
+  import { lastOutput } from "./lib/terminal-output";
 
   const wsUrl = getAgentAddr() ?? defaultAgentUrl(import.meta.env.DEV, location);
 
@@ -322,7 +323,13 @@
       case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
       case "scrollDown": terms.get(activeId)?.scrollPages(1); break;
       case "toggleFullscreen": cancelSelection(); fullscreen = !fullscreen; break;
-      case "copyVisible": copyOutput(activeId); break;
+      case "copyVisible": {
+        const t = activeTerm(); if (!t) { showToast("无终端"); break; }
+        const text = lastOutput(t.buffer.active, t.rows);
+        if (!text.trim()) { showToast("无输出可复制"); break; }
+        writeClip(text, "已复制最后输出");
+        break;
+      }
       case "renameSession": {
         const next = prompt("新的会话名称", activeId);
         if (next && next.trim() && next !== activeId) renameSession(activeId, next.trim());

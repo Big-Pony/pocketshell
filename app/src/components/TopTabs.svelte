@@ -25,8 +25,15 @@
 
   // Close-confirm modal
   let closing = $state<TabView | null>(null);
+  let closingAt = 0; // when the modal opened; ignore the ghost click double-tap synthesizes
   function confirmClose() {
     if (closing) onCloseTab(closing.id);
+    closing = null;
+  }
+  function dismissClose(e: Event) {
+    // The double-tap that opened this modal synthesizes a trailing mouse click
+    // on the overlay (~<350ms later). Ignore it so the modal doesn't vanish.
+    if (e.timeStamp - closingAt < 350) return;
     closing = null;
   }
 
@@ -45,21 +52,42 @@
     downId = "";
     if (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8) { lastTapId = ""; return; } // a scroll/drag, not a tap
     const now = e.timeStamp;
-    if (lastTapId === t.id && now - lastTapAt < 300) { lastTapId = ""; lastTapAt = 0; closing = t; return; }
+    if (lastTapId === t.id && now - lastTapAt < 300) { lastTapId = ""; lastTapAt = 0; closing = t; closingAt = now; return; }
     lastTapId = t.id;
     lastTapAt = now;
     onSelect(t.id);
   }
 
   function autoFocus(node: HTMLElement) { node.focus(); }
+
+  let strip = $state<HTMLElement | null>(null);
+  // First scroll (e.g. a restored far-right active tab on mount) jumps instantly;
+  // later scrolls animate.
+  let firstScroll = true;
+  // When the active tab changes, scroll it flush-left so it's always visible.
+  // Ordering is NOT changed — this is scroll-only (requirement 6).
+  $effect(() => {
+    const id = activeId; // track
+    if (!strip) return;
+    const el = strip.querySelector<HTMLElement>(".tab.active");
+    if (el) {
+      // Use bounding-rect deltas rather than el.offsetLeft: offsetLeft is
+      // relative to the offsetParent (.tabs-wrap, position:relative in
+      // App.svelte), not to .strip itself, so it includes that ancestor's
+      // padding and overshoots the scroll. Rect deltas are relative to the
+      // viewport, so they're correct regardless of offsetParent/CSS position.
+      const delta = el.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+      strip.scrollTo({ left: strip.scrollLeft + delta, behavior: firstScroll ? "auto" : "smooth" });
+      firstScroll = false;
+    }
+  });
 </script>
 
 <div class="toptabs">
-  <nav class="strip">
+  <nav class="strip" bind:this={strip}>
     {#each tabs as t (t.id)}
       <button
         class="tab"
-        class:file={t.kind === "file"}
         class:active={t.id === activeId}
         class:closed={t.kind === "term" && t.closed}
         onpointerdown={(e) => onTabDown(e, t)}
@@ -92,7 +120,7 @@
 {/if}
 
 {#if closing}
-  <div class="overlay" role="presentation" onclick={() => (closing = null)}>
+  <div class="overlay" role="presentation" onclick={dismissClose}>
     <div class="dlg" role="dialog" aria-modal="true" aria-label="关闭标签" tabindex="-1"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (e.key === "Escape") closing = null; }}>
@@ -109,7 +137,10 @@
 {/if}
 
 <style>
-  .toptabs { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 0 8px 8px; }
+  /* flex:1 + min-width:0 so this fills .tabs-wrap and lets .strip actually
+     overflow-scroll; without it the content width pushes .ops (the +) past the
+     parent's overflow:hidden edge and off-screen. */
+  .toptabs { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 0 8px 8px; flex: 1; min-width: 0; width: 100%; }
   .strip { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
   .strip::-webkit-scrollbar { display: none; }
   .ops { flex: 0 0 auto; }
@@ -121,9 +152,6 @@
     transition: background 0.15s, color 0.15s;
   }
   .tab.active { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
-  /* File tabs share the tmux tab shape but get a distinct border colour. */
-  .tab.file { border-color: var(--teal); }
-  .tab.file.active { border-color: var(--teal); color: var(--teal); }
   .tab.closed { opacity: 0.7; }
   .dot { width: 6px; height: 6px; border-radius: 50%; }
   .dot-run { background: var(--teal); animation: pulse 1.4s infinite; }

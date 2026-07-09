@@ -1,5 +1,5 @@
 import { test, expect, beforeEach, describe } from "vitest";
-import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow, type FileNode } from "./file-tree";
+import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow, collectExpandedPaths, type FileNode } from "./file-tree";
 
 beforeEach(() => localStorage.clear());
 
@@ -70,5 +70,27 @@ describe("root follow flag", () => {
     expect(loadRootFollow()).toBe(true);
     saveRootFollow(false);
     expect(loadRootFollow()).toBe(false);
+  });
+});
+
+describe("collectExpandedPaths", () => {
+  test("empty tree yields empty set", () => {
+    expect(collectExpandedPaths([]).size).toBe(0);
+  });
+
+  test("collects nested expanded dir paths, skips collapsed and files", () => {
+    const tree: FileNode[] = [
+      {
+        name: "root", path: "/p", type: "dir", expanded: true, children: [
+          { name: "src", path: "/p/src", type: "dir", expanded: true, children: [
+            { name: "deep", path: "/p/src/deep", type: "dir", expanded: false, children: [] },
+            { name: "a.ts", path: "/p/src/a.ts", type: "file" },
+          ] },
+          { name: "docs", path: "/p/docs", type: "dir", expanded: false },
+        ],
+      },
+    ];
+    const got = collectExpandedPaths(tree);
+    expect([...got].sort()).toEqual(["/p", "/p/src"]);
   });
 });

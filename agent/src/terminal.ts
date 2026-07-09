@@ -4,6 +4,7 @@
 import { spawnPty, type PtyHandle } from "./pty";
 import { inferState } from "./state";
 import { toB64 } from "./bytes";
+import { cjkFallbackLang } from "./pty-env";
 import type { SessionMeta, SessionState } from "./protocol";
 
 interface Live {
@@ -53,9 +54,17 @@ export class TerminalService {
   private lastStates = new Map<string, SessionState>();
   private scanTimer: ReturnType<typeof setInterval>;
   private tmux: TmuxRunner;
+  // UTF-8 LANG to seed into new tmux sessions when the agent's own env has no
+  // locale (see ensure() for why this must land on the server, not the client).
+  private langFallback: string | null;
 
-  constructor(deps: { tmux?: TmuxRunner } = {}) {
+  constructor(deps: { tmux?: TmuxRunner; langFallback?: string | null } = {}) {
     this.tmux = deps.tmux ?? defaultTmux;
+    // `??` would treat an explicit `null` (tests asserting "no fallback") the
+    // same as "omitted" and recompute a default — check presence instead so
+    // callers can deliberately force no LANG injection.
+    this.langFallback =
+      deps.langFallback !== undefined ? deps.langFallback : cjkFallbackLang(process.env);
     this.scanTimer = setInterval(() => this.scan(), SCAN_INTERVAL_MS);
     // Don't let the scanner keep the process (or `bun test`) alive on its own.
     (this.scanTimer as unknown as { unref?: () => void }).unref?.();
@@ -214,6 +223,15 @@ export class TerminalService {
       // phone and the input line stays visible. Also dodges the fullscreen
       // renderer's CJK-copy-corruption bug. (tmux 3.0+; `-e` before the command.)
       args.push("-e", "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1");
+      // `-e LANG=...`: a pane program's locale (what `vim`/the shell see) is
+      // decided by the tmux SERVER's `new-session` environment, not by any
+      // flag on the attach CLIENT — `-u` above only makes the attach client
+      // itself UTF-8-aware, it does not reach the pane. Under launchd there is
+      // no LANG/LC_* at all, so without this the pane runs in the C locale and
+      // vim/CJK input gets garbled even though attach() looks correct. Only
+      // seed a fallback when the agent's own env has no locale, so an operator
+      // who explicitly configured one is never overridden (see cjkFallbackLang).
+      if (this.langFallback) args.push("-e", `LANG=${this.langFallback}`);
       if (opt.cwd) args.push("-c", opt.cwd);
       if (opt.cmd) args.push(opt.cmd);
       const res = this.tmux(args);

@@ -12,6 +12,8 @@
 //   - When `terminal` option is used, proc.stdin/stdout/stderr are all null.
 //   - Use `proc.exited` Promise for actual subprocess exit code.
 
+import { ptyEnv } from "./pty-env";
+
 export interface PtyHandle {
   write(data: Uint8Array): void;
   resize(cols: number, rows: number): void;
@@ -39,13 +41,10 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
 
   const proc = Bun.spawn(opts.cmd, {
     terminal,
-    // The PTY client (tmux attach) needs a TERM whose terminfo exists, or tmux
-    // aborts with "open terminal failed: terminal does not support clear". Under
-    // launchd there is no TERM in the environment, so set one explicitly. The
-    // frontend is xterm.js, so xterm-256color is the correct emulation (its
-    // terminfo ships with macOS/Linux). tmux still overrides TERM inside panes
-    // via its own default-terminal, so programs like Claude Code are unaffected.
-    env: { ...process.env, TERM: "xterm-256color" },
+    // ptyEnv keeps TERM correct and guarantees a UTF-8 locale (LANG) when the
+    // service manager (launchd) provides none, so vim/shell inside tmux handle
+    // CJK input correctly. See pty-env.ts.
+    env: ptyEnv(process.env),
   });
 
   // Wire subprocess exit to exitCbs.

@@ -98,7 +98,15 @@
     refit = () => {
       const d = dims();
       if (term.cols !== d.cols || term.rows !== d.rows) term.resize(d.cols, d.rows);
-      conn.resize(sessionId, d.cols, d.rows);
+      // proposeDimensions can over-count by ~1 col on narrow mobile viewports
+      // (padding/scrollbar rounding), clipping the rightmost cells off-screen.
+      // Shrink a column at a time until the rendered screen fits the host width.
+      const screen = host.querySelector(".xterm-screen") as HTMLElement | null;
+      let guard = 4;
+      while (screen && screen.scrollWidth > host.clientWidth && term.cols > 20 && guard-- > 0) {
+        term.resize(term.cols - 1, term.rows);
+      }
+      conn.resize(sessionId, term.cols, term.rows);
     };
 
     const unsubscribeOutput = conn.onOutput((f) => {
