@@ -334,13 +334,13 @@
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 3em;
-    height: 3em;
+    width: 3.9em;
+    height: 3.9em;
     border-radius: 50%;
     background: var(--teal);
     color: var(--teal-dark);
     border: 2px solid var(--bg);
-    font-size: 0.72rem;
+    font-size: 0.94rem;
     font-weight: 600;
     z-index: 2;
     display: flex;
