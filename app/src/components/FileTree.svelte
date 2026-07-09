@@ -94,12 +94,16 @@
     return toFileNodes(path, r.nodes);
   }
 
+  // Display name for the synthetic root node (keep "/" as-is, else basename).
+  function rootLabel(p: string): string {
+    return p === "/" ? "/" : p.slice(p.lastIndexOf("/") + 1);
+  }
+
   async function loadRoot() {
     notice = "";
     try {
       const kids = await loadLevel(root);
-      const rootName = root === "/" ? "/" : root.slice(root.lastIndexOf("/") + 1);
-      nodes = [{ name: rootName, path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
+      nodes = [{ name: rootLabel(root), path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
     } catch (e: any) { notice = e?.message ?? "加载失败"; nodes = []; }
   }
 
@@ -122,8 +126,7 @@
     };
     try {
       const kids = await rebuild(root);
-      const rootName = root === "/" ? "/" : root.slice(root.lastIndexOf("/") + 1);
-      nodes = [{ name: rootName, path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
+      nodes = [{ name: rootLabel(root), path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
       onRefresh?.();
     } catch (e: any) { notice = e?.message ?? "刷新失败"; }
   }
@@ -360,10 +363,8 @@
 <style>
   .ft { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
   .pathbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
-  .root-switch { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
-  .root-switch:active { background: var(--key); }
-  .root-refresh { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
-  .root-refresh:active { background: var(--key); }
+  .root-switch, .root-refresh { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
+  .root-switch:active, .root-refresh:active { background: var(--key); }
   .path-text { flex: 1; min-width: 0; font-size: 0.68rem; color: var(--dim); overflow-x: auto; white-space: nowrap; }
   .root-anchor { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; }
   .root-anchor .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }
