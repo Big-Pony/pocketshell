@@ -80,3 +80,17 @@ export function filterTree(root: FileNode[], query: string): FileNode[] {
   };
   return walk(root);
 }
+
+// Depth-first collect of every currently-expanded directory path, so a refresh
+// can re-fetch those levels and restore the same expansion afterwards.
+export function collectExpandedPaths(nodes: FileNode[]): Set<string> {
+  const out = new Set<string>();
+  const walk = (list: FileNode[]) => {
+    for (const n of list) {
+      if (n.type === "dir" && n.expanded) out.add(n.path);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
