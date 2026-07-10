@@ -25,6 +25,7 @@
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
   import { defaultAgentUrl } from "./lib/agent-url";
   import { lastOutput } from "./lib/terminal-output";
+  import { fullscreenAction } from "./lib/fullscreen";
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
   import { suggest, delta } from "./lib/command-suggest";
   import { CATALOG } from "./lib/command-catalog";
@@ -37,6 +38,13 @@
   let bottomPanel = $state<BottomPanel>("kbd");
   let splitRatio = $state(0.6);
   let fullscreen = $state(false);
+  let pageFullscreen = $state(false);
+  function togglePageFullscreen() {
+    const action = fullscreenAction(document);
+    if (action === "unsupported") { showToast("iOS 请用『添加到主屏幕』获得全屏"); return; }
+    if (action === "enter") document.documentElement.requestFullscreen?.().catch(() => showToast("无法进入全屏"));
+    else document.exitFullscreen?.().catch(() => {});
+  }
   let settings = $state<Settings>(loadSettings());
   let fileTabs = $state<TopTab[]>([]);
   let tabOrder = $state<string[]>([]);
@@ -123,6 +131,9 @@
       // activeId is re-validated against live sessions once onSessions arrives.
       if (saved.activeId) activeId = saved.activeId;
     }
+    const onFsChange = () => { pageFullscreen = !!document.fullscreenElement; };
+    document.addEventListener("fullscreenchange", onFsChange);
+
     registerDevHelpers({
       openFile,
       openPanel,
@@ -141,6 +152,7 @@
       unregisterDevHelpers();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
       topEl?.removeEventListener("pointerup", onTopPointerUp, { capture: true });
+      document.removeEventListener("fullscreenchange", onFsChange);
     };
   });
 
@@ -235,6 +247,12 @@
       cmdLines.set(activeId, feed(cmdState(activeId), text));
       recomputeHints();
     }
+  }
+
+  function handleNewFile(dir: string, name: string) {
+    if (!activeId) { showToast("请先新建或打开一个终端会话"); return; }
+    const path = dir === "/" ? "/" + name : dir + "/" + name;
+    sendActive("vim " + JSON.stringify(path) + "\n"); // opens vim, creating the file
   }
 
   function onHint(cmd: string) {
@@ -440,6 +458,20 @@
         else showToast("无法访问剪贴板");
         break;
       }
+      case "togglePageFullscreen": togglePageFullscreen(); break;
+      case "clearScreen": if (activeId) sendActive("\x0c"); break;
+      case "smartCopy": {
+        // Phase 5 req 1+2: system native selection -> keyboard selection -> last output.
+        const sys = window.getSelection?.()?.toString() ?? "";
+        if (sys.trim()) { writeClip(sys, "已复制选中文本"); break; }
+        const t = activeTerm(); if (!t) { showToast("无终端"); break; }
+        const kb = t.getSelection();
+        if (kb) { writeClip(kb, "已复制选区"); cancelSelection(); break; }
+        const text = lastOutput(t.buffer.active, t.rows);
+        if (!text.trim()) { showToast("无输出可复制"); break; }
+        writeClip(text, "已复制最后输出");
+        break;
+      }
     }
   }
 
@@ -500,6 +532,9 @@
       <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
       <span class="conn-text mono">{statusText[status]}</span>
     </div>
+    <button class="fs-btn mono" aria-label={pageFullscreen ? "退出全屏" : "全屏"} onclick={togglePageFullscreen}>
+      {pageFullscreen ? "⤡" : "⤢"}
+    </button>
   </div>
 
   <div class="tabs-wrap">
@@ -533,31 +568,33 @@
     {/if}
   </div>
 
-  {#if !fullscreen}
-    <div class="divider" role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
-      <div class="grip"></div>
+  <div class="divider" class:hidden={fullscreen} role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
+    <div class="grip"></div>
+  </div>
+  <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
+    <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} onNewFile={handleNewFile} />
     </div>
-    <div class="bottom" style="flex: {1 - topFlex} 1 0;">
-      {#if bottomPanel === "file"}
-        <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} />
-      {:else if bottomPanel === "task"}
-        <TaskPanel
-          {sessions}
-          onSelect={enterSession}
-          onRename={renameSession}
-          onKill={killSession}
-          onCopy={copyOutput}
-          onClose={closeTab}
-        />
-      {:else if bottomPanel === "set"}
-        <SettingsPanel {conn} {settings} onChange={applySettings} />
-      {:else if bottomPanel === "kbd"}
-        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
-      {:else if bottomPanel === "snip"}
-        <SnippetPanel {conn} onInsert={sendActive} />
-      {/if}
+    <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
+      <TaskPanel
+        {sessions}
+        onSelect={enterSession}
+        onRename={renameSession}
+        onKill={killSession}
+        onCopy={copyOutput}
+        onClose={closeTab}
+      />
     </div>
-  {/if}
+    <div class="panel-slot" class:hidden={bottomPanel !== "set"}>
+      <SettingsPanel {conn} {settings} onChange={applySettings} />
+    </div>
+    <div class="panel-slot" class:hidden={bottomPanel !== "kbd"}>
+      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
+    </div>
+    <div class="panel-slot" class:hidden={bottomPanel !== "snip"}>
+      <SnippetPanel {conn} onInsert={sendActive} />
+    </div>
+  </div>
 
   <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={openPanel} />
 </div>
@@ -615,6 +652,17 @@
     min-width: 3em;
     text-align: right;
   }
+  .fs-btn {
+    flex: 0 0 auto;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: var(--radius-md);
+    padding: 2px 8px;
+    font-size: 0.9rem;
+    line-height: 1.2;
+  }
+  .fs-btn:active { background: var(--key); }
 
   .tabs-wrap {
     flex: 0 0 auto;
@@ -689,6 +737,13 @@
     display: flex;
     flex-direction: column;
   }
+  .panel-slot {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .divider.hidden, .bottom.hidden, .panel-slot.hidden { display: none; }
 
   .toast {
     position: absolute;

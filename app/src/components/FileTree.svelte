@@ -12,12 +12,13 @@
   import UploadDialog from "./UploadDialog.svelte";
   import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/transfer";
 
-  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, onToast, onRefresh }: {
+  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, onToast, onRefresh, onNewFile }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
     getFocusedPwd: () => Promise<{ pwd: string } | { error: string }>;
     rootTick: number;
     onToast: (msg: string) => void;
     onRefresh?: () => void;
+    onNewFile?: (dir: string, name: string) => void;
   } = $props();
 
   const cached0 = getBrowseCache();
@@ -31,6 +32,15 @@
   let confirmDel = $state<FileNode | null>(null);
   let arm = $state<ArmState>(IDLE);
   let uploadDir = $state<string | null>(null);
+  let newFileDir = $state<string | null>(null);
+  let newFileName = $state("");
+  function openNewFile(n: FileNode) { newFileDir = n.path; newFileName = ""; }
+  function submitNewFile() {
+    const name = newFileName.trim();
+    if (!newFileDir || !name) return;
+    onNewFile?.(newFileDir, name);
+    newFileDir = null;
+  }
   let archiving = $state(false);
   let historyOpen = $state(false);
   let historyList = $state<string[]>([]);
@@ -288,6 +298,7 @@
         { label: "cd 到此处", icon: "⌘", onSelect: () => onCd(menuFor!.path) },
         { label: "重命名", icon: "✎", onSelect: () => doRename(menuFor!) },
         { label: "新建目录", icon: "＋", onSelect: () => doMkdir(menuFor!) },
+        { label: "新建文件", icon: "⊕", onSelect: () => openNewFile(menuFor!) },
         { label: "上传文件", icon: "⬆", onSelect: () => { uploadDir = menuFor!.path; } },
         { label: "下载", icon: "⬇", onSelect: () => doDownloadDir(menuFor!) },
         { label: "删除", icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
@@ -307,6 +318,23 @@
     <UploadDialog {conn} dir={uploadDir}
       onClose={() => (uploadDir = null)}
       onUploaded={(d) => { uploadDir = null; void refreshParent(childPath(d, "x")); }} />
+  {/if}
+
+  {#if newFileDir}
+    <div class="confirm-overlay" role="presentation" onclick={() => (newFileDir = null)}>
+      <div class="confirm-dlg" role="dialog" aria-modal="true" aria-labelledby="newfile-title" tabindex="-1"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.key === 'Escape' && (newFileDir = null)}>
+        <div class="dlg-title" id="newfile-title">新建文件</div>
+        <div class="dlg-path mono">{newFileDir}</div>
+        <input class="nf-input mono" placeholder="文件名（如 main.ts）" bind:value={newFileName}
+          onkeydown={(e) => { if (e.key === 'Enter') submitNewFile(); if (e.key === 'Escape') newFileDir = null; }} />
+        <div class="dlg-btns">
+          <button onclick={() => (newFileDir = null)}>取消</button>
+          <button class="ok" disabled={!newFileName.trim()} onclick={submitNewFile}>确认</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if archiving}
@@ -402,6 +430,9 @@
   .dlg-btns button { flex: 1; padding: 9px 0; border-radius: var(--radius-md); border: 1px solid var(--line); font-size: 0.75rem; background: var(--key); color: var(--text); }
   .dlg-btns button.danger { background: var(--red); color: #fff; border-color: transparent; }
   .dlg-btns button.danger.armed { outline: 2px solid var(--amber); }
+  .nf-input { width: 100%; box-sizing: border-box; margin-bottom: 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 8px 10px; font-size: 0.75rem; }
+  .dlg-btns button.ok { background: var(--teal); color: #06231e; border-color: transparent; font-weight: 700; }
+  .dlg-btns button.ok:disabled { opacity: 0.5; }
 
   .arch-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(7,9,11,0.7); display: grid; place-items: center; gap: 10px; }
   .arch-overlay .arch-txt { color: var(--text); font-size: 0.75rem; text-align: center; }
