@@ -31,8 +31,11 @@ export function feed(s: CmdLineState, text: string): CmdLineState {
     const c = chars[i];
     const code = c.codePointAt(0)!;
     if (c === "\r" || c === "\n") {
+      // Only commit when the reconstruction is still trustworthy. An untrusted
+      // line (after cursor movement / Tab completion / multi-line editing) is a
+      // guess that would pollute history and later completions, so drop it.
       const cmd = line.trim();
-      if (cmd) history = commit(history, cmd);
+      if (cmd && trusted) history = commit(history, cmd);
       line = "";
       trusted = true;
     } else if (code === 0x7f || code === 0x08) {

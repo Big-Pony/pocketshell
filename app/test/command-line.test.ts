@@ -68,3 +68,14 @@ test("history deduplication: repeated command moves to front", () => {
   s = feed(s, "ls\r");
   expect(s.history).toEqual(["ls", "pwd"]);
 });
+
+test("untrusted line is not committed to history on Enter", () => {
+  let s = feed(emptyCmdLine(), "ls -la");
+  s = feed(s, "\x1b[D"); // cursor-left -> untrusted (reconstruction unreliable)
+  expect(s.trusted).toBe(false);
+  s = feed(s, "x");
+  s = feed(s, "\r"); // Enter: drop the guessed line instead of polluting history
+  expect(s.history).toEqual([]);
+  expect(s.line).toBe("");
+  expect(s.trusted).toBe(true); // recovers for the next line
+});
