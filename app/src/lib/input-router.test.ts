@@ -105,3 +105,30 @@ test("selecting mode: non-arrow keys are unaffected", () => {
 test("selecting defaults to false: bare arrow still sends bytes", () => {
   expect(resolveKey("ArrowUp", M())).toEqual({ kind: "bytes", text: "\x1b[A" });
 });
+
+// ---- Phase 5 req 2: Cmd GUI shortcuts ----
+
+test("cmd letters map to app commands, not control chars", () => {
+  expect(resolveKey("a", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "selectAllCopy" } });
+  expect(resolveKey("c", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "smartCopy" } });
+  expect(resolveKey("v", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "paste" } });
+  expect(resolveKey("f", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "togglePageFullscreen" } });
+  expect(resolveKey("n", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "newSession" } });
+  expect(resolveKey("r", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "renameSession" } });
+  expect(resolveKey("k", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "clearScreen" } });
+});
+
+test("cmd arrows switch tabs", () => {
+  expect(resolveKey("ArrowLeft", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "prevTab" } });
+  expect(resolveKey("ArrowRight", M({ cmd: true }))).toEqual({ kind: "command", command: { type: "nextTab" } });
+});
+
+test("ctrl letters still send control chars (regression: ctrl semantics untouched)", () => {
+  expect(resolveKey("a", M({ ctrl: true }))).toEqual({ kind: "bytes", text: "\x01" });
+  expect(resolveKey("c", M({ ctrl: true }))).toEqual({ kind: "bytes", text: "\x03" });
+});
+
+test("fn takes precedence over cmd when both are active", () => {
+  // Fn+n is newSession via the Fn layer; cmd must not override the Fn branch.
+  expect(resolveKey("n", M({ fn: true, cmd: true }))).toEqual({ kind: "command", command: { type: "newSession" } });
+});

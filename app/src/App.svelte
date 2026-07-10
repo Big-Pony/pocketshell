@@ -452,6 +452,20 @@
         else showToast("无法访问剪贴板");
         break;
       }
+      case "togglePageFullscreen": togglePageFullscreen(); break;
+      case "clearScreen": if (activeId) sendActive("\x0c"); break;
+      case "smartCopy": {
+        // Phase 5 req 1+2: system native selection -> keyboard selection -> last output.
+        const sys = window.getSelection?.()?.toString() ?? "";
+        if (sys.trim()) { writeClip(sys, "已复制选中文本"); break; }
+        const t = activeTerm(); if (!t) { showToast("无终端"); break; }
+        const kb = t.getSelection();
+        if (kb) { writeClip(kb, "已复制选区"); cancelSelection(); break; }
+        const text = lastOutput(t.buffer.active, t.rows);
+        if (!text.trim()) { showToast("无输出可复制"); break; }
+        writeClip(text, "已复制最后输出");
+        break;
+      }
     }
   }
 
