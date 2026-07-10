@@ -62,6 +62,7 @@ const ARROW_DIR: Record<string, "up" | "down" | "left" | "right"> = {
 };
 
 function fnCommand(id: string): KeyResult {
+  if (/^F([1-9]|1[0-2])$/.test(id)) return { kind: "bytes", text: SEQ[id] };
   if (id === "ArrowLeft") return { kind: "command", command: { type: "prevTab" } };
   if (id === "ArrowRight") return { kind: "command", command: { type: "nextTab" } };
   if (id === "ArrowUp") return { kind: "command", command: { type: "scrollUp" } };

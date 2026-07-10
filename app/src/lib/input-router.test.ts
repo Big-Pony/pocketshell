@@ -70,6 +70,22 @@ test("fn layer maps to app commands, not PTY", () => {
   expect(resolveKey("x", M({ fn: true }))).toEqual({ kind: "none" });
 });
 
+test("Fn+F1 sends the F1 escape sequence", () => {
+  expect(resolveKey("F1", M({ fn: true }))).toEqual({ kind: "bytes", text: "\x1bOP" });
+});
+
+test("Fn+F12 sends the F12 escape sequence", () => {
+  expect(resolveKey("F12", M({ fn: true }))).toEqual({ kind: "bytes", text: "\x1b[24~" });
+});
+
+test("Fn layer: arrows still map to app commands (regression)", () => {
+  expect(resolveKey("ArrowLeft", M({ fn: true }))).toEqual({ kind: "command", command: { type: "prevTab" } });
+});
+
+test("without Fn, F1 still sends its escape sequence (regression)", () => {
+  expect(resolveKey("F1", M())).toEqual({ kind: "bytes", text: "\x1bOP" });
+});
+
 test("selecting mode: bare arrows become selMove commands", () => {
   expect(resolveKey("ArrowUp", M(), true)).toEqual({ kind: "command", command: { type: "selMove", dir: "up" } });
   expect(resolveKey("ArrowDown", M(), true)).toEqual({ kind: "command", command: { type: "selMove", dir: "down" } });
