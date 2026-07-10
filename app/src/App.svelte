@@ -25,6 +25,9 @@
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
   import { defaultAgentUrl } from "./lib/agent-url";
   import { lastOutput } from "./lib/terminal-output";
+  import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
+  import { suggest, delta } from "./lib/command-suggest";
+  import { CATALOG } from "./lib/command-catalog";
 
   const wsUrl = getAgentAddr() ?? defaultAgentUrl(import.meta.env.DEV, location);
 
@@ -65,6 +68,18 @@
   const conn = new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");
   const terms = new Map<string, Terminal>();
+  const cmdLines = new Map<string, CmdLineState>();
+  let hints = $state<string[]>([]);
+
+  function cmdState(id: string): CmdLineState {
+    let s = cmdLines.get(id);
+    if (!s) { s = emptyCmdLine(); cmdLines.set(id, s); }
+    return s;
+  }
+  function recomputeHints() {
+    const s = cmdLines.get(activeId);
+    hints = s && s.trusted ? suggest(s.line, s.history, CATALOG) : [];
+  }
 
   conn.onStatus((s) => (status = s));
   // Guard so restored session tabs are re-attached exactly once (on the first
@@ -213,6 +228,19 @@
   function sendActive(text: string) {
     if (!activeId) return;
     conn.sendInput(activeId, new TextEncoder().encode(text));
+    // Mirror outbound bytes into the per-session command line, except while a
+    // full-screen TUI (vim/htop) owns the alternate screen — then hints pause.
+    const alt = activeTerm()?.buffer.active.type === "alternate";
+    if (!alt) {
+      cmdLines.set(activeId, feed(cmdState(activeId), text));
+      recomputeHints();
+    }
+  }
+
+  function onHint(cmd: string) {
+    if (!activeId) return;
+    const s = cmdState(activeId);
+    sendActive(delta(s.line, cmd));
   }
 
   function openFile(path: string, mode: "code" | "diff" = "code") {
@@ -256,6 +284,12 @@
       return { error: "无法获取该会话的工作目录" };
     }
   }
+
+  // Recompute hint bar when the active terminal changes.
+  $effect(() => {
+    activeId;
+    recomputeHints();
+  });
 
   // Project-root-follow: when enabled, switching to a terminal tab re-points the
   // bookmark at that session's cwd and signals FileTree to reload.
@@ -518,7 +552,7 @@
       {:else if bottomPanel === "set"}
         <SettingsPanel {conn} {settings} onChange={applySettings} />
       {:else if bottomPanel === "kbd"}
-        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} />
+        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
       {:else if bottomPanel === "snip"}
         <SnippetPanel {conn} onInsert={sendActive} />
       {/if}
