@@ -223,6 +223,19 @@
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
   }
+  /* Phase 5 req 1: allow native OS text selection on the terminal (mobile long-press).
+     xterm DOM renderer uses real spans; overriding user-select lets the system
+     selection handles appear. IME suppression is already handled by the helper
+     textarea being readOnly + inputmode=none, so this does not bring up the keyboard.
+     Known limits: multi-line selection may include trailing padding spaces; active
+     output rebuids the DOM and clears an in-progress selection. */
+  .term :global(.xterm),
+  .term :global(.xterm .xterm-screen),
+  .term :global(.xterm .xterm-rows),
+  .term :global(.xterm .xterm-rows *) {
+    user-select: text;
+    -webkit-user-select: text;
+  }
   .hidden { display: none; }
   .closed { opacity: 0.6; }
 </style>
