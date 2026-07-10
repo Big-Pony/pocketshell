@@ -1,12 +1,13 @@
 <!-- app/src/components/Keyboard.svelte -->
 <script lang="ts">
-  import { LAYOUT, MOD_IDS, capFor } from "../lib/keymap";
+  import { LAYOUT, FKEYS, ESC_KEY, SEQ, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
 
-  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle" }: {
+  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
     vibrate?: boolean; layout?: "mac" | "win"; selecting?: boolean; selCount?: number;
     selMode?: "idle" | "selecting" | "line";
+    hints?: string[]; onHint?: (cmd: string) => void;
   } = $props();
 
   let sub = $state<"keys" | "ime" | "ops">("keys");
@@ -24,6 +25,16 @@
     if (r.kind === "bytes") onText(r.text);
     else if (r.kind === "command") onCommand(r.command);
     mods = consumeAfterKey(mods);
+  }
+
+  function pressEsc() {
+    buzz();
+    onText(SEQ.Esc);
+    mods = consumeAfterKey(mods);
+  }
+  function tapHint(cmd: string) {
+    buzz();
+    onHint(cmd);
   }
 
   function sendIme() {
@@ -53,6 +64,24 @@
   </div>
 
   {#if sub === "keys"}
+    <div class="funcrow">
+      <button class="key esc" data-key-id="Esc"
+        onpointerdown={(e) => { e.preventDefault(); pressEsc(); }}>{ESC_KEY.cap}</button>
+      {#if isModOn("Fn")}
+        <div class="fkeys">
+          {#each FKEYS as k (k.id)}
+            <button class="key fkey" data-key-id={k.id}
+              onpointerdown={(e) => { e.preventDefault(); press(k.id); }}>{k.cap}</button>
+          {/each}
+        </div>
+      {:else}
+        <div class="hints">
+          {#each hints as h (h)}
+            <button class="hint-chip" onpointerdown={(e) => { e.preventDefault(); tapHint(h); }}>{h}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
     <div class="rows">
       {#each LAYOUT as row}
         <div class="row">
@@ -159,6 +188,59 @@
     color: var(--teal);
     border-color: var(--line-strong);
   }
+
+  .funcrow {
+    display: flex;
+    gap: 3px;
+    padding: 4px 4px 0;
+    flex: 0 0 auto;
+    align-items: stretch;
+  }
+  .funcrow .key.esc {
+    flex: 0 0 auto;
+    min-width: 3em;
+    min-height: 2.3em;
+    font-size: 0.62rem;
+  }
+  .fkeys {
+    display: flex;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .fkeys::-webkit-scrollbar { display: none; }
+  .fkeys .fkey {
+    flex: 1 1 0;
+    min-width: 2.4em;
+    min-height: 2.3em;
+    font-size: 0.62rem;
+  }
+  .hints {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    align-items: center;
+  }
+  .hints::-webkit-scrollbar { display: none; }
+  .hint-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    background: var(--key);
+    color: var(--teal);
+    border: 1px solid var(--key-line);
+    border-radius: var(--radius-md);
+    padding: 5px 10px;
+    font-size: 0.7rem;
+    touch-action: none;
+    user-select: none;
+    min-height: 2.3em;
+  }
+  .hint-chip:active { background: var(--keyhi); }
 
   .rows {
     display: flex;

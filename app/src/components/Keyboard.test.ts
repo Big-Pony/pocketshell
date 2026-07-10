@@ -56,6 +56,34 @@ test("ops sub-tab: Home button sends escape sequence via onText", async () => {
   expect(onText).toHaveBeenCalledWith("\x1b[H");
 });
 
+test("normal state shows hint chips and tapping one calls onHint", async () => {
+  const onHint = vi.fn();
+  render(Keyboard, {
+    props: { onText: () => {}, onCommand: () => {}, hints: ["git status", "ls -la"], onHint },
+  });
+  const chip = screen.getByText("git status");
+  await fireEvent.pointerDown(chip);
+  expect(onHint).toHaveBeenCalledWith("git status");
+});
+
+test("Fn state shows F1–F12 in the function row", async () => {
+  render(Keyboard, {
+    props: { onText: () => {}, onCommand: () => {}, hints: ["git status"] },
+  });
+  expect(screen.queryByText("F1")).toBeNull();
+  await fireEvent.pointerDown(screen.getByText("Fn"));
+  expect(screen.getByText("F1")).toBeInTheDocument();
+});
+
+test("Esc always sends the escape sequence", async () => {
+  const onText = vi.fn();
+  render(Keyboard, {
+    props: { onText, onCommand: () => {}, hints: [] },
+  });
+  await fireEvent.pointerDown(screen.getByText("Esc"));
+  expect(onText).toHaveBeenCalledWith("\x1b");
+});
+
 test("ops sub-tab: circular Enter button sends carriage return", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));

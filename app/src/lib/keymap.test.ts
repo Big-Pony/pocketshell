@@ -1,6 +1,6 @@
 // app/src/lib/keymap.test.ts
 import { test, expect } from "vitest";
-import { SEQ, SHIFT_SYMBOLS, LAYOUT, MOD_IDS, capFor } from "./keymap";
+import { SEQ, SHIFT_SYMBOLS, LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "./keymap";
 
 test("arrow + esc + control sequences are the xterm defaults", () => {
   expect(SEQ.ArrowUp).toBe("\x1b[A");
@@ -27,8 +27,15 @@ test("shift symbol map covers the number row", () => {
   expect(SHIFT_SYMBOLS["`"]).toBe("~");
 });
 
-test("layout has 6 rows and modifiers are single (not duplicated)", () => {
-  expect(LAYOUT.length).toBe(6);
+test("Esc and F-keys live outside LAYOUT for the smart hint bar", () => {
+  expect(ESC_KEY).toEqual({ id: "Esc", cap: "Esc" });
+  expect(FKEYS.length).toBe(12);
+  expect(FKEYS[0]).toEqual({ id: "F1", cap: "F1" });
+  expect(FKEYS[11]).toEqual({ id: "F12", cap: "F12" });
+});
+
+test("layout has 5 rows and modifiers are single (not duplicated)", () => {
+  expect(LAYOUT.length).toBe(5);
   const ids = LAYOUT.flat().map((k) => k.id);
   for (const m of MOD_IDS) {
     expect(ids.filter((id) => id === m).length).toBeLessThanOrEqual(1);

@@ -30,11 +30,13 @@ export function capFor(k: KeyCap, layout: "mac" | "win"): string {
 }
 
 const letters = (s: string): KeyCap[] => s.split("").map((c) => ({ id: c, cap: c.toUpperCase() }));
-const fkeys = Array.from({ length: 12 }, (_, i) => ({ id: `F${i + 1}`, cap: `F${i + 1}` }));
+
+// Function keys and Esc are rendered by Keyboard's dedicated function row
+// (hint bar ↔ F1–F12), not as part of the static LAYOUT grid.
+export const FKEYS: KeyCap[] = Array.from({ length: 12 }, (_, i) => ({ id: `F${i + 1}`, cap: `F${i + 1}` }));
+export const ESC_KEY: KeyCap = { id: "Esc", cap: "Esc" };
 
 export const LAYOUT: KeyCap[][] = [
-  // 功能行
-  [{ id: "Esc", cap: "Esc" }, ...fkeys],
   // 数字行
   [
     { id: "`", cap: "`", up: "~" },
