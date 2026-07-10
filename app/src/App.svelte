@@ -25,6 +25,7 @@
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
   import { defaultAgentUrl } from "./lib/agent-url";
   import { lastOutput } from "./lib/terminal-output";
+  import { fullscreenAction } from "./lib/fullscreen";
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
   import { suggest, delta } from "./lib/command-suggest";
   import { CATALOG } from "./lib/command-catalog";
@@ -37,6 +38,13 @@
   let bottomPanel = $state<BottomPanel>("kbd");
   let splitRatio = $state(0.6);
   let fullscreen = $state(false);
+  let pageFullscreen = $state(false);
+  function togglePageFullscreen() {
+    const action = fullscreenAction(document);
+    if (action === "unsupported") { showToast("iOS 请用『添加到主屏幕』获得全屏"); return; }
+    if (action === "enter") document.documentElement.requestFullscreen?.().catch(() => showToast("无法进入全屏"));
+    else document.exitFullscreen?.().catch(() => {});
+  }
   let settings = $state<Settings>(loadSettings());
   let fileTabs = $state<TopTab[]>([]);
   let tabOrder = $state<string[]>([]);
@@ -123,6 +131,9 @@
       // activeId is re-validated against live sessions once onSessions arrives.
       if (saved.activeId) activeId = saved.activeId;
     }
+    const onFsChange = () => { pageFullscreen = !!document.fullscreenElement; };
+    document.addEventListener("fullscreenchange", onFsChange);
+
     registerDevHelpers({
       openFile,
       openPanel,
@@ -141,6 +152,7 @@
       unregisterDevHelpers();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
       topEl?.removeEventListener("pointerup", onTopPointerUp, { capture: true });
+      document.removeEventListener("fullscreenchange", onFsChange);
     };
   });
 
@@ -500,6 +512,9 @@
       <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
       <span class="conn-text mono">{statusText[status]}</span>
     </div>
+    <button class="fs-btn mono" aria-label={pageFullscreen ? "退出全屏" : "全屏"} onclick={togglePageFullscreen}>
+      {pageFullscreen ? "⤡" : "⤢"}
+    </button>
   </div>
 
   <div class="tabs-wrap">
@@ -615,6 +630,17 @@
     min-width: 3em;
     text-align: right;
   }
+  .fs-btn {
+    flex: 0 0 auto;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: var(--radius-md);
+    padding: 2px 8px;
+    font-size: 0.9rem;
+    line-height: 1.2;
+  }
+  .fs-btn:active { background: var(--key); }
 
   .tabs-wrap {
     flex: 0 0 auto;
