@@ -249,6 +249,12 @@
     }
   }
 
+  function handleNewFile(dir: string, name: string) {
+    if (!activeId) { showToast("请先新建或打开一个终端会话"); return; }
+    const path = dir === "/" ? "/" + name : dir + "/" + name;
+    sendActive("vim " + JSON.stringify(path) + "\n"); // opens vim, creating the file
+  }
+
   function onHint(cmd: string) {
     if (!activeId) return;
     const s = cmdState(activeId);
@@ -567,7 +573,7 @@
   </div>
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
-      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} />
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} onNewFile={handleNewFile} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
       <TaskPanel
