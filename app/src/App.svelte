@@ -562,31 +562,33 @@
     {/if}
   </div>
 
-  {#if !fullscreen}
-    <div class="divider" role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
-      <div class="grip"></div>
+  <div class="divider" class:hidden={fullscreen} role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
+    <div class="grip"></div>
+  </div>
+  <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
+    <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} />
     </div>
-    <div class="bottom" style="flex: {1 - topFlex} 1 0;">
-      {#if bottomPanel === "file"}
-        <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} />
-      {:else if bottomPanel === "task"}
-        <TaskPanel
-          {sessions}
-          onSelect={enterSession}
-          onRename={renameSession}
-          onKill={killSession}
-          onCopy={copyOutput}
-          onClose={closeTab}
-        />
-      {:else if bottomPanel === "set"}
-        <SettingsPanel {conn} {settings} onChange={applySettings} />
-      {:else if bottomPanel === "kbd"}
-        <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
-      {:else if bottomPanel === "snip"}
-        <SnippetPanel {conn} onInsert={sendActive} />
-      {/if}
+    <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
+      <TaskPanel
+        {sessions}
+        onSelect={enterSession}
+        onRename={renameSession}
+        onKill={killSession}
+        onCopy={copyOutput}
+        onClose={closeTab}
+      />
     </div>
-  {/if}
+    <div class="panel-slot" class:hidden={bottomPanel !== "set"}>
+      <SettingsPanel {conn} {settings} onChange={applySettings} />
+    </div>
+    <div class="panel-slot" class:hidden={bottomPanel !== "kbd"}>
+      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
+    </div>
+    <div class="panel-slot" class:hidden={bottomPanel !== "snip"}>
+      <SnippetPanel {conn} onInsert={sendActive} />
+    </div>
+  </div>
 
   <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={openPanel} />
 </div>
@@ -729,6 +731,13 @@
     display: flex;
     flex-direction: column;
   }
+  .panel-slot {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .divider.hidden, .bottom.hidden, .panel-slot.hidden { display: none; }
 
   .toast {
     position: absolute;
