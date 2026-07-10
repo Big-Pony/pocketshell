@@ -228,7 +228,7 @@
      selection handles appear. IME suppression is already handled by the helper
      textarea being readOnly + inputmode=none, so this does not bring up the keyboard.
      Known limits: multi-line selection may include trailing padding spaces; active
-     output rebuids the DOM and clears an in-progress selection. */
+     output rebuilds the DOM and clears an in-progress selection. */
   .term :global(.xterm),
   .term :global(.xterm .xterm-screen),
   .term :global(.xterm .xterm-rows),
