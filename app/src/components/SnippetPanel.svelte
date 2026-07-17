@@ -86,13 +86,13 @@
     margin-bottom: 10px;
     flex: 0 0 auto;
   }
-  .title { font-size: 0.85rem; font-weight: 600; }
+  .title { font-size: 0.9rem; font-weight: 700; }
   .add-btn {
-    background: var(--teal);
-    color: var(--teal-dark);
-    border: 0;
-    border-radius: var(--radius-md);
-    padding: 5px 11px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    padding: 6px 13px;
     font-size: 0.72rem;
     font-weight: 600;
   }
@@ -116,7 +116,7 @@
     font-size: 0.78rem;
     outline: none;
   }
-  .sp-form input:focus { border-color: var(--teal); }
+  .sp-form input:focus { border-color: var(--accent); }
   .check {
     font-size: 0.72rem;
     color: var(--dim);
@@ -125,8 +125,8 @@
     gap: 6px;
   }
   .save {
-    background: var(--teal);
-    color: var(--teal-dark);
+    background: var(--primary-bg);
+    color: var(--primary-text);
     border: 0;
     border-radius: var(--radius-md);
     padding: 7px;
@@ -141,10 +141,11 @@
     padding: 20px 8px;
   }
   .sp-group {
-    color: var(--dim);
-    font-size: 0.66rem;
+    color: var(--dimmer);
+    font-size: 0.62rem;
+    font-weight: 700;
     margin: 10px 2px 6px;
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
     text-transform: uppercase;
   }
   .sp-items {
@@ -155,9 +156,9 @@
   .sp-row {
     display: flex;
     align-items: center;
-    background: var(--panel2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
     overflow: hidden;
   }
   .ins {
@@ -168,8 +169,8 @@
     font-size: 0.75rem;
     font-family: "SF Mono", ui-monospace, monospace;
   }
-  .ins:active { background: var(--key); }
-  .cr { color: var(--teal); margin-left: 5px; font-size: 0.65rem; }
+  .ins:active { background: var(--keyhi); }
+  .cr { color: var(--accent); margin-left: 5px; font-size: 0.65rem; }
   .del {
     background: transparent;
     color: var(--red);

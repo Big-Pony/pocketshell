@@ -75,16 +75,16 @@
   .hint, .empty, .gn { color: var(--dim); padding: 10px; }
   .gn { color: var(--amber); }
   .sec { margin-bottom: 12px; }
-  .st { color: var(--teal); font-weight: 600; margin-bottom: 4px; }
+  .st { color: var(--accent-text); font-weight: 600; margin-bottom: 4px; }
   .cur { color: var(--text); }
   .brs { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
   .br { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 2px 6px; color: var(--dim); }
-  .br.on { color: var(--teal); border-color: var(--teal); }
+  .br.on { color: var(--accent-text); border-color: var(--accent); }
   .tip { color: var(--dimmer); font-size: 0.64rem; }
   .chg, .cm, .more { display: flex; gap: 6px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 4px; align-items: center; }
   .chg:active, .cm:active { background: var(--panel); }
-  .g { font-weight: 700; } .g-M { color: var(--amber); } .g-A { color: var(--teal); } .g-D { color: var(--red); } .g-\? { color: var(--dim); }
+  .g { font-weight: 700; } .g-M { color: var(--amber); } .g-A { color: var(--ok); } .g-D { color: var(--red); } .g-\? { color: var(--dim); }
   .cm { flex-wrap: wrap; } .h { color: var(--amber); } .m { flex: 1; } .meta { color: var(--dim); font-size: 0.64rem; width: 100%; }
   .files { padding: 2px 0 6px 14px; } .cf em { color: var(--dim); font-style: normal; }
-  .more { color: var(--teal); justify-content: center; }
+  .more { color: var(--accent-text); justify-content: center; }
 </style>

@@ -140,37 +140,39 @@
   /* flex:1 + min-width:0 so this fills .tabs-wrap and lets .strip actually
      overflow-scroll; without it the content width pushes .ops (the +) past the
      parent's overflow:hidden edge and off-screen. */
-  .toptabs { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 0 8px 8px; flex: 1; min-width: 0; width: 100%; }
+  .toptabs { display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 2px 12px 10px; flex: 1; min-width: 0; width: 100%; }
   .strip { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
   .strip::-webkit-scrollbar { display: none; }
   .ops { flex: 0 0 auto; }
   .tab {
     flex: none; display: flex; align-items: center; gap: 6px;
-    padding: 5px 11px; border: 1px solid var(--line); border-bottom: none;
-    border-radius: 8px 8px 0 0; background: var(--panel); color: var(--dim);
+    padding: 6px 13px; border: 1px solid var(--tab-line);
+    border-radius: 999px; background: var(--tab-bg); color: var(--dim);
     font-size: 0.74rem; white-space: nowrap; scroll-snap-align: start;
     transition: background 0.15s, color 0.15s;
   }
-  .tab.active { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
+  .tab.active { background: var(--tab-active-bg); color: var(--tab-active-text); border-color: var(--tab-active-line); font-weight: 600; }
   .tab.closed { opacity: 0.7; }
   .dot { width: 6px; height: 6px; border-radius: 50%; }
-  .dot-run { background: var(--teal); animation: pulse 1.4s infinite; }
+  .dot-run { background: var(--ok); animation: pulse 1.4s infinite; }
   .dot-wait { background: var(--amber); animation: pulse 1s infinite; }
   .dot-done { background: var(--dimmer); }
   @keyframes pulse { 50% { opacity: 0.35; } }
   .name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
   .add {
-    flex: none; background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius-md); color: var(--text); padding: 5px 12px; font-size: 0.9rem;
+    flex: none; background: transparent; border: 1px dashed var(--line-strong);
+    border-radius: 50%; color: var(--dim); width: 30px; height: 30px;
+    padding: 0; font-size: 1rem; line-height: 1;
   }
-  .add:active { background: var(--key); }
+  .add:active { background: var(--keyhi); }
 
-  .overlay { position: fixed; inset: 0; z-index: 40; background: rgba(7, 9, 11, 0.75); display: grid; place-items: center; }
-  .dlg { background: #1c2530; border: 1px solid var(--line); border-radius: 14px; padding: 20px; width: min(280px, 82vw); text-align: center; }
+  .overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: grid; place-items: center; }
+  .dlg { background: var(--dlg-bg); border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 20px; width: min(280px, 82vw); text-align: center; box-shadow: var(--pop-shadow); }
   .dlg-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 10px; }
   .dlg-hint { font-size: 0.7rem; color: var(--dim); margin-bottom: 14px; line-height: 1.5; }
   .dlg-input { width: 100%; box-sizing: border-box; background: var(--panel2); border: 1px solid var(--line-strong); border-radius: var(--radius-md); color: var(--text); padding: 8px 10px; font-size: 0.8rem; margin-bottom: 14px; outline: none; }
+  .dlg-input:focus { border-color: var(--accent); }
   .dlg-btns { display: flex; gap: 8px; }
   .dlg-btns button { flex: 1; padding: 9px 0; border-radius: var(--radius-md); border: 1px solid var(--line); font-size: 0.75rem; background: var(--key); color: var(--text); }
-  .dlg-btns button.primary { background: var(--teal); color: var(--teal-dark); border-color: transparent; font-weight: 600; }
+  .dlg-btns button.primary { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; font-weight: 600; }
 </style>

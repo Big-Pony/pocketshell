@@ -62,10 +62,11 @@
       cursorBlink: true,
       disableStdin: true,
       theme: {
-        background: "#1c242c",
-        foreground: "#c8d3dc",
-        cursor: "#46d0b4",
-        selectionBackground: "rgba(106, 169, 232, 0.28)",
+        // 终端区两套主题均为深色（--term-bg/--term-text），此处与之保持一致
+        background: "#0c1017",
+        foreground: "#c6d0dc",
+        cursor: "#3ecf94",
+        selectionBackground: "rgba(110, 168, 254, 0.28)",
       },
     });
     fit = new FitAddon();

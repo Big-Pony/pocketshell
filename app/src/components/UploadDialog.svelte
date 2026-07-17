@@ -141,8 +141,8 @@
 </div>
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(7,9,11,0.75); display: grid; place-items: center; }
-  .dlg { background: #1c2530; border: 1px solid var(--line); border-radius: 14px; padding: 16px; width: min(340px, 88vw); }
+  .backdrop { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: grid; place-items: center; }
+  .dlg { background: var(--dlg-bg); border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 16px; width: min(340px, 88vw); box-shadow: var(--pop-shadow); }
   .hd { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; margin-bottom: 10px; }
   .x { background: transparent; border: 0; color: var(--dim); font-size: 0.9rem; }
   .list { max-height: 40vh; overflow-y: auto; margin: 6px 0; }
@@ -153,10 +153,10 @@
   .empty { color: var(--dim); font-size: 0.72rem; padding: 10px 0; text-align: center; }
   .btns { display: flex; gap: 8px; margin-top: 10px; }
   .btns button { flex: 1; padding: 8px 0; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--key); color: var(--text); font-size: 0.73rem; }
-  .btns button.primary { background: var(--teal); color: #06231f; border-color: transparent; }
+  .btns button.primary { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; }
   .btns button:disabled { opacity: 0.5; }
   .prog { font-size: 0.78rem; text-align: center; padding: 14px 0; }
-  .prog.ok { color: var(--teal); } .prog.err { color: var(--red); }
+  .prog.ok { color: var(--ok); } .prog.err { color: var(--red); }
   .hint { font-size: 0.68rem; color: var(--amber); text-align: center; }
   select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 0.7rem; }
 </style>

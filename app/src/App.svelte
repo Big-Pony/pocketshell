@@ -20,6 +20,7 @@
   import { begin, beginLine, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
   import { detectSwipe } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+  import { applyTheme, watchSystem } from "./lib/theme";
   import { loadTabs, saveTabs } from "./lib/tab-store";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
@@ -61,6 +62,7 @@
   function applySettings(next: Settings) {
     settings = next;
     saveSettings(next);
+    applyTheme(next.theme);
   }
 
   function openPanel(p: BottomPanel) {
@@ -120,6 +122,9 @@
     setTimeout(() => (notice = ""), 4000);
   });
   conn.listSessions();
+
+  // Re-apply when the OS scheme flips while preference is "system".
+  const unwatchSystem = watchSystem(() => settings.theme, () => applyTheme(settings.theme));
 
   onMount(() => {
     const saved = loadTabs();
@@ -526,10 +531,10 @@
 
 <div class="shell">
   <div class="topbar">
-    <span class="brand mono">◧ PocketShell</span>
+    <span class="brand mono">◧ Pocket<b>Shell</b></span>
     <span class="version">S5</span>
-    <div class="conn">
-      <span class="conn-dot" class:online={status === "online"} class:connecting={status === "connecting"} class:offline={status === "offline"}></span>
+    <div class="conn conn-{status}">
+      <span class="conn-dot"></span>
       <span class="conn-text mono">{statusText[status]}</span>
     </div>
     <button class="fs-btn mono" aria-label={pageFullscreen ? "退出全屏" : "全屏"} onclick={togglePageFullscreen}>
@@ -617,52 +622,60 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px 6px;
+    padding: 10px 14px 8px;
     background: var(--bg);
     flex: 0 0 auto;
   }
   .brand {
     font-weight: 700;
-    letter-spacing: 0.4px;
-    font-size: 0.85rem;
-    color: var(--teal);
+    letter-spacing: 0.2px;
+    font-size: 0.94rem;
+    color: var(--text);
   }
+  .brand b { color: var(--accent); font-weight: 700; }
   .version {
     font-size: 0.62rem;
-    color: var(--dim);
+    color: var(--dimmer);
+    font-weight: 600;
+    margin-top: 2px;
   }
   .conn {
     margin-left: auto;
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
     color: var(--dim);
   }
+  .conn-online { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+  .conn-connecting { color: var(--amber); background: var(--amber-soft); border-color: var(--amber); }
+  .conn-offline { color: var(--red); background: var(--red-soft); border-color: var(--red); }
   .conn-dot {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
-    background: var(--dimmer);
+    background: currentColor;
   }
-  .conn-dot.online { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
-  .conn-dot.connecting { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
-  .conn-dot.offline { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .conn-online .conn-dot { box-shadow: 0 0 6px currentColor; }
   .conn-text {
     min-width: 3em;
     text-align: right;
   }
   .fs-btn {
     flex: 0 0 auto;
-    background: var(--panel2);
+    background: var(--panel);
     border: 1px solid var(--line);
-    color: var(--text);
+    color: var(--dim);
     border-radius: var(--radius-md);
-    padding: 2px 8px;
-    font-size: 0.9rem;
-    line-height: 1.2;
+    width: 30px;
+    height: 30px;
+    font-size: 0.85rem;
+    line-height: 1;
   }
-  .fs-btn:active { background: var(--key); }
+  .fs-btn:active { background: var(--keyhi); }
 
   .tabs-wrap {
     flex: 0 0 auto;
@@ -675,20 +688,20 @@
     padding: 0 8px;
   }
   .banner {
-    background: var(--red-dark);
-    color: var(--amber);
+    background: var(--banner-bg);
+    color: var(--banner-text);
     font-size: 0.72rem;
     padding: 6px 12px;
-    border-bottom: 1px solid #55402c;
+    border-bottom: 1px solid var(--banner-line);
     text-align: center;
     flex: 0 0 auto;
   }
   .notice {
-    background: var(--red-dark);
+    background: var(--banner-bg);
     color: var(--red);
     padding: 8px 12px;
     font-size: 13px;
-    border-bottom: 1px solid #55402c;
+    border-bottom: 1px solid var(--banner-line);
     flex: 0 0 auto;
   }
 
@@ -696,8 +709,10 @@
     position: relative;
     min-height: 0;
     overflow: hidden;
-    background: var(--panel2);
-    border-top: 1px solid var(--line-strong);
+    background: var(--term-bg);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-lg);
+    margin: 0 8px;
   }
   .hint {
     display: flex;
@@ -705,26 +720,24 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: var(--dim);
+    color: var(--term-dim);
     text-align: center;
     gap: 6px;
   }
-  .hint-title { font-size: 15px; color: var(--text); }
+  .hint-title { font-size: 15px; color: var(--term-text); }
   .hint-body { font-size: 12px; }
 
   .divider {
     flex: 0 0 auto;
-    background: var(--panel);
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    padding: 6px 0;
+    background: transparent;
+    padding: 7px 0;
     touch-action: none;
     display: flex;
     justify-content: center;
     align-items: center;
   }
   .grip {
-    width: 44px;
+    width: 40px;
     height: 4px;
     border-radius: 2px;
     background: var(--keyhi);
@@ -750,12 +763,13 @@
     left: 50%;
     bottom: 110px;
     transform: translateX(-50%) translateY(8px);
-    background: #243039;
+    background: var(--toast-bg);
     border: 1px solid var(--line-strong);
-    color: var(--text);
+    color: var(--toast-text);
     font-size: 0.72rem;
     padding: 8px 14px;
-    border-radius: var(--radius-xl);
+    border-radius: 999px;
+    box-shadow: var(--pop-shadow);
     opacity: 0;
     transition: 0.2s;
     pointer-events: none;

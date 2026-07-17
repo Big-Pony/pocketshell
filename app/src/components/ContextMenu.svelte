@@ -47,12 +47,12 @@
   .ctxmenu {
     position: fixed;
     z-index: 31;
-    background: #1e2936;
+    background: var(--menu-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-xl);
     padding: 4px 0;
     min-width: 160px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    box-shadow: var(--pop-shadow);
     display: flex;
     flex-direction: column;
   }
@@ -67,7 +67,7 @@
     align-items: center;
     gap: 8px;
   }
-  .ctxmenu button:active { background: var(--key); }
+  .ctxmenu button:active { background: var(--keyhi); }
   .ctxmenu .danger { color: var(--red); }
   .ctxmenu .sep { height: 1px; background: var(--line); margin: 3px 0; }
   .ic { font-size: 0.8rem; }

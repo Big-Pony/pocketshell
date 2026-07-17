@@ -62,19 +62,20 @@
 </div>
 
 <style>
-  .preview { width: 100%; height: 100%; overflow: auto; background: var(--panel2); }
+  /* 上区（终端/代码预览）两套主题下均为深色，固定用 --term-* 令牌 */
+  .preview { width: 100%; height: 100%; overflow: auto; background: var(--term-bg); color: var(--term-text); }
   .hidden { display: none; }
-  .pv-notice { font-size: 0.7rem; color: var(--amber); padding: 6px 10px; background: var(--panel); }
+  .pv-notice { font-size: 0.7rem; color: var(--amber); padding: 6px 10px; }
   .codewrap { display: flex; align-items: flex-start; padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
-  .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--dimmer); user-select: none; }
+  .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--term-dim); user-select: none; }
   .gutter .ln { min-width: 2.2em; }
   .code { margin: 0; white-space: pre; }
   .code code { font: inherit; }
   .diff { padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
   .hh { color: var(--amber); margin: 6px 0 2px; }
   .dl { white-space: pre; }
-  .dl.add { color: var(--teal); }
+  .dl.add { color: var(--ok); }
   .dl.del { color: var(--red); }
-  .dl.ctx { color: var(--dim); }
+  .dl.ctx { color: var(--term-dim); }
   .sign { display: inline-block; width: 1em; user-select: none; }
 </style>
