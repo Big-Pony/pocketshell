@@ -4,6 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>PocketShell</title>
+    <script>
+      // Apply the persisted theme before first paint (FOUC guard). Mirrors
+      // app/src/lib/theme.ts — keep the storage key and logic in sync.
+      (function () {
+        var pref = "dark";
+        try {
+          var s = JSON.parse(localStorage.getItem("ps.settings") || "{}");
+          if (s.theme === "dark" || s.theme === "light" || s.theme === "system") pref = s.theme;
+        } catch (e) {}
+        var resolved = pref === "system"
+          ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+          : pref;
+        document.documentElement.dataset.theme = resolved;
+        document.documentElement.style.background = resolved === "light" ? "#f5f5f2" : "#0a0d13";
+      })();
+    </script>
   </head>
   <body style="margin:0">
     <div id="app"></div>

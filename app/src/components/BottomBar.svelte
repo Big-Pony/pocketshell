@@ -34,8 +34,8 @@
 <style>
   .bar {
     display: flex;
-    background: var(--panel);
-    border-top: 1px solid var(--line);
+    background: var(--bb-bg);
+    border-top: 1px solid var(--bb-line);
     flex: 0 0 auto;
     padding: 4px 2px calc(6px + var(--safe-bottom));
   }
@@ -43,7 +43,7 @@
     flex: 1;
     background: transparent;
     border: 0;
-    color: var(--dim);
+    color: var(--dimmer);
     padding: 6px 0 4px;
     display: flex;
     flex-direction: column;
@@ -56,15 +56,24 @@
     transition: background 0.15s, color 0.15s;
   }
   .btab.active {
-    color: var(--teal);
-    background: rgba(70, 208, 180, 0.08);
+    color: var(--bb-active);
+    font-weight: 600;
+  }
+  .btab.active::before {
+    content: "";
+    position: absolute;
+    top: -5px;
+    width: 22px;
+    height: 2.5px;
+    border-radius: 2px;
+    background: var(--bb-indicator);
   }
   .btab.disabled {
     color: var(--dimmer);
     opacity: 0.5;
   }
   .btab:not(.disabled):active {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--accent-soft);
   }
   .ic { font-size: 1rem; line-height: 1; margin-bottom: 2px; }
   .lb { font-size: 0.6rem; }

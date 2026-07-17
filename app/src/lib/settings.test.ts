@@ -20,8 +20,8 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", fontSize: 14, vibrate: false }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: false });
+  saveSettings({ layout: "win", fontSize: 14, vibrate: false, theme: "light" }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: false, theme: "light" });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
@@ -31,6 +31,23 @@ test("loadSettings fills missing keys with defaults", () => {
   expect(s.vibrate).toBe(false);
   expect(s.layout).toBe("mac"); // default
   expect(s.fontSize).toBe(10);  // default
+  expect(s.theme).toBe("dark"); // default
+});
+
+test("default theme is dark", () => {
+  expect(DEFAULT_SETTINGS.theme).toBe("dark");
+});
+
+test("loadSettings rejects unknown theme values", () => {
+  const store = memStore();
+  store.setItem("ps.settings", JSON.stringify({ theme: "neon" }));
+  expect(loadSettings(store).theme).toBe("dark");
+});
+
+test("loadSettings accepts system theme", () => {
+  const store = memStore();
+  store.setItem("ps.settings", JSON.stringify({ theme: "system" }));
+  expect(loadSettings(store).theme).toBe("system");
 });
 
 test("default fontSize is 10", () => {

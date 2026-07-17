@@ -397,9 +397,9 @@
   .root-anchor { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; }
   .root-anchor .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }
   .root-anchor .ring::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--dim); }
-  .root-anchor.on { border-color: var(--teal); }
-  .root-anchor.on .ring { border-color: var(--teal); }
-  .root-anchor.on .ring::after { background: var(--teal); }
+  .root-anchor.on { border-color: var(--accent); }
+  .root-anchor.on .ring { border-color: var(--accent); }
+  .root-anchor.on .ring::after { background: var(--accent); }
   .filter { margin: 0 8px 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 6px 8px; font-size: 0.72rem; }
   .ft-notice { font-size: 0.68rem; color: var(--amber); padding: 2px 10px; }
   .tree { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
@@ -411,17 +411,18 @@
   .tw { width: 1em; color: var(--dim); }
   .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g { font-size: 0.6rem; font-weight: 700; }
-  .g-M { color: var(--amber); } .g-A { color: var(--teal); } .g-D { color: var(--red); } .g-\? { color: var(--dim); }
+  .g-M { color: var(--amber); } .g-A { color: var(--ok); } .g-D { color: var(--red); } .g-\? { color: var(--dim); }
 
   .confirm-overlay {
     position: fixed; inset: 0; z-index: 40;
-    background: rgba(7, 9, 11, 0.75);
+    background: var(--overlay-bg);
     display: grid; place-items: center;
   }
   .confirm-dlg {
-    background: #1c2530; border: 1px solid var(--line);
-    border-radius: 14px; padding: 20px;
+    background: var(--dlg-bg); border: 1px solid var(--line);
+    border-radius: var(--radius-xl); padding: 20px;
     width: min(280px, 80vw); text-align: center;
+    box-shadow: var(--pop-shadow);
   }
   .dlg-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; }
   .dlg-path { font-size: 0.7rem; color: var(--text); margin-bottom: 6px; word-break: break-all; }
@@ -431,18 +432,18 @@
   .dlg-btns button.danger { background: var(--red); color: #fff; border-color: transparent; }
   .dlg-btns button.danger.armed { outline: 2px solid var(--amber); }
   .nf-input { width: 100%; box-sizing: border-box; margin-bottom: 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 8px 10px; font-size: 0.75rem; }
-  .dlg-btns button.ok { background: var(--teal); color: #06231e; border-color: transparent; font-weight: 700; }
+  .dlg-btns button.ok { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; font-weight: 700; }
   .dlg-btns button.ok:disabled { opacity: 0.5; }
 
-  .arch-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(7,9,11,0.7); display: grid; place-items: center; gap: 10px; }
+  .arch-overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: grid; place-items: center; gap: 10px; }
   .arch-overlay .arch-txt { color: var(--text); font-size: 0.75rem; text-align: center; }
-  .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--teal); border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite; }
+  .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .hist-list { list-style: none; margin: 0 0 14px; padding: 0; max-height: 44vh; overflow-y: auto; text-align: left; }
   .hist-list li { margin-bottom: 5px; }
   .hist-item { width: 100%; text-align: left; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 8px 10px; font-size: 0.7rem; word-break: break-all; }
-  .hist-item.cur { border-color: var(--teal); color: var(--teal); }
+  .hist-item.cur { border-color: var(--accent); color: var(--accent-text); }
   .hist-item:disabled { opacity: 0.7; }
   .hist-empty { color: var(--dim); font-size: 0.72rem; margin-bottom: 14px; }
 </style>

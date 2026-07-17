@@ -18,32 +18,192 @@
   font-display: swap;
 }
 
-/* Design tokens based on docs/需求/原型构想/remote-code-mockup.html */
+/* ==========================================================================
+   双主题设计令牌（2026-07-17）
+   - :root                       → 主题 A「深色 IDE」（默认）
+   - :root[data-theme="light"]   → 主题 B「浅色极简」
+   新组件规则：
+   1. 只允许引用变量，禁止写死颜色/阴影；两套主题都必须好看。
+   2. 颜色用语义令牌（--accent 主色 / --ok 成功运行 / --primary-* 实心主按钮），
+      不要直接用 --green/--blue 这类色名令牌（它们只被语义令牌引用）。
+   3. 结构性主题差异用 `:global(html[data-theme="light"]) .your-class` 覆盖。
+   4. 终端/代码预览区两版均为深色：固定用 --term-* 令牌。
+   ========================================================================== */
 :root {
-  --bg: #0f1317;
-  --bg-deep: #07090b;
-  --panel: #161c22;
-  --panel2: #1c242c;
-  --line: #26303a;
-  --line-strong: #33404c;
-  --text: #c8d3dc;
-  --dim: #6b7885;
-  --dimmer: #4a5866;
-  --amber: #e8a33d;
-  --teal: #46d0b4;
-  --teal-dark: #08211b;
-  --red: #e06c5f;
-  --red-dark: #3a2a20;
-  --blue: #6aa9e8;
-  --key: #222c35;
-  --keyhi: #2d3a46;
-  --key-line: #33404c;
-  --radius-sm: 5px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 10px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
   --safe-bottom: env(safe-area-inset-bottom);
   --safe-top: env(safe-area-inset-top);
+
+  /* ---- 主题 A：深色 IDE（默认） ---- */
+  --bg: #0f131b;            /* 应用底 */
+  --bg-deep: #0a0d13;       /* 最深层（底栏等） */
+  --panel: #151a24;         /* 面板/卡片 */
+  --panel2: #1b2230;        /* 抬升面 */
+  --elev: #222b3b;          /* 更抬升（激活态） */
+  --line: #232c3c;
+  --line-soft: #1c2330;
+  --line-strong: #33404c;
+  --text: #d9e0ea;
+  --dim: #7e8999;
+  --dimmer: #525d6f;
+
+  /* 主色（品牌/主操作） */
+  --accent: #7c8cf8;
+  --accent-soft: rgba(124, 140, 248, 0.14);
+  --accent-text: #aab4fb;
+  --on-accent: #0d1020;
+  /* 实心主按钮（确认/管理/发送） */
+  --primary-bg: var(--accent);
+  --primary-text: var(--on-accent);
+
+  /* 状态色 */
+  --ok: #3ecf94;            /* 运行中/已连接 */
+  --amber: #e5b567;         /* 等待输入/警告 */
+  --red: #e5646b;           /* 危险/断开 */
+  --cyan: #56c8dc;
+  --blue: #6ea8fe;
+  --ok-soft: rgba(62, 207, 148, 0.10);
+  --ok-line: rgba(62, 207, 148, 0.24);
+  --amber-soft: rgba(229, 181, 103, 0.12);
+  --red-soft: rgba(229, 100, 107, 0.12);
+  --red-dark: #3a2a20;      /* 断线横幅底 */
+  --banner-line: #55402c;
+
+  /* 兼容别名：历史代码大量引用 --teal（运行/连接语义=绿） */
+  --teal: var(--ok);
+  --teal-dark: #06231e;
+
+  /* 终端区（两版均深色） */
+  --term-bg: #0c1017;
+  --term-text: #c6d0dc;
+  --term-dim: #6b7686;
+
+  /* 键盘键帽 */
+  --key: #1b2230;
+  --key-bg-image: linear-gradient(180deg, #202839, #1b2230);
+  --keyhi: #2d3a46;
+  --key-line: #29334a;
+  --key-text: var(--text);
+  --key-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  --key-mod-bg: #12161f;
+  --key-enter-bg: linear-gradient(180deg, #8f9df9, #6c7cf0);
+  --key-enter-text: #0d1020;
+  --key-enter-line: #8f9df9;
+
+  /* 分段控件（键盘子 tab / 布局切换 / 主题切换） */
+  --seg-bg: var(--panel);
+  --seg-line: var(--line-soft);
+  --seg-active-bg: var(--elev);
+  --seg-active-text: var(--text);
+  --seg-shadow: none;
+
+  /* 上区 tab */
+  --tab-bg: transparent;
+  --tab-line: var(--line-soft);
+  --tab-active-bg: var(--accent-soft);
+  --tab-active-text: var(--accent-text);
+  --tab-active-line: rgba(124, 140, 248, 0.35);
+
+  /* 底栏 */
+  --bb-bg: var(--bg-deep);
+  --bb-line: var(--line-soft);
+  --bb-active: var(--accent-text);
+  --bb-indicator: var(--accent);
+
+  /* 弹层 */
+  --overlay-bg: rgba(7, 9, 11, 0.72);
+  --dlg-bg: #1b2230;
+  --menu-bg: #1e2936;
+  --pop-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --toast-bg: #222b3b;
+  --toast-text: var(--text);
+
+  /* 断线横幅 */
+  --banner-bg: var(--red-dark);
+  --banner-text: var(--amber);
+}
+
+/* ---- 主题 B：浅色极简 ---- */
+:root[data-theme="light"] {
+  --bg: #f5f5f2;            /* 纸白 */
+  --bg-deep: #efefeb;
+  --panel: #ffffff;
+  --panel2: #f0f0ec;
+  --elev: #ffffff;
+  --line: #e5e5e0;
+  --line-soft: #ececea;
+  --line-strong: #d0d0ca;
+  --text: #1b1f26;
+  --dim: #6c727b;
+  --dimmer: #a2a8b0;
+
+  --accent: #2f6bde;
+  --accent-soft: rgba(47, 107, 222, 0.09);
+  --accent-text: #2f6bde;
+  --on-accent: #ffffff;
+  /* 浅色版实心主按钮 = 近黑 */
+  --primary-bg: #1b1f26;
+  --primary-text: #ffffff;
+
+  --ok: #1a9e6b;
+  --amber: #c98a1b;
+  --red: #d5494d;
+  --cyan: #0e8fa8;
+  --blue: #2f6bde;
+  --ok-soft: rgba(26, 158, 107, 0.08);
+  --ok-line: rgba(26, 158, 107, 0.25);
+  --amber-soft: rgba(201, 138, 27, 0.10);
+  --red-soft: rgba(213, 73, 77, 0.10);
+  --red-dark: #fde8e7;
+  --banner-line: #f0d3d2;
+
+  --teal-dark: #e6f5ef;
+
+  /* 终端区保持深色（同主题 A） */
+  --term-bg: #0e1219;
+  --term-text: #c6d0dc;
+  --term-dim: #6b7686;
+
+  --key: #ffffff;
+  --key-bg-image: none;
+  --keyhi: #f0f0ec;
+  --key-line: #dcdcd7;
+  --key-text: var(--text);
+  --key-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.08);
+  --key-mod-bg: #f3f3ef;
+  --key-enter-bg: #1b1f26;
+  --key-enter-text: #ffffff;
+  --key-enter-line: #1b1f26;
+
+  --seg-bg: #ebebe7;
+  --seg-line: transparent;
+  --seg-active-bg: #ffffff;
+  --seg-active-text: var(--text);
+  --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+
+  --tab-bg: var(--panel);
+  --tab-line: var(--line);
+  --tab-active-bg: var(--text);
+  --tab-active-text: #ffffff;
+  --tab-active-line: var(--text);
+
+  --bb-bg: var(--panel);
+  --bb-line: var(--line);
+  --bb-active: var(--text);
+  --bb-indicator: var(--text);
+
+  --overlay-bg: rgba(27, 31, 38, 0.35);
+  --dlg-bg: #ffffff;
+  --menu-bg: #ffffff;
+  --pop-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  --toast-bg: #1b1f26;
+  --toast-text: #ffffff;
+
+  --banner-bg: #fde8e7;
+  --banner-text: var(--red);
 }
 
 * {
@@ -63,6 +223,7 @@ html, body {
 body {
   overflow: hidden;
   background: var(--bg-deep);
+  transition: background 0.2s;
 }
 
 .mono {

@@ -119,25 +119,25 @@
     gap: 10px;
     width: 100%;
     border: 0;
-    background: var(--panel2);
-    border: 1px solid var(--line);
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
     border-radius: var(--radius-lg);
     color: inherit;
     padding: 11px 12px;
     text-align: left;
     user-select: none;
   }
-  .row:active { background: var(--panel); }
+  .row:active { background: var(--panel2); }
   .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     flex: 0 0 auto;
   }
-  .dot-run { background: var(--teal); animation: pulse 1.4s infinite; }
+  .dot-run { background: var(--ok); box-shadow: 0 0 5px var(--ok); animation: pulse 1.4s infinite; }
   .dot-wait { background: var(--amber); animation: pulse 0.9s infinite; }
   .dot-done { background: var(--dimmer); }
-  .dot-idle { background: #6597c9; }
+  .dot-idle { background: var(--blue); }
   @keyframes pulse { 50% { opacity: 0.35; } }
 
   .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -149,13 +149,14 @@
     color: var(--dim);
   }
   .name em.w { color: var(--amber); }
-  .last { color: var(--dim); font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .last { color: var(--dimmer); font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .act {
     font-size: 0.7rem;
-    color: var(--teal);
-    border: 1px solid #2b4a44;
-    border-radius: var(--radius-md);
-    padding: 5px 10px;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel2);
+    padding: 6px 14px;
     flex: 0 0 auto;
   }
 
@@ -163,17 +164,18 @@
     position: fixed;
     inset: 0;
     z-index: 40;
-    background: rgba(7, 9, 11, 0.75);
+    background: var(--overlay-bg);
     display: grid;
     place-items: center;
   }
   .confirm-dlg {
-    background: #1c2530;
+    background: var(--dlg-bg);
     border: 1px solid var(--line);
-    border-radius: 14px;
+    border-radius: var(--radius-xl);
     padding: 20px;
     width: min(280px, 80vw);
     text-align: center;
+    box-shadow: var(--pop-shadow);
   }
   .dlg-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; }
   .dlg-body { font-size: 0.7rem; color: var(--dim); margin-bottom: 16px; line-height: 1.5; }
@@ -206,13 +208,13 @@
   .empty { padding: 16px; color: var(--dim); text-align: center; }
   .pnote {
     font-size: 0.68rem;
-    color: var(--dim);
-    background: var(--panel2);
-    border: 1px dashed var(--line);
+    color: var(--dimmer);
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
     border-radius: var(--radius-lg);
     padding: 9px 12px;
     line-height: 1.7;
     margin-top: 4px;
   }
-  .pnote b { color: var(--teal); font-weight: 600; }
+  .pnote b { color: var(--dim); font-weight: 600; }
 </style>

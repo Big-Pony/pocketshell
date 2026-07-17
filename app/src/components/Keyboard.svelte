@@ -170,23 +170,28 @@
   .subtabs {
     display: flex;
     gap: 4px;
-    padding: 4px 8px;
+    margin: 4px 8px;
+    padding: 3px;
     flex: 0 0 auto;
+    background: var(--seg-bg);
+    border: 1px solid var(--seg-line);
+    border-radius: 999px;
   }
   .subtabs button {
     flex: 1;
-    background: var(--key);
+    background: transparent;
     color: var(--dim);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    padding: 5px 0;
+    border: 0;
+    border-radius: 999px;
+    padding: 6px 0;
     font-size: 0.68rem;
     transition: background 0.15s, color 0.15s;
   }
   .subtabs button.on {
-    background: var(--panel2);
-    color: var(--teal);
-    border-color: var(--line-strong);
+    background: var(--seg-active-bg);
+    color: var(--seg-active-text);
+    font-weight: 600;
+    box-shadow: var(--seg-shadow);
   }
 
   .funcrow {
@@ -230,39 +235,40 @@
   .hint-chip {
     flex: 0 0 auto;
     white-space: nowrap;
-    background: var(--key);
-    color: var(--teal);
-    border: 1px solid var(--key-line);
-    border-radius: var(--radius-md);
-    padding: 5px 10px;
+    background: var(--panel);
+    color: var(--accent-text);
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    padding: 5px 11px;
     font-size: 0.7rem;
     touch-action: none;
     user-select: none;
     min-height: 2.3em;
   }
-  .hint-chip:active { background: var(--keyhi); }
+  .hint-chip:active { background: var(--accent-soft); }
 
   .rows {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 5px;
     padding: 4px;
     flex: 1;
     overflow-y: auto;
   }
   .row {
     display: flex;
-    gap: 3px;
+    gap: 5px;
   }
   .key {
     flex: 1 1 0;
     min-width: 0;
     min-height: 2.3em;
     background: var(--key);
-    color: var(--text);
+    background-image: var(--key-bg-image);
+    color: var(--key-text);
     border: 1px solid var(--key-line);
-    border-bottom-width: 2px;
     border-radius: var(--radius-sm);
+    box-shadow: var(--key-shadow);
     padding: 4px 0;
     font-size: 0.72rem;
     touch-action: none;
@@ -278,24 +284,30 @@
   }
   .key:active {
     background: var(--keyhi);
-    border-bottom-width: 1px;
+    box-shadow: none;
     transform: translateY(1px);
   }
   .key.mod {
-    background: #2a3540;
+    background: var(--key-mod-bg);
     font-size: 0.58rem;
     color: var(--dim);
   }
   .key.mod.on {
-    background: var(--teal);
-    color: var(--teal-dark);
-    border-color: var(--teal);
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: var(--accent);
   }
   .key.mod.locked {
-    background: #3a8c7a;
-    color: var(--teal-dark);
-    border-color: var(--teal);
-    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .key[data-key-id="Enter"] {
+    background: var(--key-enter-bg);
+    color: var(--key-enter-text);
+    border-color: var(--key-enter-line);
+    font-weight: 700;
   }
   .key .main {
     font-size: inherit;
@@ -335,7 +347,7 @@
     outline: none;
   }
   .ime textarea:focus {
-    border-color: var(--teal);
+    border-color: var(--accent);
   }
   .ime-actions {
     display: flex;
@@ -349,8 +361,8 @@
     font-size: 0.78rem;
   }
   .ime-actions .send {
-    background: var(--teal);
-    color: var(--teal-dark);
+    background: var(--primary-bg);
+    color: var(--primary-text);
     font-weight: 600;
     flex: 1;
   }
@@ -419,8 +431,8 @@
     width: 3.9em;
     height: 3.9em;
     border-radius: 50%;
-    background: var(--teal);
-    color: var(--teal-dark);
+    background: var(--primary-bg);
+    color: var(--primary-text);
     border: 2px solid var(--bg);
     font-size: 0.94rem;
     font-weight: 600;
@@ -454,15 +466,15 @@
   .ops-nav .key { flex: 1; min-height: 2.6em; font-size: 0.72rem; }
   .act {
     background: var(--key);
-    color: var(--text);
+    color: var(--key-text);
     border: 1px solid var(--key-line);
     border-radius: var(--radius-md);
     padding: 6px 0;
     font-size: 0.72rem;
   }
   .act.on {
-    background: var(--teal);
-    color: var(--teal-dark);
-    border-color: var(--teal);
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: var(--accent);
   }
 </style>

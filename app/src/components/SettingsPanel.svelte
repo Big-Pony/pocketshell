@@ -16,6 +16,19 @@
 </script>
 
 <div class="stg">
+  <!-- Theme -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">界面风格</div>
+      <div class="desc">深色 IDE / 浅色极简，或跟随系统外观</div>
+    </div>
+    <div class="seg">
+      <button class:on={settings.theme === "dark"} onclick={() => update("theme", "dark")}>深色</button>
+      <button class:on={settings.theme === "light"} onclick={() => update("theme", "light")}>浅色</button>
+      <button class:on={settings.theme === "system"} onclick={() => update("theme", "system")}>跟随</button>
+    </div>
+  </div>
+
   <!-- Font size -->
   <div class="set">
     <div class="grow">
@@ -80,26 +93,34 @@
   .label { font-size: 14px; }
   .desc { font-size: 11px; color: var(--dim); margin-top: 3px; }
   .val { font-size: 12px; color: var(--dim); min-width: 2.5em; text-align: right; }
-  input[type="range"] { width: 110px; accent-color: var(--teal); }
+  input[type="range"] { width: 110px; accent-color: var(--primary-bg); }
   .seg {
     display: flex;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    overflow: hidden;
+    gap: 2px;
+    background: var(--seg-bg);
+    border: 1px solid var(--seg-line);
+    border-radius: 999px;
+    padding: 2px;
   }
   .seg button {
     background: transparent;
     border: 0;
     color: var(--dim);
-    padding: 6px 13px;
+    padding: 5px 12px;
     font-size: 12px;
+    border-radius: 999px;
   }
-  .seg button.on { background: var(--key); color: var(--teal); }
+  .seg button.on {
+    background: var(--seg-active-bg);
+    color: var(--seg-active-text);
+    font-weight: 600;
+    box-shadow: var(--seg-shadow);
+  }
   .tog {
-    width: 38px;
-    height: 22px;
-    border-radius: 11px;
-    background: var(--key);
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--keyhi);
     position: relative;
     flex: 0 0 auto;
     border: 1px solid var(--line);
@@ -110,20 +131,21 @@
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
-    background: var(--dim);
+    background: #fff;
     transition: 0.15s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   }
-  .tog.on { background: var(--teal); border-color: var(--teal); }
-  .tog.on::after { left: 18px; background: var(--teal-dark); }
+  .tog.on { background: var(--primary-bg); border-color: var(--primary-bg); }
+  .tog.on::after { left: 20px; background: var(--primary-text); }
   .btn {
-    background: var(--teal);
-    color: var(--teal-dark);
+    background: var(--primary-bg);
+    color: var(--primary-text);
     border: 0;
-    border-radius: var(--radius-md);
-    padding: 6px 13px;
+    border-radius: 999px;
+    padding: 7px 14px;
     font-size: 13px;
     font-weight: 600;
   }

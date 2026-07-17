@@ -42,9 +42,9 @@
 
 <style>
   .fp { display: flex; flex-direction: column; height: 100%; }
-  .subtabs { display: flex; gap: 6px; padding: 6px 8px; flex: 0 0 auto; }
-  .subtabs button { flex: 1; padding: 6px 0; border: 1px solid var(--line); background: var(--panel); color: var(--dim); border-radius: var(--radius-md); font-size: 0.72rem; }
-  .subtabs button.on { background: var(--panel2); color: var(--text); border-color: var(--line-strong); }
+  .subtabs { display: flex; gap: 4px; margin: 6px 8px; padding: 3px; flex: 0 0 auto; background: var(--seg-bg); border: 1px solid var(--seg-line); border-radius: 999px; }
+  .subtabs button { flex: 1; padding: 6px 0; border: 0; background: transparent; color: var(--dim); border-radius: 999px; font-size: 0.72rem; }
+  .subtabs button.on { background: var(--seg-active-bg); color: var(--seg-active-text); font-weight: 600; box-shadow: var(--seg-shadow); }
   .branch { margin-left: 4px; font-size: 0.6rem; color: var(--amber); font-weight: 600; }
   .body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 </style>

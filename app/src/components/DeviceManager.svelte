@@ -72,22 +72,22 @@
   .dm-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(7, 9, 11, 0.75);
+    background: var(--overlay-bg);
     display: grid;
     place-items: center;
     z-index: 50;
     padding: 16px;
   }
   .dm-panel {
-    background: var(--panel2);
+    background: var(--dlg-bg);
     color: var(--text);
     width: min(92vw, 460px);
     max-height: 80vh;
     overflow: auto;
-    border-radius: 14px;
+    border-radius: var(--radius-xl);
     padding: 16px;
     border: 1px solid var(--line);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--pop-shadow);
   }
   header {
     display: flex;
@@ -133,11 +133,11 @@
   }
   .dm-pair textarea { resize: none; }
   .dm-pair textarea:focus,
-  .dm-pair input:focus { border-color: var(--teal); }
+  .dm-pair input:focus { border-color: var(--accent); }
   .pair-btn {
     width: 100%;
-    background: var(--teal);
-    color: var(--teal-dark);
+    background: var(--primary-bg);
+    color: var(--primary-text);
     border: 0;
     border-radius: var(--radius-md);
     padding: 9px;
