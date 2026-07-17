@@ -145,6 +145,30 @@ export class TerminalService {
     };
   }
 
+  // Force tmux to re-push the pane's current screen to every attached client.
+  // Used right after the frontend switches xterm into its alternate buffer:
+  // tmux never forwards 1049h/1049l to attach clients, so the client-side
+  // buffer switch leaves xterm's (empty) alt buffer blank until the pane app
+  // redraws on its own — vim doesn't (the "vim opens to a blank screen" bug).
+  // refresh-client makes tmux re-send the current grid; verified on tmux 3.6b
+  // (client tty byte stream grows, screen text reappears). Gentler than the
+  // resize-jiggle fallback (cols±1 -> SIGWINCH -> full repaint), so the jiggle
+  // is not used. Read-only: it changes no session/pane state.
+  redraw(name: string): { ok: boolean } {
+    const clients = this.tmux(["list-clients", "-t", name, "-F", "#{client_name}"]);
+    if (clients.exitCode !== 0) return { ok: false };
+    const names = new TextDecoder()
+      .decode(clients.stdout)
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    let ok = false;
+    for (const c of names) {
+      if (this.tmux(["refresh-client", "-t", c]).exitCode === 0) ok = true;
+    }
+    return { ok };
+  }
+
   // The focused pane's real working directory (tmux #{pane_current_path}).
   // Used by the file panel's "set project root to focused tab" button. `-u`
   // forces UTF-8 so CJK path segments aren't sanitized under a C locale.

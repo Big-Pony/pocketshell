@@ -121,6 +121,36 @@ test("paneInfo() returns a complete shape (incl. isShell) when tmux fails", () =
   term.dispose();
 });
 
+test("redraw() refreshes every client attached to the session", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("list-clients")) return ok("/dev/ttys001\n/dev/ttys002\n");
+      return ok();
+    },
+  });
+  expect(term.redraw("work")).toEqual({ ok: true });
+  term.dispose();
+  expect(calls.find((a) => a.includes("list-clients"))).toEqual(
+    ["list-clients", "-t", "work", "-F", "#{client_name}"],
+  );
+  expect(calls).toContainEqual(["refresh-client", "-t", "/dev/ttys001"]);
+  expect(calls).toContainEqual(["refresh-client", "-t", "/dev/ttys002"]);
+});
+
+test("redraw() degrades gracefully when tmux fails or no client is attached", () => {
+  const dead = new TerminalService({ tmux: () => fail() });
+  expect(dead.redraw("gone")).toEqual({ ok: false });
+  dead.dispose();
+
+  const lonely = new TerminalService({
+    tmux: (args) => (args.includes("list-clients") ? ok("\n") : ok()),
+  });
+  expect(lonely.redraw("detached")).toEqual({ ok: false });
+  lonely.dispose();
+});
+
 test("pwd() returns the pane_current_path from tmux", () => {
   const term = new TerminalService({
     tmux: (args) => (args.includes("display-message") ? ok("/Users/me/proj\n") : ok()),

@@ -52,12 +52,14 @@ type SessionsCb = (sessions: SessionMeta[]) => void;
 type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
+type InputCb = (sessionId: string) => void;
 
 export class Connection {
   private ws!: WebSocketLike;
   private open = false;
   private queue: string[] = [];
   private outputCbs: OutputCb[] = [];
+  private inputCbs: InputCb[] = [];
   private sessionsCbs: SessionsCb[] = [];
   private exitCbs: ExitCb[] = [];
   private errorCbs: ErrorCb[] = [];
@@ -355,6 +357,12 @@ export class Connection {
   }
   sendInput(sessionId: string, data: Uint8Array): void {
     this.send({ type: "input", sessionId, data: toB64(data) });
+    // Local echo of the outbound path: every input source (custom keyboard,
+    // snippet insert, file-panel `cd`, hint chip) funnels through here, so
+    // this is the single place a listener can hook "the user just typed" —
+    // e.g. Terminal re-classifies the pane right away instead of waiting for
+    // the next 2s poll (fast alt-screen entry for `vim x<CR>`).
+    for (const cb of this.inputCbs) cb(sessionId);
   }
   resize(sessionId: string, cols: number, rows: number): void {
     this.send({ type: "resize", sessionId, cols, rows });
@@ -387,6 +395,12 @@ export class Connection {
     this.outputCbs.push(cb);
     return () => {
       this.outputCbs = this.outputCbs.filter((c) => c !== cb);
+    };
+  }
+  onInput(cb: InputCb): () => void {
+    this.inputCbs.push(cb);
+    return () => {
+      this.inputCbs = this.inputCbs.filter((c) => c !== cb);
     };
   }
   onSessions(cb: SessionsCb): () => void {

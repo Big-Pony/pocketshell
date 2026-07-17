@@ -1,8 +1,10 @@
 <!-- app/src/components/Keyboard.svelte -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { t } from "svelte-i18n";
-  import { LAYOUT, FKEYS, ESC_KEY, SEQ, MOD_IDS, capFor } from "../lib/keymap";
+  import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
+  import { createKeyRepeater, type KeyRepeater } from "../lib/key-repeat";
 
   let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
@@ -19,20 +21,47 @@
 
   function buzz() { if (vibrate) navigator.vibrate?.(8); }
 
-  function press(id: string) {
-    buzz();
-    if (MODSET.has(id)) { mods = tapMod(mods, id as ModName); return; }
+  // Long-press repeaters keyed by keycap id (one per held key).
+  const repeaters = new Map<string, KeyRepeater>();
+
+  // One shot of a key: resolve against the CURRENT modifier state and emit.
+  // Repeat ticks re-resolve, so an armed one-shot modifier (e.g. Shift) only
+  // affects the first shot — holding "a" with Shift armed types "Aaaa…".
+  function fireKey(id: string) {
     const r = resolveKey(id, activeMods(mods), selecting);
     if (r.kind === "bytes") onText(r.text);
     else if (r.kind === "command") onCommand(r.command);
     mods = consumeAfterKey(mods);
   }
 
-  function pressEsc() {
-    buzz();
-    onText(SEQ.Esc);
-    mods = consumeAfterKey(mods);
+  // Key down: modifiers toggle (no repeat); byte-producing keys fire once now
+  // and arm a long-press repeater; app commands (Fn layer / Cmd shortcuts /
+  // selection-mode arrows) fire once, exactly like before.
+  function keyDown(id: string) {
+    buzz(); // vibrate on keydown only — repeating it would be a constant hum
+    if (MODSET.has(id)) { mods = tapMod(mods, id as ModName); return; }
+    const r = resolveKey(id, activeMods(mods), selecting);
+    if (r.kind !== "bytes") {
+      if (r.kind === "command") onCommand(r.command);
+      mods = consumeAfterKey(mods);
+      return;
+    }
+    keyUp(id); // safety: drop a stale repeater for the same key
+    const rep = createKeyRepeater(() => fireKey(id));
+    repeaters.set(id, rep);
+    rep.start(); // fires the first shot immediately
   }
+
+  function keyUp(id: string) {
+    const rep = repeaters.get(id);
+    if (rep) { rep.stop(); repeaters.delete(id); }
+  }
+
+  onDestroy(() => {
+    for (const rep of repeaters.values()) rep.stop();
+    repeaters.clear();
+  });
+
   function tapHint(cmd: string) {
     buzz();
     onHint(cmd);
@@ -67,12 +96,18 @@
   {#if sub === "keys"}
     <div class="funcrow">
       <button class="key esc" data-key-id="Esc"
-        onpointerdown={(e) => { e.preventDefault(); pressEsc(); }}>{ESC_KEY.cap}</button>
+        onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
+        onpointerup={() => keyUp("Esc")}
+        onpointercancel={() => keyUp("Esc")}
+        onpointerleave={() => keyUp("Esc")}>{ESC_KEY.cap}</button>
       {#if isModOn("Fn")}
         <div class="fkeys">
           {#each FKEYS as k (k.id)}
             <button class="key fkey" data-key-id={k.id}
-              onpointerdown={(e) => { e.preventDefault(); press(k.id); }}>{k.cap}</button>
+              onpointerdown={(e) => { e.preventDefault(); keyDown(k.id); }}
+              onpointerup={() => keyUp(k.id)}
+              onpointercancel={() => keyUp(k.id)}
+              onpointerleave={() => keyUp(k.id)}>{k.cap}</button>
           {/each}
         </div>
       {:else}
@@ -99,7 +134,10 @@
               class:has-up={label.upper}
               data-key-id={k.id}
               style="flex-grow: {k.wide ?? 1};"
-              onpointerdown={(e) => { e.preventDefault(); press(k.id); }}
+              onpointerdown={(e) => { e.preventDefault(); keyDown(k.id); }}
+              onpointerup={() => keyUp(k.id)}
+              onpointercancel={() => keyUp(k.id)}
+              onpointerleave={() => keyUp(k.id)}
             >
               {#if label.upper}<span class="up">{label.upper}</span>{/if}
               <span class="main">{label.main}</span>
@@ -126,23 +164,50 @@
       <div class="ops-main">
         <div class="dpad">
           <div></div>
-          <button class="key up" onpointerdown={(e) => { e.preventDefault(); press("ArrowUp"); }}>↑</button>
+          <button class="key up"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowUp"); }}
+            onpointerup={() => keyUp("ArrowUp")}
+            onpointercancel={() => keyUp("ArrowUp")}
+            onpointerleave={() => keyUp("ArrowUp")}>↑</button>
           <div></div>
-          <button class="key left" onpointerdown={(e) => { e.preventDefault(); press("ArrowLeft"); }}>←</button>
+          <button class="key left"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowLeft"); }}
+            onpointerup={() => keyUp("ArrowLeft")}
+            onpointercancel={() => keyUp("ArrowLeft")}
+            onpointerleave={() => keyUp("ArrowLeft")}>←</button>
           <button class="act toggle" class:on={selecting}
             onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? $t('keyboard.ops.cancelSel') : $t('keyboard.ops.select')}</button>
-          <button class="key right" onpointerdown={(e) => { e.preventDefault(); press("ArrowRight"); }}>→</button>
+          <button class="key right"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowRight"); }}
+            onpointerup={() => keyUp("ArrowRight")}
+            onpointercancel={() => keyUp("ArrowRight")}
+            onpointerleave={() => keyUp("ArrowRight")}>→</button>
           <div></div>
-          <button class="key down" onpointerdown={(e) => { e.preventDefault(); press("ArrowDown"); }}>↓</button>
+          <button class="key down"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowDown"); }}
+            onpointerup={() => keyUp("ArrowDown")}
+            onpointercancel={() => keyUp("ArrowDown")}
+            onpointerleave={() => keyUp("ArrowDown")}>↓</button>
           <div></div>
         </div>
         <div class="ops-side">
           <button class="act line" onclick={() => onCommand({ type: "lineUp" })}>{$t('keyboard.ops.prevLine')}</button>
           <button class="act line" onclick={() => onCommand({ type: "lineDown" })}>{$t('keyboard.ops.nextLine')}</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("Home"); }}>Home</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); press("End"); }}>End</button>
+          <button class="key"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Home"); }}
+            onpointerup={() => keyUp("Home")}
+            onpointercancel={() => keyUp("Home")}
+            onpointerleave={() => keyUp("Home")}>Home</button>
+          <button class="key"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("End"); }}
+            onpointerup={() => keyUp("End")}
+            onpointercancel={() => keyUp("End")}
+            onpointerleave={() => keyUp("End")}>End</button>
           <button class="enter-fab" aria-label={$t('keyboard.ops.enterAria')}
-            onpointerdown={(e) => { e.preventDefault(); press("Enter"); }}>{$t('keyboard.ops.enter')}</button>
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Enter"); }}
+            onpointerup={() => keyUp("Enter")}
+            onpointercancel={() => keyUp("Enter")}
+            onpointerleave={() => keyUp("Enter")}>{$t('keyboard.ops.enter')}</button>
         </div>
       </div>
       <div class="ops-bottom">
@@ -153,8 +218,16 @@
         <button class="act" onclick={() => onCommand({ type: "paste" })}>{$t('keyboard.ops.paste')}</button>
       </div>
       <div class="ops-nav">
-        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgUp"); }}>PgUp</button>
-        <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgDn"); }}>PgDn</button>
+        <button class="key"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("PgUp"); }}
+          onpointerup={() => keyUp("PgUp")}
+          onpointercancel={() => keyUp("PgUp")}
+          onpointerleave={() => keyUp("PgUp")}>PgUp</button>
+        <button class="key"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("PgDn"); }}
+          onpointerup={() => keyUp("PgDn")}
+          onpointercancel={() => keyUp("PgDn")}
+          onpointerleave={() => keyUp("PgDn")}>PgDn</button>
       </div>
     </div>
   {/if}
