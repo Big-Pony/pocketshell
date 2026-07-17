@@ -6,6 +6,7 @@ import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo
 import { toB64, fromB64 } from "./bytes";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
 import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
+import { tr } from "./i18n";
 
 export interface WebSocketLike {
   binaryType?: string;
@@ -274,7 +275,7 @@ export class Connection {
       if (++this.pairFailStreak >= 3) {
         clearPendingPair();
         this.pairFailStreak = 0;
-        for (const cb of this.errorCbs) cb({ code: "pair_failed", message: "配对被拒绝，请在设备管理里重新配对" });
+        for (const cb of this.errorCbs) cb({ code: "pair_failed", message: tr("errors.pairRejected") });
       }
     } else {
       this.pairFailStreak = 0;

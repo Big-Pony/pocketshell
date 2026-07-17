@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tr } from "../lib/i18n";
   import { Connection } from "../lib/connection";
   import { splitLines, highlightTo } from "../lib/highlight";
 
@@ -18,17 +19,17 @@
       try {
         const r = (await conn.rpc("fs.diff", { path })) as { hunks: typeof hunks };
         hunks = r.hunks;
-        if (!hunks.length) notice = "无改动";
+        if (!hunks.length) notice = tr("preview.noChanges");
       } catch (e: any) {
-        notice = e?.message ?? "diff 失败";
+        notice = e?.message ?? tr("preview.diffFailed");
         hunks = [];
       }
       return;
     }
     try {
       const r = (await conn.rpc("fs.read", { path })) as { content: string; lang: string; truncated?: boolean; binary?: boolean };
-      if (r.binary) { notice = "二进制文件，不预览"; lines = []; html = ""; return; }
-      if (r.truncated) notice = "已截断，仅显示前若干行";
+      if (r.binary) { notice = tr("preview.binary"); lines = []; html = ""; return; }
+      if (r.truncated) notice = tr("preview.truncated");
       // Line count for the gutter comes from the raw content; the highlighted
       // HTML is rendered as ONE block so multi-line tokens (block comments,
       // template literals) keep their spans intact — splitting the HTML on "\n"
@@ -36,7 +37,7 @@
       lines = splitLines(r.content);
       html = await highlightTo(r.lang, r.content);
     } catch (e: any) {
-      notice = e?.message ?? "读取失败";
+      notice = e?.message ?? tr("preview.readFailed");
       lines = []; html = "";
     }
   }

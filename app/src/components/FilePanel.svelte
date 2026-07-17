@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import { Connection } from "../lib/connection";
   import { loadProjectRoot } from "../lib/file-tree";
   import FileTree from "./FileTree.svelte";
@@ -28,7 +29,7 @@
 
 <div class="fp">
   <div class="subtabs">
-    <button class:on={sub === "dir"} onclick={() => (sub = "dir")}>目录</button>
+    <button class:on={sub === "dir"} onclick={() => (sub = "dir")}>{$t('filepanel.dir')}</button>
     <button class:on={sub === "git"} onclick={() => (sub = "git")}>Git{#if branch}<span class="branch">{branch}</span>{/if}</button>
   </div>
   <div class="body">

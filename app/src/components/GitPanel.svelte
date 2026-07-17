@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
+  import { tr } from "../lib/i18n";
   import { Connection } from "../lib/connection";
   import { loadProjectRoot } from "../lib/file-tree";
 
@@ -21,7 +23,7 @@
       commits = ((await conn.rpc("git.log", { cwd: root, limit })) as any).commits;
       changes = ((await conn.rpc("git.status", { cwd: root })) as any).files;
     } catch (e: any) {
-      notice = e?.code === "rpc_error" && /not_a_repo/.test(e?.message) ? "当前项目根不是 Git 仓库" : (e?.message ?? "加载失败");
+      notice = e?.code === "rpc_error" && /not_a_repo/.test(e?.message) ? tr("git.notRepo") : (e?.message ?? tr("git.loadFailed"));
     }
   }
   async function loadMore() { limit += 30; await loadAll(); }
@@ -36,26 +38,26 @@
 
 <div class="git">
   {#if noRoot}
-    <div class="hint">请先在目录树里「设为项目根」</div>
+    <div class="hint">{$t('git.needRoot')}</div>
   {:else}
     {#if notice}<div class="gn">{notice}</div>{/if}
     <div class="sec">
-      <div class="st">分支（只读）</div>
+      <div class="st">{$t('git.branches')}</div>
       <div class="cur mono">● {branches.current}</div>
       <div class="brs">{#each branches.branches as b}<span class="br mono" class:on={b === branches.current}>{b}</span>{/each}</div>
-      <div class="tip">切换分支请在终端 / Claude 里操作</div>
+      <div class="tip">{$t('git.branchTip')}</div>
     </div>
     <div class="sec">
-      <div class="st">工作区改动</div>
+      <div class="st">{$t('git.changes')}</div>
       {#each changes as c}
         <button class="chg" onclick={() => onOpenDiff((root === "/" ? "" : root) + "/" + c.path)}>
           <span class="g g-{c.status}">{c.status}</span><span class="cp mono">{c.path}</span>
         </button>
       {/each}
-      {#if !changes.length}<div class="empty">工作区干净</div>{/if}
+      {#if !changes.length}<div class="empty">{$t('git.clean')}</div>{/if}
     </div>
     <div class="sec">
-      <div class="st">历史</div>
+      <div class="st">{$t('git.history')}</div>
       {#each commits as c}
         <button class="cm" onclick={() => (expanded = expanded === c.hash ? null : c.hash)}>
           <span class="h mono">{c.hash.slice(0, 7)}</span><span class="m">{c.msg}</span>
@@ -65,7 +67,7 @@
           <div class="files">{#each c.files as f}<div class="cf mono">{f.path} <em>+{f.add} -{f.del}</em></div>{/each}</div>
         {/if}
       {/each}
-      <button class="more" onclick={loadMore}>加载更多</button>
+      <button class="more" onclick={loadMore}>{$t('git.loadMore')}</button>
     </div>
   {/if}
 </div>

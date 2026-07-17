@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { t } from "svelte-i18n";
+  import { tr } from "../lib/i18n";
   import { Connection } from "../lib/connection";
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
@@ -55,18 +57,18 @@
     const r = await getFocusedPwd();
     if ("error" in r) { onToast(r.error); return; }
     applyRoot(r.pwd);
-    onToast("项目根已设为 " + r.pwd);
+    onToast(tr("filetree.toast.rootSet", { path: r.pwd }));
   }
   async function toggleFollow() {
     const next = !following;
     if (next) {
       const r = await getFocusedPwd();
-      if ("error" in r) { onToast("没有活跃终端，无法绑定项目根跟随"); return; }
+      if ("error" in r) { onToast(tr("filetree.toast.noActiveTerm")); return; }
       applyRoot(r.pwd);
     }
     following = next;
     saveRootFollow(next);
-    onToast(next ? "项目根开始跟随聚焦终端" : "已取消项目根跟随");
+    onToast(next ? tr("filetree.toast.followOn") : tr("filetree.toast.followOff"));
   }
   // Single tap sets root once; double tap toggles follow (cancels the pending single).
   function onAnchorPointer() {
@@ -89,18 +91,18 @@
     try {
       const blob = await downloadFileBlob(conn, n.path);
       triggerBrowserDownload(blob, n.name);
-    } catch (e: any) { notice = e?.message ?? "下载失败"; }
+    } catch (e: any) { notice = e?.message ?? tr("filetree.error.download"); }
   }
   async function doDownloadDir(n: FileNode) {
     try { await downloadFolder(conn, n.path, { onArchiving: (b) => (archiving = b) }); }
-    catch (e: any) { notice = e?.message ?? "打包下载失败"; }
+    catch (e: any) { notice = e?.message ?? tr("filetree.error.downloadDir"); }
   }
 
   const view = $derived(filterTree(nodes, query));
 
   async function loadLevel(path: string): Promise<FileNode[]> {
     const r = (await conn.rpc("fs.tree", { path })) as { path: string; nodes: any[]; truncated?: boolean };
-    if (r.truncated) notice = "目录过大，仅显示前 500 项";
+    if (r.truncated) notice = tr("filetree.notice.truncated");
     return toFileNodes(path, r.nodes);
   }
 
@@ -114,7 +116,7 @@
     try {
       const kids = await loadLevel(root);
       nodes = [{ name: rootLabel(root), path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
-    } catch (e: any) { notice = e?.message ?? "加载失败"; nodes = []; }
+    } catch (e: any) { notice = e?.message ?? tr("filetree.error.load"); nodes = []; }
   }
 
   // Refresh the tree in place: re-fetch the root level and every level that was
@@ -138,14 +140,14 @@
       const kids = await rebuild(root);
       nodes = [{ name: rootLabel(root), path: root, type: "dir", expanded: true, children: kids, hasChildren: kids.length > 0 }];
       onRefresh?.();
-    } catch (e: any) { notice = e?.message ?? "刷新失败"; }
+    } catch (e: any) { notice = e?.message ?? tr("filetree.error.refresh"); }
   }
 
   async function toggle(n: FileNode) {
     if (n.type === "file") { onOpenFile(n.path); return; }
     if (n.expanded) { nodes = collapse(nodes, n.path); return; }
     try { nodes = setChildren(nodes, n.path, await loadLevel(n.path)); }
-    catch (e: any) { notice = e?.message ?? "加载失败"; }
+    catch (e: any) { notice = e?.message ?? tr("filetree.error.load"); }
   }
 
   function openMenu(n: FileNode, anchor: HTMLElement) {
@@ -166,24 +168,24 @@
       } else {
         nodes = setChildren(nodes, parent, kids);
       }
-    } catch (e: any) { notice = e?.message ?? "刷新失败"; }
+    } catch (e: any) { notice = e?.message ?? tr("filetree.error.refresh"); }
   }
 
   function childPath(parent: string, name: string): string {
     return parent === "/" ? "/" + name : parent + "/" + name;
   }
   async function doRename(n: FileNode) {
-    const next = prompt("重命名为", n.name);
+    const next = prompt(tr("filetree.prompt.rename"), n.name);
     if (!next || !next.trim() || next.trim() === n.name) return;
     const to = childPath(parentOf(n.path), next.trim());
     try { await conn.rpc("fs.op", { op: "rename", path: n.path, to }); await refreshParent(n.path); }
-    catch (e: any) { notice = e?.message ?? "重命名失败"; }
+    catch (e: any) { notice = e?.message ?? tr("filetree.error.rename"); }
   }
   async function doMkdir(n: FileNode) {
-    const name = prompt("新建目录名", "");
+    const name = prompt(tr("filetree.prompt.mkdir"), "");
     if (!name || !name.trim()) return;
     try { await conn.rpc("fs.op", { op: "mkdir", path: childPath(n.path, name.trim()) }); await refreshParent(childPath(n.path, "x")); }
-    catch (e: any) { notice = e?.message ?? "新建失败"; }
+    catch (e: any) { notice = e?.message ?? tr("filetree.error.create"); }
   }
   async function confirmDelete(n: FileNode, now: number) {
     const r = press(arm, now);
@@ -191,7 +193,7 @@
     if (!r.fire) return;
     confirmDel = null;
     try { await conn.rpc("fs.op", { op: "delete", path: n.path }); await refreshParent(n.path); }
-    catch (e: any) { notice = e?.message ?? "删除失败"; }
+    catch (e: any) { notice = e?.message ?? tr("filetree.error.delete"); }
   }
   function resetScroll() {
     setBrowseCache({ scrollTop: 0 });
@@ -266,13 +268,13 @@
 
 <div class="ft">
   <div class="pathbar">
-    <button class="root-anchor" class:on={following} aria-label="设为/跟随项目根"
+    <button class="root-anchor" class:on={following} aria-label={$t('filetree.aria.anchor')}
       onpointerdown={onAnchorPointer}><span class="ring"></span></button>
     <span class="path-text mono">{root}</span>
-    <button class="root-switch" aria-label="切换项目根" onclick={openHistory}>⇄</button>
-    <button class="root-refresh" aria-label="刷新目录" onclick={reloadKeepingExpanded}>⟳</button>
+    <button class="root-switch" aria-label={$t('filetree.aria.switchRoot')} onclick={openHistory}>⇄</button>
+    <button class="root-refresh" aria-label={$t('filetree.aria.refresh')} onclick={reloadKeepingExpanded}>⟳</button>
   </div>
-  <input class="filter" bind:value={query} placeholder="过滤当前已加载节点…" />
+  <input class="filter" bind:value={query} placeholder={$t('filetree.filterPh')} />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
   <ul class="tree" bind:this={treeEl} onscroll={onScroll}>
     {#each rows as { n, depth } (n.path)}
@@ -283,7 +285,7 @@
           <span class="nm">{n.name}</span>
           {#if n.git}<span class="g g-{n.git}">{n.git}</span>{/if}
         </button>
-        <button class="more" aria-label="更多"
+        <button class="more" aria-label={$t('common.more')}
           onclick={(e) => { e.stopPropagation(); openMenu(n, e.currentTarget); }}>⋯</button>
       </li>
     {/each}
@@ -292,24 +294,24 @@
   {#if menuFor}
     {#if menuFor.type === "dir"}
       <ContextMenu onClose={() => (menuFor = null)} anchor={menuAnchor} items={[
-        { label: "设为项目根", icon: "◎", onSelect: () => setRoot(menuFor!) },
-        ...(menuFor.path === root ? [{ label: "取消根目录绑定", icon: "⊘", onSelect: unsetRoot }] : []),
-        { label: "复制路径", icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
-        { label: "cd 到此处", icon: "⌘", onSelect: () => onCd(menuFor!.path) },
-        { label: "重命名", icon: "✎", onSelect: () => doRename(menuFor!) },
-        { label: "新建目录", icon: "＋", onSelect: () => doMkdir(menuFor!) },
-        { label: "新建文件", icon: "⊕", onSelect: () => openNewFile(menuFor!) },
-        { label: "上传文件", icon: "⬆", onSelect: () => { uploadDir = menuFor!.path; } },
-        { label: "下载", icon: "⬇", onSelect: () => doDownloadDir(menuFor!) },
-        { label: "删除", icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
+        { label: $t('filetree.menu.setRoot'), icon: "◎", onSelect: () => setRoot(menuFor!) },
+        ...(menuFor.path === root ? [{ label: $t('filetree.menu.unsetRoot'), icon: "⊘", onSelect: unsetRoot }] : []),
+        { label: $t('filetree.menu.copyPath'), icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
+        { label: $t('filetree.menu.cd'), icon: "⌘", onSelect: () => onCd(menuFor!.path) },
+        { label: $t('filetree.menu.rename'), icon: "✎", onSelect: () => doRename(menuFor!) },
+        { label: $t('filetree.menu.mkdir'), icon: "＋", onSelect: () => doMkdir(menuFor!) },
+        { label: $t('filetree.menu.newFile'), icon: "⊕", onSelect: () => openNewFile(menuFor!) },
+        { label: $t('filetree.menu.upload'), icon: "⬆", onSelect: () => { uploadDir = menuFor!.path; } },
+        { label: $t('filetree.menu.download'), icon: "⬇", onSelect: () => doDownloadDir(menuFor!) },
+        { label: $t('filetree.menu.delete'), icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
       ]} />
     {:else}
       <ContextMenu onClose={() => (menuFor = null)} anchor={menuAnchor} items={[
-        { label: "打开预览", icon: "▤", onSelect: () => onOpenFile(menuFor!.path) },
-        { label: "复制路径", icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
-        { label: "下载", icon: "⬇", onSelect: () => doDownloadFile(menuFor!) },
-        { label: "重命名", icon: "✎", onSelect: () => doRename(menuFor!) },
-        { label: "删除", icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
+        { label: $t('filetree.menu.openPreview'), icon: "▤", onSelect: () => onOpenFile(menuFor!.path) },
+        { label: $t('filetree.menu.copyPath'), icon: "📋", onSelect: () => navigator.clipboard?.writeText(menuFor!.path) },
+        { label: $t('filetree.menu.download'), icon: "⬇", onSelect: () => doDownloadFile(menuFor!) },
+        { label: $t('filetree.menu.rename'), icon: "✎", onSelect: () => doRename(menuFor!) },
+        { label: $t('filetree.menu.delete'), icon: "🗑", danger: true, onSelect: () => { confirmDel = menuFor; arm = IDLE; } },
       ]} />
     {/if}
   {/if}
@@ -325,35 +327,35 @@
       <div class="confirm-dlg" role="dialog" aria-modal="true" aria-labelledby="newfile-title" tabindex="-1"
         onclick={(e) => e.stopPropagation()}
         onkeydown={(e) => e.key === 'Escape' && (newFileDir = null)}>
-        <div class="dlg-title" id="newfile-title">新建文件</div>
+        <div class="dlg-title" id="newfile-title">{$t('filetree.newfile.title')}</div>
         <div class="dlg-path mono">{newFileDir}</div>
-        <input class="nf-input mono" placeholder="文件名（如 main.ts）" bind:value={newFileName}
+        <input class="nf-input mono" placeholder={$t('filetree.newfile.ph')} bind:value={newFileName}
           onkeydown={(e) => { if (e.key === 'Enter') submitNewFile(); if (e.key === 'Escape') newFileDir = null; }} />
         <div class="dlg-btns">
-          <button onclick={() => (newFileDir = null)}>取消</button>
-          <button class="ok" disabled={!newFileName.trim()} onclick={submitNewFile}>确认</button>
+          <button onclick={() => (newFileDir = null)}>{$t('common.cancel')}</button>
+          <button class="ok" disabled={!newFileName.trim()} onclick={submitNewFile}>{$t('common.confirm')}</button>
         </div>
       </div>
     </div>
   {/if}
 
   {#if archiving}
-    <div class="arch-overlay" role="status" aria-label="打包中">
+    <div class="arch-overlay" role="status" aria-label={$t('filetree.archivingAria')}>
       <div class="spinner"></div>
-      <div class="arch-txt">正在打包…</div>
+      <div class="arch-txt">{$t('filetree.archiving')}</div>
     </div>
   {/if}
 
   {#if confirmDel}
     <div class="confirm-overlay" role="dialog" aria-modal="true">
       <div class="confirm-dlg">
-        <div class="dlg-title">删除</div>
+        <div class="dlg-title">{$t('filetree.del.title')}</div>
         <div class="dlg-path mono">{confirmDel.path}</div>
-        <div class="dlg-hint">此操作不可撤销 · 连点 2 下确认</div>
+        <div class="dlg-hint">{$t('filetree.del.hint')}</div>
         <div class="dlg-btns">
-          <button onclick={() => (confirmDel = null)}>取消</button>
+          <button onclick={() => (confirmDel = null)}>{$t('common.cancel')}</button>
           <button class="danger" class:armed={arm.armed} onclick={(e) => confirmDelete(confirmDel, e.timeStamp)}>
-            {arm.armed ? "再点一次删除" : "确定"}
+            {arm.armed ? $t('filetree.del.armed') : $t('filetree.del.ok')}
           </button>
         </div>
       </div>
@@ -367,9 +369,9 @@
         bind:this={historyDlg}
         onclick={(e) => e.stopPropagation()}
         onkeydown={(e) => e.key === 'Escape' && (historyOpen = false)}>
-        <div class="dlg-title" id="history-title">切换项目根</div>
+        <div class="dlg-title" id="history-title">{$t('filetree.history.title')}</div>
         {#if historyList.length === 0}
-          <div class="hist-empty">暂无历史</div>
+          <div class="hist-empty">{$t('filetree.history.empty')}</div>
         {:else}
           <ul class="hist-list">
             {#each historyList as p (p)}
@@ -381,7 +383,7 @@
           </ul>
         {/if}
         <div class="dlg-btns">
-          <button onclick={() => (historyOpen = false)}>取消</button>
+          <button onclick={() => (historyOpen = false)}>{$t('common.cancel')}</button>
         </div>
       </div>
     </div>

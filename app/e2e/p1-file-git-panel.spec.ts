@@ -77,7 +77,7 @@ test.describe("P1 file + git panel", () => {
     await page.goto("/");
 
     // Wait for online indicator.
-    await expect(page.locator(".conn-dot.online")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".conn-online .conn-dot")).toBeVisible({ timeout: 15_000 });
 
     // Open file panel.
     await page.locator('button:has-text("文件")').first().click();
@@ -87,7 +87,7 @@ test.describe("P1 file + git panel", () => {
     await page.locator(".tree .row", { hasText: "src" }).first().click();
     // Click on app.ts to open preview.
     await page.locator(".tree .row", { hasText: "app.ts" }).first().click();
-    await expect(page.locator(".ftab")).toBeVisible();
+    await expect(page.locator(".preview:not(.hidden)")).toBeVisible();
     await expect(page.locator(".code")).toContainText("const x");
 
     // Switch to Git tab (project root already seeded for this test).

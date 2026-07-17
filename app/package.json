@@ -13,7 +13,8 @@
     "@xterm/xterm": "^5.5.0",
     "highlight.js": "^11.11.1",
     "noise-handshake": "^4.2.0",
-    "sodium-javascript": "^0.8.0"
+    "sodium-javascript": "^0.8.0",
+    "svelte-i18n": "^4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "1.43.1",

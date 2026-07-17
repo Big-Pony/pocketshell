@@ -14,6 +14,9 @@ export default defineConfig({
     isMobile: true,
     hasTouch: true,
     browserName: "chromium",
+    // The app's first-run language follows the browser; pin zh-CN so specs can
+    // keep locating UI by Chinese text.
+    locale: "zh-CN",
   },
   projects: [
     {

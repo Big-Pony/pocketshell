@@ -1,5 +1,7 @@
 <!-- app/src/components/DeviceManager.svelte -->
 <script lang="ts">
+  import { t } from "svelte-i18n";
+  import { tr } from "../lib/i18n";
   import type { Connection } from "../lib/connection";
   import type { DeviceInfo } from "../lib/protocol";
   import { parsePairingString } from "../lib/pairing";
@@ -22,14 +24,14 @@
     error = "";
     const r = parsePairingString(pasteText);
     if (!r.ok) { error = r.error; return; }
-    if (!deviceName.trim()) { error = "请填写本设备名称"; return; }
+    if (!deviceName.trim()) { error = tr("devices.err.noName"); return; }
     applyPairing({ ...r.value, deviceName: deviceName.trim() });
     location.reload();
   }
 
   function revoke(d: DeviceInfo) {
     if (d.source === "env") return;
-    const msg = d.self ? "吊销后本机将断开且需重新配对，确定？" : `吊销设备「${d.name}」？`;
+    const msg = d.self ? tr("devices.revokeSelf") : tr("devices.revokeOther", { name: d.name });
     if (!confirm(msg)) return;
     conn.revokeDevice(d.pubKey);
     conn.listDevices();
@@ -39,30 +41,30 @@
 <div class="dm-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }} onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}>
   <div class="dm-panel">
     <header>
-      <h2>设备管理</h2>
-      <button class="close" onclick={onClose} aria-label="关闭">×</button>
+      <h2>{$t('devices.title')}</h2>
+      <button class="close" onclick={onClose} aria-label={$t('common.close')}>×</button>
     </header>
 
     <section class="dm-pair">
-      <h3>配对新设备（本机）</h3>
-      <textarea bind:value={pasteText} placeholder="粘贴 pocketshell-pair:… 配对串" rows="3"></textarea>
-      <input bind:value={deviceName} placeholder="本设备名称，如 iPhone" />
-      <button class="pair-btn" onclick={submitPairing}>配对并连接</button>
+      <h3>{$t('devices.pairTitle')}</h3>
+      <textarea bind:value={pasteText} placeholder={$t('devices.pairPh')} rows="3"></textarea>
+      <input bind:value={deviceName} placeholder={$t('devices.namePh')} />
+      <button class="pair-btn" onclick={submitPairing}>{$t('devices.pairBtn')}</button>
       {#if error}<p class="dm-error">{error}</p>{/if}
     </section>
 
     <section class="dm-list">
-      <h3>已登记设备</h3>
+      <h3>{$t('devices.listTitle')}</h3>
       {#each devices as d (d.pubKey)}
         <div class="dm-row">
-          <span class="dm-name">{d.name}{#if d.self} · 本机{/if}</span>
+          <span class="dm-name">{d.name}{#if d.self} · {$t('devices.self')}{/if}</span>
           <span class="dm-src">{d.source}</span>
           <span class="dm-seen">{d.lastSeen ?? "—"}</span>
-          <button disabled={d.source === "env"} onclick={() => revoke(d)}>吊销</button>
+          <button disabled={d.source === "env"} onclick={() => revoke(d)}>{$t('devices.revoke')}</button>
         </div>
       {/each}
       {#if devices.length === 0}
-        <div class="dm-empty">暂无已登记设备</div>
+        <div class="dm-empty">{$t('devices.empty')}</div>
       {/if}
     </section>
   </div>

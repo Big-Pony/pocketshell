@@ -27,10 +27,10 @@ test("nextSessionName picks the lowest free sN, skipping taken (incl. foreign na
   expect(nextSessionName(["s2", "work"])).toBe("s1");  // non-sN names ignored
 });
 
-test("actionLabel: 打开 for un-adopted, 进入 for adopted, 关闭 for tombstone", () => {
-  expect(actionLabel(meta({ attached: false, state: "idle" }) as LocalSession)).toBe("打开");
-  expect(actionLabel(meta({ attached: true }) as LocalSession)).toBe("进入");
-  expect(actionLabel({ ...meta(), closed: true } as LocalSession)).toBe("关闭");
+test("actionLabel: open for un-adopted, enter for adopted, close for tombstone", () => {
+  expect(actionLabel(meta({ attached: false, state: "idle" }) as LocalSession)).toBe("open");
+  expect(actionLabel(meta({ attached: true }) as LocalSession)).toBe("enter");
+  expect(actionLabel({ ...meta(), closed: true } as LocalSession)).toBe("close");
 });
 
 test("shouldAdopt only for live un-adopted sessions", () => {

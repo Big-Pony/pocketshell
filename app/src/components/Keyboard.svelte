@@ -1,5 +1,6 @@
 <!-- app/src/components/Keyboard.svelte -->
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import { LAYOUT, FKEYS, ESC_KEY, SEQ, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
 
@@ -58,9 +59,9 @@
 
 <div class="kb">
   <div class="subtabs">
-    <button class:on={sub === "keys"} onclick={() => (sub = "keys")}>⌨ 全键盘</button>
-    <button class:on={sub === "ime"} onclick={() => (sub = "ime")}>✎ 输入法缓冲</button>
-    <button class:on={sub === "ops"} onclick={() => (sub = "ops")}>✂ 快捷操作</button>
+    <button class:on={sub === "keys"} onclick={() => (sub = "keys")}>{$t('keyboard.tab.keys')}</button>
+    <button class:on={sub === "ime"} onclick={() => (sub = "ime")}>{$t('keyboard.tab.ime')}</button>
+    <button class:on={sub === "ops"} onclick={() => (sub = "ops")}>{$t('keyboard.tab.ops')}</button>
   </div>
 
   {#if sub === "keys"}
@@ -109,18 +110,18 @@
     </div>
   {:else if sub === "ime"}
     <div class="ime">
-      <div class="target">发送到当前会话 · 用系统输入法编辑整段后一次性注入</div>
-      <textarea bind:value={imeBuf} placeholder="例如：帮我给登录接口加上基于 IP 的限流，每分钟最多 20 次…" rows="3"></textarea>
+      <div class="target">{$t('keyboard.ime.target')}</div>
+      <textarea bind:value={imeBuf} placeholder={$t('keyboard.ime.ph')} rows="3"></textarea>
       <div class="ime-actions">
-        <button class="clear" onclick={() => (imeBuf = "")}>清空</button>
-        <button class="send" onclick={sendIme}>发送到终端 ⏎</button>
+        <button class="clear" onclick={() => (imeBuf = "")}>{$t('keyboard.ime.clear')}</button>
+        <button class="send" onclick={sendIme}>{$t('keyboard.ime.send')}</button>
       </div>
-      <div class="hint">发送前内容只存在于本地缓冲区，断线也不丢失。</div>
+      <div class="hint">{$t('keyboard.ime.hint')}</div>
     </div>
   {:else}
     <div class="ops">
       <div class="ops-mode">
-        {#if selMode === "line"}选行中 · {selCount} 行 · 上一行/下一行扩选{:else if selMode === "selecting"}选区中 · {selCount} 字 · 方向键扩选{:else}方向键发送到程序 · 点「选区」或「上/下一行」开始{/if}
+        {#if selMode === "line"}{$t('keyboard.ops.lineMode', { values: { count: selCount } })}{:else if selMode === "selecting"}{$t('keyboard.ops.selMode', { values: { count: selCount } })}{:else}{$t('keyboard.ops.idle')}{/if}
       </div>
       <div class="ops-main">
         <div class="dpad">
@@ -129,27 +130,27 @@
           <div></div>
           <button class="key left" onpointerdown={(e) => { e.preventDefault(); press("ArrowLeft"); }}>←</button>
           <button class="act toggle" class:on={selecting}
-            onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? "取消" : "选区"}</button>
+            onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? $t('keyboard.ops.cancelSel') : $t('keyboard.ops.select')}</button>
           <button class="key right" onpointerdown={(e) => { e.preventDefault(); press("ArrowRight"); }}>→</button>
           <div></div>
           <button class="key down" onpointerdown={(e) => { e.preventDefault(); press("ArrowDown"); }}>↓</button>
           <div></div>
         </div>
         <div class="ops-side">
-          <button class="act line" onclick={() => onCommand({ type: "lineUp" })}>上一行</button>
-          <button class="act line" onclick={() => onCommand({ type: "lineDown" })}>下一行</button>
+          <button class="act line" onclick={() => onCommand({ type: "lineUp" })}>{$t('keyboard.ops.prevLine')}</button>
+          <button class="act line" onclick={() => onCommand({ type: "lineDown" })}>{$t('keyboard.ops.nextLine')}</button>
           <button class="key" onpointerdown={(e) => { e.preventDefault(); press("Home"); }}>Home</button>
           <button class="key" onpointerdown={(e) => { e.preventDefault(); press("End"); }}>End</button>
-          <button class="enter-fab" aria-label="确认（回车）"
-            onpointerdown={(e) => { e.preventDefault(); press("Enter"); }}>确认</button>
+          <button class="enter-fab" aria-label={$t('keyboard.ops.enterAria')}
+            onpointerdown={(e) => { e.preventDefault(); press("Enter"); }}>{$t('keyboard.ops.enter')}</button>
         </div>
       </div>
       <div class="ops-bottom">
-        <button class="act" onclick={() => onCommand({ type: "selCopy" })}>复制选区</button>
-        <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>复制后续</button>
-        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>全选复制</button>
-        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>复制输出</button>
-        <button class="act" onclick={() => onCommand({ type: "paste" })}>粘贴</button>
+        <button class="act" onclick={() => onCommand({ type: "selCopy" })}>{$t('keyboard.ops.copySel')}</button>
+        <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>{$t('keyboard.ops.copyAfter')}</button>
+        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>{$t('keyboard.ops.copyAll')}</button>
+        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>{$t('keyboard.ops.copyOutput')}</button>
+        <button class="act" onclick={() => onCommand({ type: "paste" })}>{$t('keyboard.ops.paste')}</button>
       </div>
       <div class="ops-nav">
         <button class="key" onpointerdown={(e) => { e.preventDefault(); press("PgUp"); }}>PgUp</button>
