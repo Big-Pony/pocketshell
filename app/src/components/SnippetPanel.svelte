@@ -1,5 +1,7 @@
 <!-- app/src/components/SnippetPanel.svelte -->
 <script lang="ts">
+  import { t } from "svelte-i18n";
+  import { tr } from "../lib/i18n";
   import type { Connection } from "../lib/connection";
   import type { Snippet } from "../lib/protocol";
   import { mergeSnippets } from "../lib/snippets";
@@ -8,7 +10,7 @@
 
   let customs = $state<Snippet[]>([]);
   let adding = $state(false);
-  let form = $state({ group: "项目", label: "", command: "", autoEnter: true });
+  let form = $state({ group: "", label: "", command: "", autoEnter: true });
 
   $effect(() => {
     const off = conn.onSnippets((s) => (customs = s));
@@ -22,35 +24,35 @@
   function isCustom(s: Snippet) { return !s.id.startsWith("builtin:"); }
   function submit() {
     if (!form.label.trim() || !form.command.trim()) return;
-    conn.addSnippet({ group: form.group.trim() || "项目", label: form.label.trim(), command: form.command, autoEnter: form.autoEnter });
+    conn.addSnippet({ group: form.group.trim() || tr("snippets.defaultGroup"), label: form.label.trim(), command: form.command, autoEnter: form.autoEnter });
     form = { group: form.group, label: "", command: "", autoEnter: true };
     adding = false;
   }
   function del(s: Snippet) {
-    if (!confirm(`删除指令「${s.label}」？`)) return;
+    if (!confirm(tr("snippets.delConfirm", { label: s.label }))) return;
     conn.removeSnippet(s.id);
   }
 </script>
 
 <div class="sp">
   <div class="sp-head">
-    <span class="title">⚡ 快捷指令</span>
-    <button class="add-btn" onclick={() => (adding = !adding)}>{adding ? "取消" : "＋ 自定义"}</button>
+    <span class="title">{$t('snippets.title')}</span>
+    <button class="add-btn" onclick={() => (adding = !adding)}>{adding ? $t('snippets.cancel') : $t('snippets.add')}</button>
   </div>
 
   {#if adding}
     <div class="sp-form">
-      <input bind:value={form.group} placeholder="分组，如 项目" />
-      <input bind:value={form.label} placeholder="显示名，如 build" />
-      <input bind:value={form.command} placeholder="命令，如 npm run build" />
-      <label class="check"><input type="checkbox" bind:checked={form.autoEnter} /> 自动回车 ⏎</label>
-      <button class="save" onclick={submit}>保存</button>
+      <input bind:value={form.group} placeholder={$t('snippets.groupPh')} />
+      <input bind:value={form.label} placeholder={$t('snippets.labelPh')} />
+      <input bind:value={form.command} placeholder={$t('snippets.cmdPh')} />
+      <label class="check"><input type="checkbox" bind:checked={form.autoEnter} /> {$t('snippets.autoEnter')}</label>
+      <button class="save" onclick={submit}>{$t('snippets.save')}</button>
     </div>
   {/if}
 
   <div class="groups">
     {#if groups.length === 0}
-      <div class="sp-empty">还没有自定义指令，点右上角 ＋ 添加</div>
+      <div class="sp-empty">{$t('snippets.empty')}</div>
     {/if}
     {#each groups as g (g.group)}
       <div class="sp-group">{g.group}</div>
@@ -60,14 +62,14 @@
             <button class="ins" onclick={() => insert(s)} title={s.command}>
               {s.label}{#if s.autoEnter}<span class="cr">⏎</span>{/if}
             </button>
-            {#if isCustom(s)}<button class="del" onclick={() => del(s)} aria-label="删除">×</button>{/if}
+            {#if isCustom(s)}<button class="del" onclick={() => del(s)} aria-label={$t('common.delete')}>×</button>{/if}
           </div>
         {/each}
       </div>
     {/each}
   </div>
 
-  <div class="hint">自定义指令会同步到同一 Agent 下的所有设备。</div>
+  <div class="hint">{$t('snippets.hint')}</div>
 </div>
 
 <style>

@@ -30,6 +30,8 @@
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
   import { suggest, delta } from "./lib/command-suggest";
   import { CATALOG } from "./lib/command-catalog";
+  import { t } from "svelte-i18n";
+  import { applyLanguage, tr } from "./lib/i18n";
 
   const wsUrl = getAgentAddr() ?? defaultAgentUrl(import.meta.env.DEV, location);
 
@@ -42,8 +44,8 @@
   let pageFullscreen = $state(false);
   function togglePageFullscreen() {
     const action = fullscreenAction(document);
-    if (action === "unsupported") { showToast("iOS 请用『添加到主屏幕』获得全屏"); return; }
-    if (action === "enter") document.documentElement.requestFullscreen?.().catch(() => showToast("无法进入全屏"));
+    if (action === "unsupported") { showToast(tr("app.toast.iosFullscreen")); return; }
+    if (action === "enter") document.documentElement.requestFullscreen?.().catch(() => showToast(tr("app.toast.fullscreenFailed")));
     else document.exitFullscreen?.().catch(() => {});
   }
   let settings = $state<Settings>(loadSettings());
@@ -63,17 +65,17 @@
     settings = next;
     saveSettings(next);
     applyTheme(next.theme);
+    applyLanguage(next.language);
   }
 
   function openPanel(p: BottomPanel) {
     bottomPanel = p;
     fullscreen = false; // leaving fullscreen — otherwise the bottom region stays hidden
   }
-  let notice = $state(
-    !getAgentPubKey()
-      ? "未配置 Agent 公钥：打开「设置 → 设备管理」粘贴配对串完成配对"
-      : ""
-  );
+  // Persistent pubkey reminder stays reactive to the locale (uses $t inside
+  // $derived); transient notices (resync/error) go through `flash`.
+  let flash = $state("");
+  const notice = $derived(!getAgentPubKey() ? $t("app.notice.noPubkey") : flash);
 
   const conn = new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");
@@ -114,12 +116,12 @@
   });
   conn.onExit((f) => { sessions = tombstone(sessions, f.sessionId); });
   conn.onResync(() => {
-    notice = "部分历史超出缓冲、未补齐";
-    setTimeout(() => (notice = ""), 4000);
+    flash = tr("app.notice.historyLost");
+    setTimeout(() => (flash = ""), 4000);
   });
   conn.onError((f) => {
-    notice = `${f.code}: ${f.message}`;
-    setTimeout(() => (notice = ""), 4000);
+    flash = `${f.code}: ${f.message}`;
+    setTimeout(() => (flash = ""), 4000);
   });
   conn.listSessions();
 
@@ -217,7 +219,7 @@
     const buf = term.buffer.active;
     let text = "";
     for (let i = 0; i < buf.length; i++) text += buf.getLine(i)?.translateToString(true) + "\n";
-    void navigator.clipboard?.writeText(text.replace(/\n+$/, "\n")).then(() => showToast("已复制可见输出"));
+    void navigator.clipboard?.writeText(text.replace(/\n+$/, "\n")).then(() => showToast(tr("app.toast.copiedVisible")));
   }
 
   // ---- Divider drag + double-tap fullscreen ----
@@ -255,7 +257,7 @@
   }
 
   function handleNewFile(dir: string, name: string) {
-    if (!activeId) { showToast("请先新建或打开一个终端会话"); return; }
+    if (!activeId) { showToast(tr("app.toast.needSession")); return; }
     const path = dir === "/" ? "/" + name : dir + "/" + name;
     sendActive("vim " + JSON.stringify(path) + "\n"); // opens vim, creating the file
   }
@@ -298,13 +300,13 @@
 
   // Read the focused tab's real cwd for the file panel's root buttons.
   async function getFocusedPwd(): Promise<{ pwd: string } | { error: string }> {
-    if (!activeTopId || activeTopId.startsWith("file:")) return { error: "当前聚焦不是终端，无法获取工作目录" };
+    if (!activeTopId || activeTopId.startsWith("file:")) return { error: tr("app.error.notTerminal") };
     try {
       const r = (await conn.rpc("terminal.pwd", { session: activeTopId })) as { pwd: string };
-      if (!r.pwd) return { error: "无法获取该会话的工作目录" };
+      if (!r.pwd) return { error: tr("app.error.pwdFailed") };
       return { pwd: r.pwd };
     } catch {
-      return { error: "无法获取该会话的工作目录" };
+      return { error: tr("app.error.pwdFailed") };
     }
   }
 
@@ -366,8 +368,8 @@
 
   function writeClip(text: string, ok: string) {
     const p = navigator.clipboard?.writeText?.(text);
-    if (p) p.then(() => showToast(ok)).catch(() => showToast("无法访问剪贴板"));
-    else showToast("无法访问剪贴板");
+    if (p) p.then(() => showToast(ok)).catch(() => showToast(tr("app.toast.clipboardDenied")));
+    else showToast(tr("app.toast.clipboardDenied"));
   }
 
   function runCommand(c: AppCommand) {
@@ -381,14 +383,14 @@
       case "scrollDown": terms.get(activeId)?.scrollPages(1); break;
       case "toggleFullscreen": cancelSelection(); fullscreen = !fullscreen; break;
       case "copyVisible": {
-        const t = activeTerm(); if (!t) { showToast("无终端"); break; }
+        const t = activeTerm(); if (!t) { showToast(tr("app.toast.noTerminal")); break; }
         const text = lastOutput(t.buffer.active, t.rows);
-        if (!text.trim()) { showToast("无输出可复制"); break; }
-        writeClip(text, "已复制最后输出");
+        if (!text.trim()) { showToast(tr("app.toast.noOutput")); break; }
+        writeClip(text, tr("app.toast.copiedOutput"));
         break;
       }
       case "renameSession": {
-        const next = prompt("新的会话名称", activeId);
+        const next = prompt(tr("app.prompt.rename"), activeId);
         if (next && next.trim() && next !== activeId) renameSession(activeId, next.trim());
         break;
       }
@@ -428,8 +430,8 @@
       case "selCopy": {
         const t = activeTerm(); if (!t) break;
         const text = t.getSelection();
-        if (!text) { showToast("无选区"); break; }
-        writeClip(text, "已复制选区");
+        if (!text) { showToast(tr("app.toast.noSelection")); break; }
+        writeClip(text, tr("app.toast.copiedSelection"));
         cancelSelection();
         break;
       }
@@ -442,14 +444,14 @@
           const line = b.getLine(i)?.translateToString(true) ?? "";
           text += (i === startRow ? line.slice(startCol) : line) + "\n";
         }
-        writeClip(text.replace(/\n+$/, "\n"), "已复制光标之后内容");
+        writeClip(text.replace(/\n+$/, "\n"), tr("app.toast.copiedAfter"));
         cancelSelection();
         break;
       }
       case "selectAllCopy": {
         const t = activeTerm(); if (!t) break;
         t.selectAll();
-        writeClip(t.getSelection(), "已全选并复制");
+        writeClip(t.getSelection(), tr("app.toast.copiedAll"));
         t.clearSelection();
         sel = reset();
         selCount = 0;
@@ -459,8 +461,8 @@
         if (!activeId) break;
         const rd = navigator.clipboard?.readText?.();
         if (rd) rd.then((text) => { if (text) conn.sendInput(activeId, new TextEncoder().encode(text)); })
-                 .catch(() => showToast("无法访问剪贴板"));
-        else showToast("无法访问剪贴板");
+                 .catch(() => showToast(tr("app.toast.clipboardDenied")));
+        else showToast(tr("app.toast.clipboardDenied"));
         break;
       }
       case "togglePageFullscreen": togglePageFullscreen(); break;
@@ -468,13 +470,13 @@
       case "smartCopy": {
         // Phase 5 req 1+2: system native selection -> keyboard selection -> last output.
         const sys = window.getSelection?.()?.toString() ?? "";
-        if (sys.trim()) { writeClip(sys, "已复制选中文本"); break; }
-        const t = activeTerm(); if (!t) { showToast("无终端"); break; }
+        if (sys.trim()) { writeClip(sys, tr("app.toast.copiedText")); break; }
+        const t = activeTerm(); if (!t) { showToast(tr("app.toast.noTerminal")); break; }
         const kb = t.getSelection();
-        if (kb) { writeClip(kb, "已复制选区"); cancelSelection(); break; }
+        if (kb) { writeClip(kb, tr("app.toast.copiedSelection")); cancelSelection(); break; }
         const text = lastOutput(t.buffer.active, t.rows);
-        if (!text.trim()) { showToast("无输出可复制"); break; }
-        writeClip(text, "已复制最后输出");
+        if (!text.trim()) { showToast(tr("app.toast.noOutput")); break; }
+        writeClip(text, tr("app.toast.copiedOutput"));
         break;
       }
     }
@@ -521,12 +523,6 @@
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => saveTabs(snapshot), 200);
   });
-
-  const statusText: Record<ConnStatus, string> = {
-    online: "已连接",
-    connecting: "连接中…",
-    offline: "已断开",
-  };
 </script>
 
 <div class="shell">
@@ -535,9 +531,9 @@
     <span class="version">S5</span>
     <div class="conn conn-{status}">
       <span class="conn-dot"></span>
-      <span class="conn-text mono">{statusText[status]}</span>
+      <span class="conn-text mono">{$t('app.status.' + status)}</span>
     </div>
-    <button class="fs-btn mono" aria-label={pageFullscreen ? "退出全屏" : "全屏"} onclick={togglePageFullscreen}>
+    <button class="fs-btn mono" aria-label={pageFullscreen ? $t('app.fullscreen.exit') : $t('app.fullscreen.enter')} onclick={togglePageFullscreen}>
       {pageFullscreen ? "⤡" : "⤢"}
     </button>
   </div>
@@ -548,10 +544,10 @@
 
   {#if notice}<div class="notice">{notice}</div>{/if}
   {#if status !== "online"}
-    <div class="banner">⚠ 连接已断开 · 会话由服务器托管，任务继续运行 · 正在重连…</div>
+    <div class="banner">{$t('app.banner')}</div>
   {/if}
 
-  <div class="top" style="flex: {topFlex} 1 0;" role="application" aria-label="终端与文件预览" bind:this={topEl}>
+  <div class="top" style="flex: {topFlex} 1 0;" role="application" aria-label={$t('app.topAria')} bind:this={topEl}>
     {#each topSessions as s (s.name)}
       <TerminalView
         {conn}
@@ -567,8 +563,8 @@
     {/each}
     {#if topSessions.length === 0 && fileTabs.length === 0}
       <div class="hint">
-        <div class="hint-title">还没有会话</div>
-        <div class="hint-body">点击上方 ＋ 新建，或在键盘上按 Fn + n</div>
+        <div class="hint-title">{$t('app.empty.title')}</div>
+        <div class="hint-body">{$t('app.empty.body')}</div>
       </div>
     {/if}
   </div>

@@ -2,6 +2,7 @@
 // download half). All bytes travel the encrypted WS via conn.rpc — chunked
 // base64 to stay well under the WS payload cap.
 import { toB64, fromB64 } from "./bytes";
+import { tr } from "./i18n";
 
 export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
 
@@ -72,7 +73,7 @@ export async function downloadFileBlob(
   const chunk = opts.chunkBytes ?? CHUNK_BYTES;
   // Pre-check size so the user gets a localized error before any real bytes flow.
   const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as { dataB64: string; eof: boolean; size: number };
-  if (probe.size > MAX_TRANSFER_BYTES) throw new Error("文件超过 200MB 上限");
+  if (probe.size > MAX_TRANSFER_BYTES) throw new Error(tr("errors.transfer.tooBig"));
   if (probe.eof) return new Blob([]);
   const parts: BlobPart[] = [];
   let offset = 0;

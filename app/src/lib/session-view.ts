@@ -27,11 +27,12 @@ export function nextSessionName(existing: string[]): string {
   return `s${n}`;
 }
 
-// Card action label. Un-adopted (foreign/idle) sessions are "打开" (tapping
-// attaches/adopts them); adopted ones are "进入"; tombstones are "关闭".
-export function actionLabel(s: LocalSession): "打开" | "进入" | "关闭" {
-  if (s.closed) return "关闭";
-  return s.attached ? "进入" : "打开";
+// Card action i18n key. Un-adopted (foreign/idle) sessions are "open" (tapping
+// attaches/adopts them); adopted ones are "enter"; tombstones are "close".
+// Rendered via $t('tasks.action.' + actionLabel(s)) in TaskPanel.
+export function actionLabel(s: LocalSession): "open" | "enter" | "close" {
+  if (s.closed) return "close";
+  return s.attached ? "enter" : "open";
 }
 
 // Whether selecting this session should trigger a backend adopt (attach).

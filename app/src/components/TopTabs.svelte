@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import { stateDotClass } from "../lib/session-view";
   import type { SessionState } from "../lib/protocol";
 
@@ -99,21 +100,21 @@
     {/each}
   </nav>
   <div class="ops">
-    <button class="add" aria-label="new session" onclick={openAdd}>＋</button>
+    <button class="add" aria-label={$t('tabs.ariaNew')} onclick={openAdd}>＋</button>
   </div>
 </div>
 
 {#if adding}
   <div class="overlay" role="presentation" onclick={() => (adding = false)}>
-    <div class="dlg" role="dialog" aria-modal="true" aria-label="新建会话" tabindex="-1"
+    <div class="dlg" role="dialog" aria-modal="true" aria-label={$t('tabs.ariaNew')} tabindex="-1"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (e.key === "Escape") adding = false; }}>
-      <div class="dlg-title">新建终端会话</div>
-      <input class="dlg-input" use:autoFocus bind:value={draft} placeholder="会话名称"
+      <div class="dlg-title">{$t('tabs.newTitle')}</div>
+      <input class="dlg-input" use:autoFocus bind:value={draft} placeholder={$t('tabs.namePh')}
         onkeydown={(e) => { if (e.key === "Enter") submitAdd(); if (e.key === "Escape") adding = false; }} />
       <div class="dlg-btns">
-        <button onclick={() => (adding = false)}>取消</button>
-        <button class="primary" onclick={submitAdd}>确认</button>
+        <button onclick={() => (adding = false)}>{$t('common.cancel')}</button>
+        <button class="primary" onclick={submitAdd}>{$t('common.confirm')}</button>
       </div>
     </div>
   </div>
@@ -121,16 +122,16 @@
 
 {#if closing}
   <div class="overlay" role="presentation" onclick={dismissClose}>
-    <div class="dlg" role="dialog" aria-modal="true" aria-label="关闭标签" tabindex="-1"
+    <div class="dlg" role="dialog" aria-modal="true" aria-label={$t('tabs.ariaClose')} tabindex="-1"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (e.key === "Escape") closing = null; }}>
-      <div class="dlg-title">关闭「{closing.title}」？</div>
+      <div class="dlg-title">{$t('tabs.closeTitle', { values: { title: closing.title } })}</div>
       <div class="dlg-hint">
-        {closing.kind === "term" ? "仅关闭标签，会话仍在后台运行，可从任务面板重新打开。" : "关闭该文件预览标签。"}
+        {closing.kind === "term" ? $t('tabs.closeTermHint') : $t('tabs.closeFileHint')}
       </div>
       <div class="dlg-btns">
-        <button onclick={() => (closing = null)}>取消</button>
-        <button class="primary" onclick={confirmClose}>确认</button>
+        <button onclick={() => (closing = null)}>{$t('common.cancel')}</button>
+        <button class="primary" onclick={confirmClose}>{$t('common.confirm')}</button>
       </div>
     </div>
   </div>

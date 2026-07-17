@@ -61,7 +61,7 @@ test.describe("P1 quick-ops + swipe", () => {
     expect(agentInfo).not.toBeNull();
     await seedLocalStorage(page, agentInfo!);
     await page.goto("/");
-    await expect(page.locator(".conn-dot.online")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".conn-online .conn-dot")).toBeVisible({ timeout: 15_000 });
 
     await newSession(page, "one");
     await newSession(page, "two");
@@ -89,7 +89,7 @@ test.describe("P1 quick-ops + swipe", () => {
     test.setTimeout(120_000);
     await seedLocalStorage(page, agentInfo!);
     await page.goto("/");
-    await expect(page.locator(".conn-dot.online")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".conn-online .conn-dot")).toBeVisible({ timeout: 15_000 });
     await newSession(page, "sel");
     // Wait for terminal to render some content.
     await expect(page.locator(".term:not(.hidden) .xterm")).toBeVisible({ timeout: 10_000 });
@@ -122,7 +122,7 @@ test.describe("P1 quick-ops + swipe", () => {
     test.setTimeout(120_000);
     await seedLocalStorage(page, agentInfo!);
     await page.goto("/");
-    await expect(page.locator(".conn-dot.online")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".conn-online .conn-dot")).toBeVisible({ timeout: 15_000 });
     await newSession(page, "hist");
     await expect(page.locator(".term:not(.hidden) .xterm")).toBeVisible({ timeout: 10_000 });
 

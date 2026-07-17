@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   let { items, onClose, anchor }: {
     items: { label: string; icon?: string; danger?: boolean; onSelect: () => void }[];
     onClose: () => void;
@@ -25,7 +26,7 @@
   });
 </script>
 
-<div class="backdrop" onclick={onClose} role="button" tabindex="-1" aria-label="关闭菜单">
+<div class="backdrop" onclick={onClose} role="button" tabindex="-1" aria-label={$t('contextmenu.aria')}>
   <div class="ctxmenu" bind:this={menuEl} onclick={(e) => e.stopPropagation()} style:left="{pos.left}px" style:top="{pos.top}px">
     {#each items as it}
       <button class:danger={it.danger} onclick={() => { it.onSelect(); onClose(); }}>
@@ -33,7 +34,7 @@
       </button>
     {/each}
     <div class="sep"></div>
-    <button onclick={onClose}>取消</button>
+    <button onclick={onClose}>{$t('contextmenu.cancel')}</button>
   </div>
 </div>
 

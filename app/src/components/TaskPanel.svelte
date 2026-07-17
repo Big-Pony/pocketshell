@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
+  import { tr } from "../lib/i18n";
   import { stateDotClass, needsKillConfirm, actionLabel } from "../lib/session-view";
   import ContextMenu from "./ContextMenu.svelte";
 
@@ -30,7 +32,7 @@
     menuFor = null;
   }
   function doRename(name: string) {
-    const next = prompt("Rename session", name);
+    const next = prompt(tr("tasks.prompt.rename"), name);
     closeMenu();
     if (next && next.trim() && next.trim() !== name) onRename(name, next.trim());
   }
@@ -40,7 +42,6 @@
     else onKill(s.name);
   }
 
-  const stateLabel: Record<string, string> = { run: "运行中", wait: "等待输入", done: "已结束", idle: "后台运行" };
 </script>
 
 <div class="tp">
@@ -54,12 +55,12 @@
         >
           <span class="dot {stateDotClass(s.state)}"></span>
           <span class="info">
-            <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{stateLabel[s.state]}</em></span>
+            <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{$t('tasks.state.' + s.state)}</em></span>
             <span class="last mono">{s.lastLine}</span>
           </span>
-          <span class="act">{actionLabel(s)}</span>
+          <span class="act">{$t('tasks.action.' + actionLabel(s))}</span>
         </button>
-        <button class="more" aria-label="更多"
+        <button class="more" aria-label={$t('common.more')}
           onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget); }}>⋯</button>
       </div>
 
@@ -68,11 +69,11 @@
           onClose={closeMenu}
           anchor={menuAnchor}
           items={[
-            { label: "重命名", icon: "✎", onSelect: () => doRename(s.name) },
-            { label: "复制输出", icon: "📋", onSelect: () => onCopy(s.name) },
+            { label: $t('tasks.menu.rename'), icon: "✎", onSelect: () => doRename(s.name) },
+            { label: $t('tasks.menu.copyOutput'), icon: "📋", onSelect: () => onCopy(s.name) },
             ...(s.closed
-              ? [{ label: "关闭标签", icon: "×", onSelect: () => onClose(s.name) }]
-              : [{ label: "终止", icon: "⏹", danger: true, onSelect: () => requestKill(s) }]),
+              ? [{ label: $t('tasks.menu.closeTab'), icon: "×", onSelect: () => onClose(s.name) }]
+              : [{ label: $t('tasks.menu.kill'), icon: "⏹", danger: true, onSelect: () => requestKill(s) }]),
           ]}
         />
       {/if}
@@ -80,11 +81,11 @@
       {#if confirmKill === s.name}
         <div class="confirm-overlay" role="dialog" aria-modal="true">
           <div class="confirm-dlg">
-            <div class="dlg-title">终止 {s.name}</div>
-            <div class="dlg-body">{s.state === "idle" ? "无法确认该会话是否在运行，终止可能中断任务。" : "会话正在运行中，终止后任务将中断。"}确定要终止吗？</div>
+            <div class="dlg-title">{$t('tasks.kill.title', { values: { name: s.name } })}</div>
+            <div class="dlg-body">{s.state === "idle" ? $t('tasks.kill.bodyIdle') : $t('tasks.kill.bodyRun')}</div>
             <div class="dlg-btns">
-              <button onclick={() => (confirmKill = null)}>取消</button>
-              <button class="danger" onclick={() => { onKill(s.name); confirmKill = null; }}>终止</button>
+              <button onclick={() => (confirmKill = null)}>{$t('common.cancel')}</button>
+              <button class="danger" onclick={() => { onKill(s.name); confirmKill = null; }}>{$t('tasks.kill.confirm')}</button>
             </div>
           </div>
         </div>
@@ -92,10 +93,10 @@
     </li>
   {/each}
   {#if sessions.length === 0}
-    <li class="empty">No sessions. Tap ＋ to create one.</li>
+    <li class="empty">{$t('tasks.empty')}</li>
   {/if}
   <li class="pnote">
-    <b>断线保护</b>：以上会话全部由服务器端 Agent（tmux）托管，App 只是 attach 上去的窗口。
+    <b>{$t('tasks.note.title')}</b>{$t('tasks.note.body')}
   </li>
 </ul>
 

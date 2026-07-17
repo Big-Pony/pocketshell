@@ -1,5 +1,6 @@
 <!-- app/src/components/SettingsPanel.svelte -->
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import type { Connection } from "../lib/connection";
   import type { Settings } from "../lib/settings";
   import DeviceManager from "./DeviceManager.svelte";
@@ -19,21 +20,33 @@
   <!-- Theme -->
   <div class="set">
     <div class="grow">
-      <div class="label">界面风格</div>
-      <div class="desc">深色 IDE / 浅色极简，或跟随系统外观</div>
+      <div class="label">{$t('settings.theme.label')}</div>
+      <div class="desc">{$t('settings.theme.desc')}</div>
     </div>
     <div class="seg">
-      <button class:on={settings.theme === "dark"} onclick={() => update("theme", "dark")}>深色</button>
-      <button class:on={settings.theme === "light"} onclick={() => update("theme", "light")}>浅色</button>
-      <button class:on={settings.theme === "system"} onclick={() => update("theme", "system")}>跟随</button>
+      <button class:on={settings.theme === "dark"} onclick={() => update("theme", "dark")}>{$t('settings.theme.dark')}</button>
+      <button class:on={settings.theme === "light"} onclick={() => update("theme", "light")}>{$t('settings.theme.light')}</button>
+      <button class:on={settings.theme === "system"} onclick={() => update("theme", "system")}>{$t('settings.theme.system')}</button>
+    </div>
+  </div>
+
+  <!-- Language -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('settings.language.label')}</div>
+      <div class="desc">{$t('settings.language.desc')}</div>
+    </div>
+    <div class="seg">
+      <button class:on={settings.language === "zh"} onclick={() => update("language", "zh")}>中文</button>
+      <button class:on={settings.language === "en"} onclick={() => update("language", "en")}>English</button>
     </div>
   </div>
 
   <!-- Font size -->
   <div class="set">
     <div class="grow">
-      <div class="label">终端字号</div>
-      <div class="desc">也支持在终端区双指缩放</div>
+      <div class="label">{$t('settings.fontSize.label')}</div>
+      <div class="desc">{$t('settings.fontSize.desc')}</div>
     </div>
     <input type="range" min="10" max="18" step="0.5" value={settings.fontSize}
       oninput={(e) => update("fontSize", Number((e.target as HTMLInputElement).value))} />
@@ -43,8 +56,8 @@
   <!-- Keyboard layout -->
   <div class="set">
     <div class="grow">
-      <div class="label">键盘布局</div>
-      <div class="desc">全键盘 tab 采用笔记本布局，默认 Mac</div>
+      <div class="label">{$t('settings.layout.label')}</div>
+      <div class="desc">{$t('settings.layout.desc')}</div>
     </div>
     <div class="seg">
       <button class:on={settings.layout === "mac"} onclick={() => update("layout", "mac")}>Mac</button>
@@ -55,8 +68,8 @@
   <!-- Vibration -->
   <div class="set">
     <div class="grow">
-      <div class="label">按键震动</div>
-      <div class="desc">自定义键盘按下时短振一下</div>
+      <div class="label">{$t('settings.vibrate.label')}</div>
+      <div class="desc">{$t('settings.vibrate.desc')}</div>
     </div>
     <div class="tog" class:on={settings.vibrate} role="switch" aria-checked={settings.vibrate} tabindex="0"
       onclick={() => update("vibrate", !settings.vibrate)}
@@ -66,11 +79,11 @@
   <!-- Device management -->
   <div class="set" style="border:none">
     <div class="grow">
-      <div class="label">设备管理</div>
-      <div class="desc">配对新设备、查看已登记设备、吊销</div>
+      <div class="label">{$t('settings.devices.label')}</div>
+      <div class="desc">{$t('settings.devices.desc')}</div>
     </div>
     <button class="btn" onclick={() => (showDevices = !showDevices)}>
-      {showDevices ? "关闭" : "管理 ›"}
+      {showDevices ? $t('settings.devices.close') : $t('settings.devices.manage')}
     </button>
   </div>
 </div>

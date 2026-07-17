@@ -1,32 +1,33 @@
 <!-- app/src/components/BottomBar.svelte -->
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import type { BottomPanel } from "../lib/shell";
   let { active, taskBadge = false, onSelect }: {
     active: BottomPanel; taskBadge?: boolean; onSelect: (p: BottomPanel) => void;
   } = $props();
 
-  const tabs: { id: BottomPanel; icon: string; label: string; disabled?: boolean }[] = [
-    { id: "task", icon: "▶", label: "任务" },
-    { id: "file", icon: "🗀", label: "文件" },
-    { id: "kbd", icon: "⌨", label: "键盘" },
-    { id: "snip", icon: "⚡", label: "指令" },
-    { id: "set", icon: "⚙", label: "设置" },
+  const tabs: { id: BottomPanel; icon: string; labelKey: string; disabled?: boolean }[] = [
+    { id: "task", icon: "▶", labelKey: "bottombar.task" },
+    { id: "file", icon: "🗀", labelKey: "bottombar.file" },
+    { id: "kbd", icon: "⌨", labelKey: "bottombar.kbd" },
+    { id: "snip", icon: "⚡", labelKey: "bottombar.snip" },
+    { id: "set", icon: "⚙", labelKey: "bottombar.set" },
   ];
 </script>
 
 <nav class="bar">
-  {#each tabs as t (t.id)}
+  {#each tabs as tab (tab.id)}
     <button
       class="btab"
-      class:active={active === t.id}
-      class:disabled={t.disabled}
-      disabled={t.disabled}
-      onclick={() => !t.disabled && onSelect(t.id)}
-      title={t.disabled ? "文件面板（P1）" : t.label}
+      class:active={active === tab.id}
+      class:disabled={tab.disabled}
+      disabled={tab.disabled}
+      onclick={() => !tab.disabled && onSelect(tab.id)}
+      title={tab.disabled ? $t('bottombar.fileP1') : $t(tab.labelKey)}
     >
-      <span class="ic">{t.icon}</span>
-      <span class="lb">{t.label}</span>
-      {#if t.id === "task" && taskBadge}<span class="dot"></span>{/if}
+      <span class="ic">{tab.icon}</span>
+      <span class="lb">{$t(tab.labelKey)}</span>
+      {#if tab.id === "task" && taskBadge}<span class="dot"></span>{/if}
     </button>
   {/each}
 </nav>

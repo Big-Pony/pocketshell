@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
+  import { tr } from "../lib/i18n";
   import { Connection } from "../lib/connection";
   import { uploadFiles, humanSize, MAX_TRANSFER_BYTES, type UploadItem } from "../lib/transfer";
 
@@ -41,7 +43,7 @@
     try {
       const r = (await conn.rpc("fs.uploadCheck", { dir, names })) as { conflicts: string[] };
       conflicts = r.conflicts;
-    } catch (e: any) { errMsg = e?.message ?? "检查失败"; phase = "error"; return; }
+    } catch (e: any) { errMsg = e?.message ?? tr("upload.error.check"); phase = "error"; return; }
     if (conflicts.length) {
       choices = Object.fromEntries(conflicts.map((n) => [n, "rename" as Choice]));
       phase = "conflict";
@@ -61,7 +63,7 @@
       let destName = f.name;
       if (c === "rename") {
         try { destName = ((await conn.rpc("fs.resolveName", { dir, name: f.name })) as { name: string }).name; }
-        catch (e: any) { errMsg = e?.message ?? "命名失败"; phase = "error"; return; }
+        catch (e: any) { errMsg = e?.message ?? tr("upload.error.resolve"); phase = "error"; return; }
       }
       items.push({ name: f.name, size: f.size, blob: f.blob, destName });
     }
@@ -74,7 +76,7 @@
       if (cancelled) { onClose(); return; }
       phase = "done";
       onUploaded(dir);
-    } catch (e: any) { errMsg = e?.message ?? "上传失败"; phase = "error"; }
+    } catch (e: any) { errMsg = e?.message ?? tr("upload.error.upload"); phase = "error"; }
   }
 
   function close() { cancelled = true; onClose(); }
@@ -83,8 +85,8 @@
 <div class="backdrop" role="dialog" aria-modal="true">
   <div class="dlg">
     <div class="hd">
-      <span>上传到 {dir}</span>
-      <button class="x" aria-label="关闭" onclick={close}>✕</button>
+      <span>{$t('upload.title', { values: { dir } })}</span>
+      <button class="x" aria-label={$t('common.close')} onclick={close}>✕</button>
     </div>
 
     <input bind:this={input} type="file" multiple style="display:none" onchange={onPicked} />
@@ -94,48 +96,48 @@
         {#each files as f (f.name + f.size)}
           <div class="item" class:bad={f.tooBig}>
             <span class="nm">{f.name}</span>
-            <span class="sz">{humanSize(f.size)}{f.tooBig ? " · 超 200MB" : ""}</span>
+            <span class="sz">{humanSize(f.size)}{f.tooBig ? " · " + $t('upload.tooBig') : ""}</span>
           </div>
         {/each}
-        {#if !files.length}<div class="empty">未选择文件</div>{/if}
+        {#if !files.length}<div class="empty">{$t('upload.empty')}</div>{/if}
       </div>
       <div class="btns">
-        <button onclick={pick}>继续选择</button>
-        <button onclick={close}>取消</button>
-        <button class="primary" disabled={!files.length || anyTooBig} onclick={start}>上传</button>
+        <button onclick={pick}>{$t('upload.pickMore')}</button>
+        <button onclick={close}>{$t('common.cancel')}</button>
+        <button class="primary" disabled={!files.length || anyTooBig} onclick={start}>{$t('upload.start')}</button>
       </div>
     {:else if phase === "conflict"}
-      <div class="hint">以下文件已存在，请选择处理方式</div>
+      <div class="hint">{$t('upload.conflictHint')}</div>
       <div class="btns">
-        <button onclick={() => applyAll("overwrite")}>全部覆盖</button>
-        <button onclick={() => applyAll("skip")}>全部跳过</button>
-        <button onclick={() => applyAll("rename")}>全部重命名</button>
+        <button onclick={() => applyAll("overwrite")}>{$t('upload.allOverwrite')}</button>
+        <button onclick={() => applyAll("skip")}>{$t('upload.allSkip')}</button>
+        <button onclick={() => applyAll("rename")}>{$t('upload.allRename')}</button>
       </div>
       <div class="list">
         {#each conflicts as n (n)}
           <div class="item">
             <span class="nm">{n}</span>
             <select bind:value={choices[n]}>
-              <option value="overwrite">覆盖</option>
-              <option value="skip">跳过</option>
-              <option value="rename">重命名</option>
+              <option value="overwrite">{$t('upload.op.overwrite')}</option>
+              <option value="skip">{$t('upload.op.skip')}</option>
+              <option value="rename">{$t('upload.op.rename')}</option>
             </select>
           </div>
         {/each}
       </div>
       <div class="btns">
-        <button onclick={() => (phase = "selecting")}>返回</button>
-        <button class="primary" onclick={run}>开始上传</button>
+        <button onclick={() => (phase = "selecting")}>{$t('upload.back')}</button>
+        <button class="primary" onclick={run}>{$t('upload.begin')}</button>
       </div>
     {:else if phase === "uploading"}
-      <div class="prog">已上传 {humanSize(uploaded)} / {humanSize(total)}</div>
-      <div class="hint">关闭弹窗即取消上传</div>
+      <div class="prog">{$t('upload.progress', { values: { uploaded: humanSize(uploaded), total: humanSize(total) } })}</div>
+      <div class="hint">{$t('upload.cancelHint')}</div>
     {:else if phase === "done"}
-      <div class="prog ok">上传完成 · {humanSize(total)}</div>
-      <div class="btns"><button class="primary" onclick={onClose}>关闭</button></div>
+      <div class="prog ok">{$t('upload.done', { values: { size: humanSize(total) } })}</div>
+      <div class="btns"><button class="primary" onclick={onClose}>{$t('common.close')}</button></div>
     {:else}
       <div class="prog err">{errMsg}</div>
-      <div class="btns"><button onclick={onClose}>关闭</button></div>
+      <div class="btns"><button onclick={onClose}>{$t('common.close')}</button></div>
     {/if}
   </div>
 </div>
