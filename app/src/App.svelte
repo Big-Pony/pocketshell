@@ -533,8 +533,12 @@
       <span class="conn-dot"></span>
       <span class="conn-text mono">{$t('app.status.' + status)}</span>
     </div>
-    <button class="fs-btn mono" aria-label={pageFullscreen ? $t('app.fullscreen.exit') : $t('app.fullscreen.enter')} onclick={togglePageFullscreen}>
-      {pageFullscreen ? "⤡" : "⤢"}
+    <button class="fs-btn" aria-label={pageFullscreen ? $t('app.fullscreen.exit') : $t('app.fullscreen.enter')} onclick={togglePageFullscreen}>
+      {#if pageFullscreen}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg>
+      {:else}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+      {/if}
     </button>
   </div>
 
@@ -662,15 +666,21 @@
   }
   .fs-btn {
     flex: 0 0 auto;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    color: var(--dim);
-    border-radius: var(--radius-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 30px;
     height: 30px;
-    font-size: 0.85rem;
-    line-height: 1;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--dim);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
   }
+  .fs-btn svg { width: 16px; height: 16px; display: block; }
+  .fs-btn:hover { color: var(--text); }
   .fs-btn:active { background: var(--keyhi); }
 
   .tabs-wrap {

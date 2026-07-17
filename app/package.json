@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gen:icons": "bun run scripts/gen-icons.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

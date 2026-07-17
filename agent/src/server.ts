@@ -16,6 +16,7 @@ import { resolveStatic } from "./static-serve";
 import { ASSETS } from "./embedded-manifest";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 import { buildReadiness, isNonLocalBind } from "./readiness";
+import { runWarmup } from "./warmup";
 import { createPairing } from "./pairing";
 import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
 
@@ -200,6 +201,7 @@ export function startServer(deps: Deps = {}) {
             case "git.status": result = gitStatus(String(p.cwd)); break;
             case "term.history": result = terminal.history(String(p.session)); break;
             case "term.paneInfo": result = terminal.paneInfo(String(p.session)); break;
+            case "term.redraw": result = terminal.redraw(String(p.session)); break;
             case "terminal.pwd": result = terminal.pwd(String(p.session)); break;
             default:
               sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
@@ -361,6 +363,16 @@ export function startServer(deps: Deps = {}) {
 
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
+  // `pocketshell-agent --warmup`: foreground TCC warmup, then exit. TCC
+  // prompts from a launchd background process are not always reliable, so
+  // running this once in a real terminal is the dependable fallback (and the
+  // only way to batch the prompts ahead of first use). See warmup.ts.
+  if (process.argv.includes("--warmup")) {
+    const lines = runWarmup();
+    for (const l of lines) console.log(l);
+    if (lines.length === 0) console.log("[pocketshell] warmup done — no manual steps needed.");
+    process.exit(0);
+  }
   const cfg = loadConfig();
   ensureTmux(realTmuxDeps());
   const advertise = resolveAdvertise(cfg);
@@ -381,4 +393,10 @@ if (import.meta.main) {
   });
   console.log(`[pocketshell] listening on ${cfg.listen.host}:${cfg.listen.port} (TLS ${cfg.tls.enabled ? "on" : "off"})`);
   for (const l of lines) console.log(l);
+  // macOS TCC warmup after boot: batch any permission prompts at startup.
+  // Async + silent on failure; prints FDA guidance lines when FDA is missing.
+  // Full no-op on non-darwin (see warmup.ts).
+  setTimeout(() => {
+    try { for (const l of runWarmup()) console.log(l); } catch { /* probes must never crash the agent */ }
+  }, 0);
 }

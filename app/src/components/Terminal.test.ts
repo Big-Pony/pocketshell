@@ -5,6 +5,7 @@ import Terminal from "./Terminal.svelte";
 function stubConn() {
   return {
     onOutput: () => () => {},
+    onInput: () => () => {},
     attach: () => {},
     resize: () => {},
     rpc: vi.fn().mockResolvedValue({ data: "", currentCommand: "", alternateOn: false, isShell: true }),

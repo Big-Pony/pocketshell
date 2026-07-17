@@ -124,7 +124,11 @@
       try {
         const h = (await conn.rpc("term.history", { session: sessionId })) as { data: string };
         term.clear();
-        if (h?.data) term.write(fromB64(h.data));
+        // capture-pane lines are trimmed and bare-\n separated; xterm runs with
+        // convertEol:false, so a bare \n moves down WITHOUT returning to column
+        // 0 and the reseed renders as a diagonal staircase (visible after `:q`
+        // from vim, where no live repaint masks it). Normalize to \r\n.
+        if (h?.data) term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
       } catch { /* best-effort */ }
     };
 
@@ -160,7 +164,16 @@
           // currentBuffer = "normal", so reloadHistory won't early-return.
           term.write("\x1b[?1049l", () => { void reloadHistory(); });
         } else {
-          term.write("\x1b[?1049h");
+          // Switch xterm into its alternate buffer, then make tmux re-push the
+          // pane's current screen (term.redraw). The pane app (vim/htop) already
+          // drew its UI into tmux's alt screen, but those bytes landed in xterm's
+          // NORMAL buffer before this switch — and vim never redraws unprompted,
+          // so without the re-push the fresh (empty) alt buffer stays blank. The
+          // write callback guarantees the buffer switch completed before the
+          // re-pushed bytes arrive. Best-effort: failure keeps the 2s-poll UX.
+          term.write("\x1b[?1049h", () => {
+            void conn.rpc("term.redraw", { session: sessionId }).catch(() => {});
+          });
         }
       } catch { /* keep current mode */ }
     };
@@ -168,6 +181,18 @@
     // Track xterm's buffer so reloadHistory knows it's in the normal buffer.
     term.buffer.onBufferChange((buf) => {
       currentBuffer = (buf.type as BufferType) === "alternate" ? "alternate" : "normal";
+    });
+
+    // Outbound input is the strongest hint that the pane may change mode
+    // (`vim x<CR>` enters the alt screen; `:q<CR>` leaves it). Re-classify
+    // ~200ms after the last keystroke of a burst instead of waiting for the
+    // next 2s poll, so the buffer switch + redraw feel immediate. Trailing
+    // debounce keeps it to one paneInfo RPC per burst, not per keystroke.
+    let classifyDebounce: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribeInput = conn.onInput((sid) => {
+      if (sid !== sessionId) return;
+      if (classifyDebounce) clearTimeout(classifyDebounce);
+      classifyDebounce = setTimeout(() => void classifyPane(), 200);
     });
 
     // Session is created by App (SessionTabs "new"); here we only attach + size.
@@ -190,6 +215,8 @@
     return () => {
       window.removeEventListener("resize", onResize);
       unsubscribeOutput?.();
+      unsubscribeInput?.();
+      if (classifyDebounce) clearTimeout(classifyDebounce);
       stopPoll();
       term?.dispose();
     };
