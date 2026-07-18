@@ -70,7 +70,7 @@ export function fsTree(path: string, opts: { maxNodes?: number } = {}): TreeResu
   return { path: abs, nodes: truncated ? all.slice(0, max) : all, ...(truncated ? { truncated: true } : {}) };
 }
 
-export interface ReadResult { path: string; content: string; lang: string; truncated?: boolean; binary?: boolean }
+export interface ReadResult { path: string; content: string; lang: string; mtime: number; truncated?: boolean; binary?: boolean }
 
 const LANG_BY_EXT: Record<string, string> = {
   ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".mjs": "javascript",
@@ -92,10 +92,11 @@ export function fsRead(path: string, opts: { maxBytes?: number; maxLines?: numbe
   const maxLines = opts.maxLines ?? DEFAULT_MAX_LINES;
   const buf = readFileSync(abs); // throws ENOENT → caller wraps
   const lang = langForExt(abs);
+  const mtime = Math.floor(statSync(abs).mtimeMs);
 
   // Binary sniff: a NUL byte in the first chunk means "not text".
   const sniff = buf.subarray(0, Math.min(buf.length, 8192));
-  if (sniff.includes(0)) return { path: abs, content: "", lang, binary: true };
+  if (sniff.includes(0)) return { path: abs, content: "", lang, mtime, binary: true };
 
   let truncated = false;
   let slice = buf;
@@ -103,7 +104,7 @@ export function fsRead(path: string, opts: { maxBytes?: number; maxLines?: numbe
   let text = slice.toString("utf8");
   const lines = text.split("\n");
   if (lines.length > maxLines) { text = lines.slice(0, maxLines).join("\n"); truncated = true; }
-  return { path: abs, content: text, lang, ...(truncated ? { truncated: true } : {}) };
+  return { path: abs, content: text, lang, mtime, ...(truncated ? { truncated: true } : {}) };
 }
 
 export interface DiffHunk { header: string; lines: { kind: "add" | "del" | "ctx"; text: string }[] }

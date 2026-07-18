@@ -337,3 +337,19 @@ test("fsOp rename without target throws", () => {
   expect(() => fsOp("rename", join(d, "a"))).toThrow();
   rmSync(d, { recursive: true, force: true });
 });
+
+
+test("fsRead returns file mtime (epoch ms), also on binary early-return", () => {
+  const d = tmp();
+  const f = join(d, "a.txt");
+  writeFileSync(f, "hello");
+  utimesSync(f, new Date(1700000000000), new Date(1700000001234));
+  expect(fsRead(f).mtime).toBe(1700000001234);
+  const b = join(d, "bin.dat");
+  writeFileSync(b, Buffer.from([0x00, 0x01, 0x02]));
+  utimesSync(b, new Date(1700000000000), new Date(1700000002000));
+  const rb = fsRead(b);
+  expect(rb.binary).toBe(true);
+  expect(rb.mtime).toBe(1700000002000);
+  rmSync(d, { recursive: true, force: true });
+});
