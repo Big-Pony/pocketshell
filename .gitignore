@@ -11,3 +11,10 @@ bun.lockb
 docs/tmp
 deploy-info
 docs/superpowers/test-reports/*/*.png
+# Private (never publish)
+docs/
+.superpowers/
+.playwright-mcp/
+spike/
+CLAUDE.md
+deploy-info/
