@@ -94,6 +94,10 @@ cd ../agent && bun install && bun run build:bin
 
 把对应平台的二进制拷到目标机运行即可（目标机只需 `tmux`）。
 
+**访问地址与默认端口**
+
+Agent 默认监听 **`8722` 端口**（`POCKETSHELL_PORT` 可改），启动后在运行 Agent 的机器上用浏览器打开 `http://127.0.0.1:8722` 即可访问 App。注意默认只绑定 `127.0.0.1`——手机要从局域网/公网访问，需设置 `POCKETSHELL_HOST=0.0.0.0` 并配好 `POCKETSHELL_ADVERTISE`，或经反向代理暴露，具体见 [部署指南](./DEPLOYMENT.md)。
+
 **首次配对**
 
 Agent 首次运行会打印：App 访问地址、可粘贴的**配对串**、Agent 公钥。手机打开 App → 粘贴配对串完成一次性配对（默认 TTL 300s）。之后该设备即受信。
@@ -108,6 +112,20 @@ Agent 首次运行会打印：App 访问地址、可粘贴的**配对串**、Age
 | `POCKETSHELL_KEY_DIR` | `~/.pocketshell` | 密钥/设备/审计目录 |
 | `POCKETSHELL_TLS` / `_CERT` / `_KEY` | `0` | Agent 内置 TLS（手供证书） |
 | `POCKETSHELL_ADMIN` | 开启 | 本地管理页（仅 127.0.0.1），`0` 关闭 |
+
+### 后台管理页
+
+Agent 内置一个**仅限本机访问**的管理页：在运行 Agent 的机器上打开 `http://127.0.0.1:8722/admin`（端口随 `POCKETSHELL_PORT`，页面中英双语）。功能：
+
+- **生成新配对码**：一键生成新的一次性配对串（TTL 300s），给新手机配对，无需重启 Agent；
+- **查看已配对设备**：设备名、公钥、最近访问 IP、在线状态；
+- **删除/吊销设备**：吊销后该设备立即断线，无法再握手。
+
+管理页只响应来自 `127.0.0.1` 的请求，经反向代理或公网访问会被拒绝（有意设计，无需额外加固）；设 `POCKETSHELL_ADMIN=0` 可整体关闭。
+
+### 部署
+
+需要从公网访问（不在同一局域网）？见 **[部署指南 DEPLOYMENT.md](./DEPLOYMENT.md)**，涵盖四种方式：纯 IP+端口直连、服务器直接部署（Caddy / Nginx 反代）、Cloudflare Tunnel（无公网 IP）、frp 中转服务器，以及 systemd / launchd 常驻运行示例。
 
 ### 安全
 
@@ -183,6 +201,10 @@ cd agent && bun install && bun run build:bin  # single-file binaries, all platfo
 
 Copy the binary for your platform to the target host (only `tmux` required) and run it.
 
+**URL & default port**
+
+The Agent listens on port **`8722`** by default (change with `POCKETSHELL_PORT`); once started, open `http://127.0.0.1:8722` in a browser on the host machine. Note it binds to `127.0.0.1` only by default — to reach it from your phone over LAN/internet, set `POCKETSHELL_HOST=0.0.0.0` plus `POCKETSHELL_ADVERTISE`, or put it behind a reverse proxy — see the [deployment guide](./DEPLOYMENT.md).
+
 **First pairing**
 
 On first run the Agent prints the App URL, a pasteable **pairing string**, and the Agent public key. Open the App on your phone, paste the pairing string to complete a one-time pairing (default TTL 300s). The device is trusted afterward.
@@ -197,6 +219,20 @@ On first run the Agent prints the App URL, a pasteable **pairing string**, and t
 | `POCKETSHELL_KEY_DIR` | `~/.pocketshell` | keys / devices / audit dir |
 | `POCKETSHELL_TLS` / `_CERT` / `_KEY` | `0` | Agent built-in TLS (bring your own cert) |
 | `POCKETSHELL_ADMIN` | on | local admin page (127.0.0.1 only), `0` to disable |
+
+### Admin page
+
+The Agent ships a built-in admin page restricted to **localhost only**: open `http://127.0.0.1:8722/admin` on the machine running the Agent (port follows `POCKETSHELL_PORT`; the page itself is bilingual zh/en). It lets you:
+
+- **Generate a new pairing code** — a fresh one-time pairing string (TTL 300s) for pairing a new phone, no Agent restart needed;
+- **Inspect paired devices** — name, public key, last-seen IP, online status;
+- **Remove / revoke devices** — a revoked device is disconnected immediately and can no longer complete the handshake.
+
+The admin page only answers requests from `127.0.0.1`; access via a reverse proxy or the public internet is rejected by design. Set `POCKETSHELL_ADMIN=0` to disable it entirely.
+
+### Deployment
+
+Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)** — it covers four setups: bare IP+port, direct server deployment behind Caddy / Nginx, Cloudflare Tunnel (no public IP needed), and an frp relay server, plus systemd / launchd service examples.
 
 ### Security
 
