@@ -71,7 +71,19 @@ cd agent && bun install && bun run start
 cd app && bun install && bun run dev      # http://localhost:5173
 ```
 
-**方式二：单文件二进制（推荐部署）**
+**方式二：下载预编译二进制（最快，推荐）**
+
+从 [Releases](https://github.com/Big-Pony/pocketshell/releases) 下载对应平台的压缩包（`linux-x64` / `linux-arm64` / `darwin-arm64` / `darwin-x64`），解压后运行：
+
+```bash
+# 以 Linux x64 为例，其余平台替换文件名即可
+tar -xzf pocketshell-agent-linux-x64.tar.gz
+./pocketshell-agent-linux-x64
+```
+
+可选：用同一 Release 附带的 `SHA256SUMS.txt` 校验完整性（`shasum -a 256 -c SHA256SUMS.txt`）。目标机只需 `tmux`。macOS 首次运行若被 Gatekeeper 拦截，在「系统设置 → 隐私与安全性」放行即可。
+
+**方式三：从源码构建二进制**
 
 ```bash
 # 先构建前端产物（Agent 会内嵌同端口 serve）
@@ -150,7 +162,19 @@ cd agent && bun install && bun run start     # backend (needs tmux)
 cd app   && bun install && bun run dev        # frontend, http://localhost:5173
 ```
 
-**Option B — single-file binary (recommended)**
+**Option B — download a prebuilt binary (fastest, recommended)**
+
+Grab the archive for your platform (`linux-x64` / `linux-arm64` / `darwin-arm64` / `darwin-x64`) from [Releases](https://github.com/Big-Pony/pocketshell/releases), then extract and run:
+
+```bash
+# Linux x64 shown; swap the filename for other platforms
+tar -xzf pocketshell-agent-linux-x64.tar.gz
+./pocketshell-agent-linux-x64
+```
+
+Optional: verify integrity with the `SHA256SUMS.txt` shipped in the same Release (`shasum -a 256 -c SHA256SUMS.txt`). The target host only needs `tmux`. On macOS, if Gatekeeper blocks the first run, allow it under System Settings → Privacy & Security.
+
+**Option C — build the binary from source**
 
 ```bash
 cd app   && bun install && bun run build      # build embedded frontend first

@@ -1,6 +1,6 @@
 {
   "name": "pocketshell-app",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "PocketShell App — Svelte 5 + xterm.js mobile frontend, embedded into the Agent binary.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "https://github.com/Big-Pony/pocketshell.git" },
