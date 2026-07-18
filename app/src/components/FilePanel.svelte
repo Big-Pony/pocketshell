@@ -5,12 +5,13 @@
   import FileTree from "./FileTree.svelte";
   import GitPanel from "./GitPanel.svelte";
 
-  let { conn, onOpenFile, onOpenDiff, onCd, getFocusedPwd, rootTick, onToast, onNewFile }: {
+  let { conn, onOpenFile, onOpenDiff, onCd, getFocusedPwd, rootTick, refreshTick = 0, onToast, onNewFile }: {
     conn: Connection; onOpenFile: (path: string) => void; onOpenDiff: (path: string) => void; onCd: (path: string) => void;
     getFocusedPwd: () => Promise<{ pwd: string } | { error: string }>;
     rootTick: number;
+    refreshTick?: number;
     onToast: (msg: string) => void;
-    onNewFile?: (dir: string, name: string) => void;
+    onNewFile?: (dir: string, name: string) => Promise<boolean> | void;
   } = $props();
   let sub = $state<"dir" | "git">("dir");
 
@@ -34,7 +35,7 @@
   </div>
   <div class="body">
     {#if sub === "dir"}
-      <FileTree {conn} {onOpenFile} {onCd} {getFocusedPwd} {rootTick} {onToast} onRefresh={refreshBranch} {onNewFile} />
+      <FileTree {conn} {onOpenFile} {onCd} {getFocusedPwd} {rootTick} {refreshTick} {onToast} onRefresh={refreshBranch} {onNewFile} />
     {:else}
       <GitPanel {conn} {onOpenDiff} />
     {/if}

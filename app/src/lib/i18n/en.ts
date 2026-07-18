@@ -36,6 +36,7 @@ export default {
       clipboardDenied: "Clipboard unavailable",
       noTerminal: "No terminal",
       noOutput: "No output to copy",
+      newFileFailed: "Failed to create file",
       copiedOutput: "Last output copied",
       noSelection: "No selection",
       copiedSelection: "Selection copied",

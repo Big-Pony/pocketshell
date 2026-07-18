@@ -268,10 +268,18 @@
     }
   }
 
-  function handleNewFile(dir: string, name: string) {
-    if (!activeId) { showToast(tr("app.toast.needSession")); return; }
+  async function handleNewFile(dir: string, name: string): Promise<boolean> {
     const path = dir === "/" ? "/" + name : dir + "/" + name;
-    sendActive("vim " + JSON.stringify(path) + "\n"); // opens vim, creating the file
+    try {
+      await conn.rpc("fs.op", { op: "touch", path });
+    } catch (e: any) {
+      showToast(tr("app.toast.newFileFailed") + ": " + (e?.message ?? ""));
+      return false;
+    }
+    treeTick++;
+    pendingEdit = path;      // FilePreview auto-enters the editor once loaded
+    openFile(path, "code");
+    return true;
   }
 
   function onHint(cmd: string) {
@@ -598,7 +606,7 @@
   </div>
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
-      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} onToast={showToast} onNewFile={handleNewFile} />
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onNewFile={handleNewFile} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
       <TaskPanel

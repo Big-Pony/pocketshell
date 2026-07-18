@@ -36,6 +36,7 @@ export default {
       clipboardDenied: "无法访问剪贴板",
       noTerminal: "无终端",
       noOutput: "无输出可复制",
+      newFileFailed: "新建文件失败",
       copiedOutput: "已复制最后输出",
       noSelection: "无选区",
       copiedSelection: "已复制选区",

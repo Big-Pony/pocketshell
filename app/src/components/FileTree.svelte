@@ -14,13 +14,14 @@
   import UploadDialog from "./UploadDialog.svelte";
   import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/transfer";
 
-  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, onToast, onRefresh, onNewFile }: {
+  let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, refreshTick, onToast, onRefresh, onNewFile }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
     getFocusedPwd: () => Promise<{ pwd: string } | { error: string }>;
     rootTick: number;
+    refreshTick?: number;
     onToast: (msg: string) => void;
     onRefresh?: () => void;
-    onNewFile?: (dir: string, name: string) => void;
+    onNewFile?: (dir: string, name: string) => Promise<boolean> | void;
   } = $props();
 
   const cached0 = getBrowseCache();
@@ -37,11 +38,11 @@
   let newFileDir = $state<string | null>(null);
   let newFileName = $state("");
   function openNewFile(n: FileNode) { newFileDir = n.path; newFileName = ""; }
-  function submitNewFile() {
+  async function submitNewFile() {
     const name = newFileName.trim();
     if (!newFileDir || !name) return;
-    onNewFile?.(newFileDir, name);
-    newFileDir = null;
+    const ok = await onNewFile?.(newFileDir, name);
+    if (ok !== false) newFileDir = null; // failure keeps the dialog open for a rename
   }
   let archiving = $state(false);
   let historyOpen = $state(false);
@@ -85,6 +86,13 @@
     if (tick === 0) return; // initial mount, nothing to reload
     const r = loadProjectRoot();
     if (r !== root) { root = r; nodes = []; resetScroll(); void loadRoot(); }
+  });
+
+  // React to App creating a new file: refresh the tree while keeping expanded state.
+  let lastRefreshTick = $state(0);
+  $effect(() => {
+    const tick = refreshTick ?? 0;
+    if (tick !== lastRefreshTick) { lastRefreshTick = tick; void reloadKeepingExpanded(); }
   });
 
   async function doDownloadFile(n: FileNode) {
