@@ -419,3 +419,13 @@ test("sweepTmp removes stale pswrite- parts", () => {
   expect(sweepTmp(d, 1000, Date.now()).removed).toBe(1);
   rmSync(d, { recursive: true, force: true });
 });
+
+test("fsOp touch creates empty file; existing → throws; missing parent → throws", () => {
+  const d = tmp();
+  const f = join(d, "new.txt");
+  expect(fsOp("touch", f).ok).toBe(true);
+  expect(rfSync(f, "utf8")).toBe("");
+  expect(() => fsOp("touch", f)).toThrow(); // EEXIST
+  expect(() => fsOp("touch", join(d, "nodir", "x.txt"))).toThrow(); // ENOENT
+  rmSync(d, { recursive: true, force: true });
+});

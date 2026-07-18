@@ -249,7 +249,7 @@ export function sweepTmp(tmpDir: string, maxAgeMs: number, now: number): { remov
   return { removed };
 }
 
-export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: string): { ok: true } {
+export function fsOp(op: "rename" | "delete" | "mkdir" | "touch", path: string, to?: string): { ok: true } {
   const abs = resolve(path);
   if (op === "rename") {
     if (!to) throw new Error("rename requires a target");
@@ -266,6 +266,10 @@ export function fsOp(op: "rename" | "delete" | "mkdir", path: string, to?: strin
   if (op === "mkdir") {
     statSync(dirname(abs)); // parent must exist (throws otherwise) — no recursive
     mkdirSync(abs);
+    return { ok: true };
+  }
+  if (op === "touch") {
+    writeFileSync(abs, "", { flag: "wx" }); // throws EEXIST when the file already exists
     return { ok: true };
   }
   throw new Error(`unknown op: ${op}`);
