@@ -9,9 +9,22 @@
 [中文](#中文) · [English](#english)
 
 <p align="center">
-  <img src="assets/screenshots/live-dark-task.jpeg" width="30%" alt="任务面板 / Task panel">
-  <img src="assets/screenshots/live-dark-kbd.jpeg" width="30%" alt="自定义键盘 / Custom keyboard">
-  <img src="assets/screenshots/live-light-set.jpeg" width="30%" alt="浅色主题设置 / Light theme settings">
+  <img src="assets/screenshots/1-键盘-全键盘.jpg" width="30%" alt="键盘界面 - 全键盘布局">
+  <img src="assets/screenshots/2-键盘-输入法缓冲.jpg" width="30%" alt="键盘界面 - 输入法缓冲">
+  <img src="assets/screenshots/3-键盘-快捷操作.jpg" width="30%" alt="键盘界面 - 快捷操作">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/5-文件-菜单面板.jpg" width="30%" alt="文件管理 - 菜单面板">
+  <img src="assets/screenshots/5-文件-目录.jpg" width="30%" alt="文件管理 - 目录浏览">
+  <img src="assets/screenshots/5-文件-git.jpg" width="30%" alt="文件管理 - Git 版本控制">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/4-任务.jpg" width="25%" alt="任务面板">
+  <img src="assets/screenshots/6-指令.jpg" width="25%" alt="指令面板">
+  <img src="assets/screenshots/7-设置.jpg" width="25%" alt="设置界面">
+  <img src="assets/screenshots/8-浅色主题.jpg" width="25%" alt="浅色主题预览">
 </p>
 
 ---
