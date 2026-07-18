@@ -70,12 +70,12 @@
 </div>
 
 <style>
-  /* 上区（终端/代码预览）两套主题下均为深色，固定用 --term-* 令牌 */
-  .preview { width: 100%; height: 100%; overflow: auto; background: var(--term-bg); color: var(--term-text); }
+  /* 代码区跟随主题（--code-*）；终端区仍固定深色 --term-* */
+  .preview { width: 100%; height: 100%; overflow: auto; background: var(--code-bg); color: var(--code-fg); }
   .hidden { display: none; }
   .pv-notice { font-size: 0.7rem; color: var(--amber); padding: 6px 10px; }
   .codewrap { display: flex; align-items: flex-start; padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
-  .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--term-dim); user-select: none; }
+  .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--code-gutter); user-select: none; }
   .gutter .ln { min-width: 2.2em; }
   .code { margin: 0; white-space: pre; }
   .code code { font: inherit; }
@@ -84,6 +84,6 @@
   .dl { white-space: pre; }
   .dl.add { color: var(--ok); }
   .dl.del { color: var(--red); }
-  .dl.ctx { color: var(--term-dim); }
+  .dl.ctx { color: var(--code-gutter); }
   .sign { display: inline-block; width: 1em; user-select: none; }
 </style>

@@ -27,7 +27,7 @@
    2. 颜色用语义令牌（--accent 主色 / --ok 成功运行 / --primary-* 实心主按钮），
       不要直接用 --green/--blue 这类色名令牌（它们只被语义令牌引用）。
    3. 结构性主题差异用 `:global(html[data-theme="light"]) .your-class` 覆盖。
-   4. 终端/代码预览区两版均为深色：固定用 --term-* 令牌。
+   4. 终端区固定深色（--term-*）；代码预览/编辑器跟随主题，统一走 --code-* 令牌，禁止写死颜色。
    ========================================================================== */
 :root {
   --radius-sm: 6px;
@@ -80,6 +80,21 @@
   --term-bg: #0c1017;
   --term-text: #c6d0dc;
   --term-dim: #6b7686;
+
+  /* 代码区（预览+编辑器）语法配色 — 跟随主题切换；终端仍固定 --term-* */
+  --code-bg: #0c1017;
+  --code-fg: #c6d0dc;
+  --code-gutter: #6b7686;
+  --code-active-line: rgba(255, 255, 255, 0.04);
+  --code-selection: rgba(124, 140, 248, 0.28);
+  --code-cursor: #7c8cf8;
+  --code-keyword: #c678dd;
+  --code-string: #98c379;
+  --code-comment: #5c6370;
+  --code-number: #d19a66;
+  --code-func: #61afef;
+  --code-type: #e5c07b;
+  --code-attr: #56b6c2;
 
   /* 键盘键帽 */
   --key: #1b2230;
@@ -167,6 +182,21 @@
   --term-text: #c6d0dc;
   --term-dim: #6b7686;
 
+  /* 代码区（预览+编辑器）语法配色 — 浅色主题 */
+  --code-bg: #ffffff;
+  --code-fg: #24292f;
+  --code-gutter: #8c959f;
+  --code-active-line: rgba(0, 0, 0, 0.035);
+  --code-selection: rgba(9, 105, 218, 0.18);
+  --code-cursor: #0969da;
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-comment: #6e7781;
+  --code-number: #0550ae;
+  --code-func: #8250df;
+  --code-type: #953800;
+  --code-attr: #116329;
+
   --key: #ffffff;
   --key-bg-image: none;
   --keyhi: #f0f0ec;
@@ -205,6 +235,17 @@
   --banner-bg: #fde8e7;
   --banner-text: var(--red);
 }
+
+/* highlight.js token colors → --code-* (file preview, follows theme) */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-meta, .hljs-tag { color: var(--code-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition { color: var(--code-string); }
+.hljs-comment, .hljs-quote { color: var(--code-comment); }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--code-number); }
+.hljs-title, .hljs-section { color: var(--code-func); }
+.hljs-type, .hljs-built_in, .hljs-class .hljs-title { color: var(--code-type); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-name { color: var(--code-attr); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
 
 * {
   margin: 0;
