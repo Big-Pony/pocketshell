@@ -24,7 +24,7 @@
   let canEdit = $state(false);
   let editing = $state(false);
   let FileEditorComp = $state<any>(null);
-  let loaded = "";
+  let loaded = $state("");
 
   async function load() {
     notice = "";

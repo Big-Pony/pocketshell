@@ -58,6 +58,7 @@
   let treeTick = $state(0);
   let fileDirty = $state(new Set<string>());
   let pendingEdit = $state<string | null>(null);
+  let editingId = $state<string | null>(null); // top-tab id whose editor is open (forces fullscreen)
   let topEl: HTMLDivElement | null = null;
   function setFileDirty(id: string, d: boolean) {
     const next = new Set(fileDirty);
@@ -297,6 +298,7 @@
   }
   function closeFile(id: string) {
     setFileDirty(id, false);
+    if (editingId === id) { editingId = null; fullscreen = false; }
     fileTabs = closeFileTab(fileTabs, id);
     tabOrder = removeOrder(tabOrder, id);
     if (activeTop === id) activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
@@ -318,6 +320,11 @@
     cancelSelection();
     if (id.startsWith("file:")) { activeTop = id; }
     else { activeTop = ""; selectSession(id); }
+    // An open editor forces fullscreen; leaving its tab must release it (the
+    // divider — the usual exit — is hidden while fullscreen). Only touch
+    // fullscreen when an editor is actually open, so manual terminal-fullscreen
+    // is unaffected.
+    if (editingId) fullscreen = id === editingId;
   }
 
   // Read the focused tab's real cwd for the file panel's root buttons.
@@ -588,7 +595,10 @@
     {#each fileTabs as t (t.id)}
       <FilePreview {conn} path={t.path} mode={t.mode} active={activeTopId === t.id}
         onToast={showToast}
-        onEditingChange={(e) => { if (activeTopId === t.id) fullscreen = e; }}
+        onEditingChange={(e) => {
+          editingId = e ? t.id : (editingId === t.id ? null : editingId);
+          if (activeTopId === t.id) fullscreen = e;
+        }}
         onDirtyChange={(d) => setFileDirty(t.id, d)}
         autoEdit={pendingEdit === t.path && t.mode === "code"}
         onAutoEdit={() => (pendingEdit = null)} />

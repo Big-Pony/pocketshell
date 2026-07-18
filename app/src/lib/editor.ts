@@ -46,8 +46,12 @@ export function encodeWriteChunks(text: string, chunkBytes = CHUNK_BYTES): strin
   return out;
 }
 
+// The agent tags mtime conflicts with a structured error code (propagated via
+// the RPC error envelope onto e.code). Keying off the code — not the message
+// text — keeps the cross-boundary contract robust and avoids misfiring on
+// unrelated errors whose message happens to contain the word "conflict".
 export function isConflictError(e: unknown): boolean {
-  return e instanceof Error && e.message.startsWith("conflict");
+  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === "conflict";
 }
 
 // Serial chunked save. Editable files are ≤512KB (fs.read cap) → ≤12 chunks;

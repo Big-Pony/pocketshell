@@ -88,8 +88,10 @@
     if (r !== root) { root = r; nodes = []; resetScroll(); void loadRoot(); }
   });
 
-  // React to App creating a new file: refresh the tree while keeping expanded state.
-  let lastRefreshTick = $state(0);
+  // React to App creating a new file: refresh the tree while keeping expanded
+  // state. lastRefreshTick is a plain non-reactive marker — the effect tracks
+  // refreshTick (a prop), and storing the last-seen value must not re-trigger it.
+  let lastRefreshTick = 0;
   $effect(() => {
     const tick = refreshTick ?? 0;
     if (tick !== lastRefreshTick) { lastRefreshTick = tick; void reloadKeepingExpanded(); }

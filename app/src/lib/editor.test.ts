@@ -57,9 +57,13 @@ describe("saveFile", () => {
 });
 
 describe("isConflictError / langExtension", () => {
-  it("matches the agent's conflict prefix only", () => {
-    expect(isConflictError(new Error("conflict: file changed on disk"))).toBe(true);
-    expect(isConflictError(new Error("write exceeds 1 bytes"))).toBe(false);
+  it("detects conflict by structured error code, not message text", () => {
+    const conflict = Object.assign(new Error("conflict: file changed on disk"), { code: "conflict" });
+    expect(isConflictError(conflict)).toBe(true);
+    // Message text alone must NOT trigger — a generic failure whose text happens
+    // to contain "conflict" (e.g. a path named conflict.ts) is not a real conflict.
+    expect(isConflictError(new Error("conflict: file changed on disk"))).toBe(false);
+    expect(isConflictError(Object.assign(new Error("boom"), { code: "rpc_error" }))).toBe(false);
     expect(isConflictError("conflict")).toBe(false);
   });
   it("loads a Lezer language and returns null for unknown", async () => {
