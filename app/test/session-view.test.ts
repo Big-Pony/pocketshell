@@ -17,8 +17,13 @@ test("needsKillConfirm only for live sessions", () => {
 const meta = (name: string, state: SessionMeta["state"] = "run"): SessionMeta =>
   ({ name, state, cols: 80, rows: 24, lastLine: "", createdAt: 0 });
 
+// A local the way mergeSessions actually emits it (closed materialized), so a
+// no-change merge can keep the element reference instead of rebuilding it.
+const localMeta = (name: string, state: SessionMeta["state"] = "run"): LocalSession =>
+  ({ ...meta(name, state), closed: false });
+
 test("mergeSessions upserts active and preserves order", () => {
-  const local: LocalSession[] = [meta("a"), meta("b")];
+  const local: LocalSession[] = [localMeta("a"), localMeta("b")];
   const out = mergeSessions(local, [meta("a", "wait"), meta("b")]);
   expect(out.map((s) => [s.name, s.state, s.closed])).toEqual([["a", "wait", false], ["b", "run", false]]);
 });
@@ -44,4 +49,44 @@ test("tombstone marks one session closed+done", () => {
 
 test("closeTab removes the session", () => {
   expect(closeTab([meta("a"), meta("b")], "a").map((s) => s.name)).toEqual(["b"]);
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-3b (R5): reference preservation — a no-change broadcast returns the same
+// array/element refs so App's $state sees no update and the tab strip,
+// TaskPanel and the persist $effect stay idle
+// ──────────────────────────────────────────────────────────────
+test("mergeSessions returns the same array reference when nothing changed", () => {
+  const tomb = { ...meta("b"), closed: true, state: "done" as const };
+  const local: LocalSession[] = [meta("a"), tomb];
+  const out = mergeSessions(local, [meta("a")]);
+  expect(out).toBe(local);          // whole-array ref kept
+  expect(out[0]).toBe(local[0]);    // unchanged element keeps its object ref
+  expect(out[1]).toBe(local[1]);    // an existing tombstone is not re-created
+});
+
+test("mergeSessions produces new refs only where fields changed", () => {
+  const local: LocalSession[] = [meta("a"), meta("b")];
+  const out = mergeSessions(local, [meta("a", "wait"), meta("b")]);
+  expect(out).not.toBe(local);
+  expect(out[0]).not.toBe(local[0]); // state run->wait: new object
+  expect(out[0]).toMatchObject({ name: "a", state: "wait", closed: false });
+  expect(out[1]).toBe(local[1]);     // untouched: same object
+});
+
+test("mergeSessions: added/removed sessions yield a new array but keep surviving refs", () => {
+  const local: LocalSession[] = [meta("a"), meta("b")];
+  const added = mergeSessions(local, [meta("a"), meta("b"), meta("c")]);
+  expect(added).not.toBe(local);
+  expect(added[0]).toBe(local[0]);
+  expect(added[1]).toBe(local[1]);
+
+  const removed = mergeSessions(local, [meta("a")]); // b disappears -> tombstone transition
+  expect(removed).not.toBe(local);
+  expect(removed[0]).toBe(local[0]);
+  expect(removed[1]).not.toBe(local[1]);
+  expect(removed[1]).toMatchObject({ name: "b", closed: true, state: "done" });
+
+  // ...and once tombstoned, the next identical broadcast is stable again
+  expect(mergeSessions(removed, [meta("a")])).toBe(removed);
 });

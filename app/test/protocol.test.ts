@@ -27,9 +27,24 @@ test("mirrors ping client message", () => {
   expect(decodeClient(encode({ type: "ping" })).type).toBe("ping");
 });
 
+test("mirrors detach client message", () => {
+  const msg = decodeClient(encode({ type: "detach", sessionId: "s" }));
+  if (msg.type !== "detach") throw new Error("wrong type");
+  expect(msg.sessionId).toBe("s");
+});
+
 test("mirrors pong + resync server messages", () => {
   expect(decodeServer(encode({ type: "pong" })).type).toBe("pong");
   const r = decodeServer(encode({ type: "resync", sessionId: "s", from: 3 }));
   if (r.type !== "resync") throw new Error("wrong type");
   expect(r.from).toBe(3);
+});
+
+test("mirrors rpcChunk server message (WP-6)", () => {
+  const msg = decodeServer(encode({ type: "rpcChunk", id: "7", index: 2, total: 5, data: "QQ==" }));
+  if (msg.type !== "rpcChunk") throw new Error("wrong type");
+  expect(msg.id).toBe("7");
+  expect(msg.index).toBe(2);
+  expect(msg.total).toBe(5);
+  expect(msg.data).toBe("QQ==");
 });

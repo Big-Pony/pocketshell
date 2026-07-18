@@ -300,6 +300,7 @@ export default {
     diffFailed: "Diff failed",
     binary: "Binary file; no preview",
     truncated: "Truncated; showing leading lines only",
+    plainLarge: "Large file shown as plain text",
     readFailed: "Failed to read",
   },
   errors: {

@@ -2,10 +2,10 @@
 // can stream bytes. Adds heuristic state inference (via inferState), lastLine
 // capture, and a rename hook. Emits raw bytes only — seq/buffer is A4.
 import { spawnPty, type PtyHandle } from "./pty";
-import { inferState } from "./state";
+import { inferState, StateHysteresis } from "./state";
 import { toB64 } from "./bytes";
 import { cjkFallbackLang } from "./pty-env";
-import type { SessionMeta, SessionState } from "./protocol";
+import type { SessionMeta } from "./protocol";
 
 interface Live {
   pty: PtyHandle;
@@ -20,6 +20,10 @@ export interface TmuxResult {
   stderr: Uint8Array;
 }
 export type TmuxRunner = (args: string[]) => TmuxResult;
+// Async counterpart used on the hot probe paths (1s scanner + list()). Same
+// TmuxResult contract and same failure semantics: a missing/failing tmux
+// degrades to exitCode 1, never a throw.
+export type AsyncTmuxRunner = (args: string[]) => Promise<TmuxResult>;
 
 interface TmuxRosterEntry {
   name: string;
@@ -44,6 +48,23 @@ const defaultTmux: TmuxRunner = (args) => {
   }
 };
 
+// Async default runner (WP-3a): Bun.spawn keeps the event loop free while
+// tmux runs — the scanner + list() fan out several probes per round, and the
+// old spawnSync versions blocked every RPC/output forward behind them.
+const defaultTmuxAsync: AsyncTmuxRunner = async (args) => {
+  try {
+    const proc = Bun.spawn(["tmux", ...args], { stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      Bun.readableStreamToArrayBuffer(proc.stdout),
+      Bun.readableStreamToArrayBuffer(proc.stderr),
+      proc.exited,
+    ]);
+    return { exitCode, stdout: new Uint8Array(stdout), stderr: new Uint8Array(stderr) };
+  } catch {
+    return { exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() };
+  }
+};
+
 const SCAN_INTERVAL_MS = 1000;
 
 export class TerminalService {
@@ -51,15 +72,30 @@ export class TerminalService {
   private outputCbs: ((name: string, chunk: Uint8Array) => void)[] = [];
   private exitCbs: ((name: string, code: number) => void)[] = [];
   private sessionsChangeCbs: (() => void)[] = [];
-  private lastStates = new Map<string, SessionState>();
+  // Published per-session states with flip hysteresis (WP-3a). Fed ONLY by
+  // the 1s scanner; list() reads these instead of re-inferring per call, so a
+  // bursty session's run/wait flap neither reaches clients nor re-triggers
+  // sessions broadcasts.
+  private states = new Map<string, StateHysteresis>();
   private scanTimer: ReturnType<typeof setInterval>;
   private tmux: TmuxRunner;
+  // Async runner for the hot probe paths (scanner + list). The sync runner
+  // stays for one-shot, user-initiated RPC/control calls (history, paneInfo,
+  // ensure, rename, ...).
+  private tmuxAsync: AsyncTmuxRunner;
+  private scanning = false;
+  private disposed = false;
   // UTF-8 LANG to seed into new tmux sessions when the agent's own env has no
   // locale (see ensure() for why this must land on the server, not the client).
   private langFallback: string | null;
 
-  constructor(deps: { tmux?: TmuxRunner; langFallback?: string | null } = {}) {
+  constructor(deps: { tmux?: TmuxRunner; tmuxAsync?: AsyncTmuxRunner; langFallback?: string | null } = {}) {
     this.tmux = deps.tmux ?? defaultTmux;
+    // Tests that inject only the sync fake get it wrapped, keeping the async
+    // probe paths hermetic; production (no injected runner) gets real
+    // non-blocking spawns via defaultTmuxAsync.
+    this.tmuxAsync =
+      deps.tmuxAsync ?? (deps.tmux ? async (args) => deps.tmux!(args) : defaultTmuxAsync);
     // `??` would treat an explicit `null` (tests asserting "no fallback") the
     // same as "omitted" and recompute a default — check presence instead so
     // callers can deliberately force no LANG injection.
@@ -88,16 +124,49 @@ export class TerminalService {
     return this.tmux(["has-session", "-t", name]).exitCode === 0;
   }
 
-  // Recompute run/wait for live sessions; fire onSessionsChange only on change.
+  private async hasSessionAsync(name: string): Promise<boolean> {
+    return (await this.tmuxAsync(["has-session", "-t", name])).exitCode === 0;
+  }
+
+  // Recompute run/wait for live sessions; fire onSessionsChange only when a
+  // debounced state actually flips. Probes run concurrently; a tick arriving
+  // while the previous round is still probing is dropped rather than stacked
+  // (the interval fires again in 1s — stacking would just queue more spawns).
   private scan(): void {
+    if (this.scanning || this.disposed) return;
+    this.scanning = true;
+    void this.scanAsync()
+      .catch(() => { /* an injected runner may throw; never kill the interval */ })
+      .finally(() => {
+        this.scanning = false;
+      });
+  }
+
+  private async scanAsync(): Promise<void> {
     const now = Date.now();
+    const entries = [...this.sessions.entries()];
+    const probes = await Promise.all(
+      entries.map(async ([name, live]) => ({
+        name,
+        inferred: inferState({
+          hasSession: await this.hasSessionAsync(name),
+          lastOutputAt: live.lastOutputAt,
+          now,
+        }),
+      })),
+    );
+    if (this.disposed) return;
     let changed = false;
-    for (const [name, live] of this.sessions) {
-      const st = inferState({ hasSession: this.hasSession(name), lastOutputAt: live.lastOutputAt, now });
-      if (this.lastStates.get(name) !== st) {
-        this.lastStates.set(name, st);
-        changed = true;
+    for (const { name, inferred } of probes) {
+      if (!this.sessions.has(name)) continue; // killed/renamed while probing
+      let m = this.states.get(name);
+      if (!m) {
+        // No baseline (ensure() seeds one, so this is defensive): adopt the
+        // first inference immediately instead of debouncing it.
+        this.states.set(name, new StateHysteresis(inferred));
+        continue;
       }
+      if (m.next(inferred)) changed = true;
     }
     if (changed) this.emitSessionsChange();
   }
@@ -106,8 +175,8 @@ export class TerminalService {
   // `-u` forces UTF-8 output: under launchd (no LANG/LC_*) tmux runs in the C
   // locale and sanitizes non-ASCII / control bytes to `_`, which would corrupt
   // CJK previews. Same locale issue as attach()/roster(); keep `-u`.
-  private captureLastLine(name: string): string {
-    const res = this.tmux(["-u", "capture-pane", "-p", "-t", name]);
+  private async captureLastLine(name: string): Promise<string> {
+    const res = await this.tmuxAsync(["-u", "capture-pane", "-p", "-t", name]);
     if (res.exitCode !== 0) return "";
     const lines = new TextDecoder()
       .decode(res.stdout)
@@ -123,6 +192,10 @@ export class TerminalService {
   // starts at the top of history, `-E -` ends at the bottom of the visible
   // screen. The frontend clears its own buffer before writing, so the entire
   // captured pane is reproduced without duplication.
+  //
+  // A full 2000-line scrollback (~200KB of SGR) does not fit one Noise frame;
+  // the rpc layer chunks oversize responses (WP-6), so this always returns the
+  // complete capture — the WP-1 halving-retry shrink is gone.
   history(name: string): { data: string } {
     const res = this.tmux(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", name]);
     if (res.exitCode !== 0) return { data: "" };
@@ -208,7 +281,7 @@ export class TerminalService {
       const now = Date.now();
       if (now - (live.lastReattachAt ?? 0) < 500) {
         this.sessions.delete(name);
-        this.lastStates.delete(name);
+        this.states.delete(name);
         for (const cb of this.exitCbs) cb(name, code);
         this.emitSessionsChange();
         return;
@@ -220,7 +293,7 @@ export class TerminalService {
 
     // Session is really gone -> done.
     this.sessions.delete(name);
-    this.lastStates.delete(name);
+    this.states.delete(name);
     for (const cb of this.exitCbs) cb(name, code);
     this.emitSessionsChange();
   }
@@ -287,7 +360,7 @@ export class TerminalService {
     };
     const pty = this.attach(name, cols, rows);
     this.sessions.set(name, { pty, meta, lastOutputAt: Date.now() });
-    this.lastStates.set(name, "run");
+    this.states.set(name, new StateHysteresis("run"));
     this.emitSessionsChange();
   }
 
@@ -308,7 +381,7 @@ export class TerminalService {
     const live = this.sessions.get(name);
     live?.pty.kill();
     this.sessions.delete(name);
-    this.lastStates.delete(name);
+    this.states.delete(name);
     this.tmux(["kill-session", "-t", name]);
     this.emitSessionsChange();
   }
@@ -335,9 +408,9 @@ export class TerminalService {
     live.meta.name = newName;
     this.sessions.delete(name);
     this.sessions.set(newName, live);
-    const st = this.lastStates.get(name);
-    this.lastStates.delete(name);
-    if (st) this.lastStates.set(newName, st);
+    const m = this.states.get(name);
+    this.states.delete(name);
+    if (m) this.states.set(newName, m);
     // Re-wire the PTY so its onData/onExit closures capture the new name;
     // otherwise output for this session keeps being emitted under the old name
     // and the client (now keyed by the new name) receives nothing.
@@ -355,8 +428,8 @@ export class TerminalService {
   // every line fails the 4-field split and the whole roster comes back empty
   // (the "task panel is empty in production" bug). Same root cause as the
   // CJK-underscore fix on attach()/new-session. Do not remove `-u`.
-  private roster(): TmuxRosterEntry[] {
-    const res = this.tmux([
+  private async roster(): Promise<TmuxRosterEntry[]> {
+    const res = await this.tmuxAsync([
       "-u",
       "list-sessions",
       "-F",
@@ -382,32 +455,44 @@ export class TerminalService {
       .filter((e): e is TmuxRosterEntry => e !== null);
   }
 
-  list(): SessionMeta[] {
-    const now = Date.now();
-    const owned: SessionMeta[] = [...this.sessions.values()].map((l) => ({
-      ...l.meta,
-      state: inferState({ hasSession: this.hasSession(l.meta.name), lastOutputAt: l.lastOutputAt, now }),
-      lastLine: this.captureLastLine(l.meta.name),
-      attached: true,
-    }));
-    const foreign: SessionMeta[] = this.roster()
-      .filter((r) => !this.sessions.has(r.name))
-      .map((r) => ({
-        name: r.name,
-        state: "idle" as const,
-        cols: r.cols,
-        rows: r.rows,
-        lastLine: this.captureLastLine(r.name),
-        createdAt: r.createdAt,
-        attached: false,
-      }));
+  // Async + concurrent (WP-3a): the roster spawn runs alongside per-session
+  // capture-pane probes (Promise.all), so a round costs ~1 spawn round-trip
+  // instead of 2S+1+F serialized spawnSyncs that blocked the event loop.
+  // Owned sessions report the scanner-debounced state instead of re-probing
+  // has-session per call: the 1s scanner already tracks liveness, and a fresh
+  // raw inference here would reintroduce the run/wait flap the hysteresis
+  // just filtered out.
+  async list(): Promise<SessionMeta[]> {
+    const rosterP = this.roster();
+    const owned = await Promise.all(
+      [...this.sessions.values()].map(async (l) => ({
+        ...l.meta,
+        state: this.states.get(l.meta.name)?.state ?? l.meta.state,
+        lastLine: await this.captureLastLine(l.meta.name),
+        attached: true,
+      })),
+    );
+    const foreign = await Promise.all(
+      (await rosterP)
+        .filter((r) => !this.sessions.has(r.name))
+        .map(async (r) => ({
+          name: r.name,
+          state: "idle" as const,
+          cols: r.cols,
+          rows: r.rows,
+          lastLine: await this.captureLastLine(r.name),
+          createdAt: r.createdAt,
+          attached: false,
+        })),
+    );
     return [...owned, ...foreign];
   }
 
   dispose(): void {
+    this.disposed = true;
     clearInterval(this.scanTimer);
     for (const l of this.sessions.values()) l.pty.kill();
     this.sessions.clear();
-    this.lastStates.clear();
+    this.states.clear();
   }
 }

@@ -300,6 +300,7 @@ export default {
     diffFailed: "diff 失败",
     binary: "二进制文件，不预览",
     truncated: "已截断，仅显示前若干行",
+    plainLarge: "文件较大，已按纯文本显示",
     readFailed: "读取失败",
   },
   errors: {

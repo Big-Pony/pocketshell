@@ -55,3 +55,9 @@ test("error response round-trips through decodeServer", () => {
   expect(msg.type).toBe("response");
   if (msg.type === "response" && !msg.ok) expect(msg.error.code).toBe("enoent");
 });
+
+test("rpcChunk round-trips through decodeServer", () => {
+  const raw = encode({ type: "rpcChunk", id: "7", index: 1, total: 3, data: "QUJD" });
+  const msg = decodeServer(raw);
+  expect(msg).toEqual({ type: "rpcChunk", id: "7", index: 1, total: 3, data: "QUJD" });
+});

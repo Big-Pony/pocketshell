@@ -110,7 +110,11 @@
         if (!id.startsWith("file:") && alive.has(id)) conn.attach(id);
       }
     }
-    tabOrder = tabOrder.filter((id) => id.startsWith("file:") || alive.has(id));
+    // R5: only assign when the order actually shrank — filter() always returns
+    // a fresh array, which would retrigger the persist $effect + tab strip on
+    // every ~3s broadcast even when nothing changed. Same length ⇒ identical.
+    const keptOrder = tabOrder.filter((id) => id.startsWith("file:") || alive.has(id));
+    if (keptOrder.length !== tabOrder.length) tabOrder = keptOrder;
     if (activeId && !alive.has(activeId)) activeId = "";
     if (!activeId) activeId = sessions.find((s) => s.attached && !s.closed)?.name ?? "";
   });
@@ -286,6 +290,7 @@
   function closeTopTab(id: string) {
     if (id.startsWith("file:")) { closeFile(id); return; }
     cancelSelection();
+    conn.detach(id); // backgrounded term tabs stop their output stream, same as toBackground
     backgrounded.add(id);
     backgrounded = new Set(backgrounded);
     tabOrder = removeOrder(tabOrder, id);
@@ -336,6 +341,7 @@
   function toBackground() {
     if (!activeId) return;
     cancelSelection();
+    conn.detach(activeId); // R2: unsubscribe; reopening re-attaches via Terminal mount
     backgrounded.add(activeId);
     backgrounded = new Set(backgrounded);
     activeId = topSessions[0]?.name ?? "";

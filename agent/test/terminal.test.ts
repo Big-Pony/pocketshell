@@ -25,7 +25,7 @@ test.skipIf(!hasTmux)("list reports the live session", async () => {
   const svc = new TerminalService();
   svc.ensure(NAME, { cols: 80, rows: 24 });
   await Bun.sleep(300);
-  expect(svc.list().some((s) => s.name === NAME)).toBe(true);
+  expect((await svc.list()).some((s) => s.name === NAME)).toBe(true);
   await svc.kill(NAME);
   svc.dispose();
 });
@@ -39,11 +39,11 @@ test.skipIf(!hasTmux)("state transitions run -> wait after output goes quiet", a
   const pollFor = async (target: "run" | "wait", timeoutMs: number) => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const s = svc.list().find((sess) => sess.name === NAME);
+      const s = (await svc.list()).find((sess) => sess.name === NAME);
       if (s?.state === target) return s;
       await Bun.sleep(50);
     }
-    return svc.list().find((sess) => sess.name === NAME);
+    return (await svc.list()).find((sess) => sess.name === NAME);
   };
 
   const busy = await pollFor("run", 3000);
@@ -71,7 +71,7 @@ test.skipIf(!hasTmux)("rename changes the session name in the list", async () =>
   svc.ensure(NAME, { cols: 80, rows: 24 });
   await Bun.sleep(300);
   svc.rename(NAME, NEW);
-  const names = svc.list().map((s) => s.name);
+  const names = (await svc.list()).map((s) => s.name);
   expect(names).toContain(NEW);
   expect(names).not.toContain(NAME);
   await svc.kill(NEW);
@@ -104,7 +104,7 @@ test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)
   Bun.spawnSync(["tmux", "detach-client", "-s", NAME]);
   await Bun.sleep(600);
   expect(exited).not.toContain(NAME);          // no exit fired
-  expect(svc.list().some((s) => s.name === NAME)).toBe(true); // still listed
+  expect((await svc.list()).some((s) => s.name === NAME)).toBe(true); // still listed
   // And it still streams after re-attach:
   const chunks: string[] = [];
   svc.onOutput((_n, c) => chunks.push(new TextDecoder().decode(c)));

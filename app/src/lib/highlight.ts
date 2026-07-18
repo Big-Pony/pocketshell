@@ -29,17 +29,46 @@ export function splitLines(content: string): string[] {
   return content.split("\n");
 }
 
-export async function highlightTo(lang: string, content: string): Promise<string> {
+// R4: large-file degradation. Over EITHER threshold the preview skips hljs
+// (main-thread highlight of a few hundred KB blocks for hundreds of ms) and
+// renders escaped plain text without the per-line gutter.
+export const HIGHLIGHT_MAX_BYTES = 200 * 1024;
+export const HIGHLIGHT_MAX_LINES = 2000;
+
+// Exact UTF-8 byte length (surrogate pairs count as one 4-byte char).
+export function utf8Bytes(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : c >= 0xd800 && c <= 0xdbff ? 2 : c >= 0xdc00 && c <= 0xdfff ? 2 : 3;
+  }
+  return n;
+}
+
+// Pure decision: byte count OR line count over the cap → degrade to plain text.
+export function shouldDeferHighlight(bytes: number, lineCount: number): boolean {
+  return bytes > HIGHLIGHT_MAX_BYTES || lineCount > HIGHLIGHT_MAX_LINES;
+}
+
+export type HighlightResult = {
+  html: string;   // highlighted HTML, or escaped plain text when plain/fallback
+  plain: boolean; // true → degraded: render without gutter, show plainLarge hint
+};
+
+export async function highlightTo(lang: string, content: string): Promise<HighlightResult> {
+  if (shouldDeferHighlight(utf8Bytes(content), splitLines(content).length)) {
+    return { html: escapeHtml(content), plain: true };
+  }
   const loader = LOADERS[lang];
-  if (!loader) return escapeHtml(content);
+  if (!loader) return { html: escapeHtml(content), plain: false };
   try {
     if (!registered.has(lang)) {
       const mod = await loader();
       hljs.registerLanguage(lang, mod.default);
       registered.add(lang);
     }
-    return hljs.highlight(content, { language: lang }).value;
+    return { html: hljs.highlight(content, { language: lang }).value, plain: false };
   } catch {
-    return escapeHtml(content);
+    return { html: escapeHtml(content), plain: false };
   }
 }

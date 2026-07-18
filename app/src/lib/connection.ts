@@ -4,6 +4,7 @@
 // S4b: in-channel pairing — send pair on established, await paired, then normal flow.
 import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo, type Snippet } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
+import { ChunkReassembler } from "./rpc-chunks";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
 import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
 import { tr } from "./i18n";
@@ -39,6 +40,9 @@ export interface ConnectionOpts {
   url: string;
   wsFactory?: (url: string) => WebSocketLike;
   scheduler?: Scheduler;
+  // A9: random source for the reconnect-backoff jitter (tests inject a fixed
+  // value to pin the delay at an exact bound).
+  random?: () => number;
   heartbeatMs?: number;
   livenessMs?: number;
   channelFactory?: () => SecureChannel;
@@ -73,6 +77,9 @@ export class Connection {
   private pairFailStreak = 0;
   private rpcSeq = 0;
   private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }>();
+  // WP-6: rpcChunk reassembly buffers share the pending rpc's exact lifetime —
+  // dropped on settle/timeout, cleared on disconnect.
+  private chunks = new ChunkReassembler();
 
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
@@ -80,6 +87,7 @@ export class Connection {
 
   private url: string;
   private factory: (url: string) => WebSocketLike;
+  private rand: () => number;
   private backoffAttempt = 0;
   private reconnectTimer?: number;
   private heartbeatMs: number;
@@ -146,6 +154,7 @@ export class Connection {
     return new Promise<unknown>((resolve, reject) => {
       const timer = this.sched.setTimeout(() => {
         this.pending.delete(id);
+        this.chunks.drop(id);
         const e = new Error("rpc_timeout") as Error & { code?: string };
         e.code = "rpc_timeout";
         reject(e);
@@ -163,6 +172,7 @@ export class Connection {
       p.reject(e);
     }
     this.pending.clear();
+    this.chunks.clear();
   }
 
   constructor(opts: ConnectionOpts) {
@@ -173,6 +183,7 @@ export class Connection {
     });
     this.url = opts.url;
     this.sched = opts.scheduler ?? realScheduler;
+    this.rand = opts.random ?? Math.random;
     this.heartbeatMs = opts.heartbeatMs ?? 10_000;
     this.livenessMs = opts.livenessMs ?? 25_000;
     this.makeChannel = opts.channelFactory ?? (() => {
@@ -283,7 +294,10 @@ export class Connection {
       this.pairFailStreak = 0;
     }
     this.setStatus("offline");
-    const delay = Math.min(10_000, 500 * 2 ** this.backoffAttempt);
+    // A9: ±20% jitter on the exponential backoff so a fleet of devices that
+    // lost the connection together (agent restart, network flap) does not
+    // reconnect in lock-step and spike the server.
+    const delay = Math.round(Math.min(10_000, 500 * 2 ** this.backoffAttempt) * (0.8 + 0.4 * this.rand()));
     this.backoffAttempt++;
     this.reconnectTimer = this.sched.setTimeout(() => this.connect(), delay);
   }
@@ -321,10 +335,13 @@ export class Connection {
       const p = this.pending.get(msg.id);
       if (p) {
         this.pending.delete(msg.id);
+        this.chunks.drop(msg.id); // defensive: single frame after partial chunks
         this.sched.clearTimeout(p.timer);
         if (msg.ok) p.resolve(msg.result);
         else { const e = new Error(msg.error.message) as Error & { code?: string }; e.code = msg.error.code; p.reject(e); }
       }
+    } else if (msg.type === "rpcChunk") {
+      this.handleRpcChunk(msg);
     } else if (msg.type === "error") {
       // A rejected pairing (expired/wrong/exhausted code) must not be retried:
       // the agent closes right after, and re-sending the same dead code on every
@@ -336,6 +353,41 @@ export class Connection {
       }
       for (const cb of this.errorCbs) cb({ code: msg.code, message: msg.message });
     }
+  }
+
+  // WP-6: collect rpcChunk frames per rpc id; once all slices are in, the
+  // concatenated bytes ARE the original `response` frame's JSON, so feeding
+  // the decoded text back through dispatch makes a chunked response behave
+  // byte-for-byte like the single-frame path (resolve/reject, unknown-id
+  // drop included).
+  private handleRpcChunk(msg: { id: string; index: number; total: number; data: string }): void {
+    // Late chunks for an unknown id (rpc already settled/timed out) are
+    // dropped silently — the buffer can only exist alongside a pending rpc.
+    if (!this.pending.has(msg.id)) return;
+    const r = this.chunks.feed(msg);
+    if (r.status === "pending") return;
+    if (r.status === "error") {
+      const p = this.pending.get(msg.id);
+      this.chunks.drop(msg.id);
+      if (p) {
+        this.pending.delete(msg.id);
+        this.sched.clearTimeout(p.timer);
+        const e = new Error(`rpc_chunk_invalid:${r.reason}`) as Error & { code?: string };
+        e.code = "rpc_chunk_invalid";
+        p.reject(e);
+      }
+      return;
+    }
+    this.dispatch(new TextDecoder().decode(r.bytes));
+  }
+
+  // A frame may go out only once the secure channel is established AND any
+  // in-channel pairing has completed (the agent answers nothing but pair until
+  // then). attach/detach gate on this instead of the offline queue: their
+  // subscription state is rebuilt by flushAndRestore on every (re)connect, so
+  // queueing them would only duplicate the attach and the backlog replay.
+  private transportReady(): boolean {
+    return this.open && !this.pairing && !!this.channel && this.channel.state === "transport";
   }
 
   private send(msg: ClientMsg): void {
@@ -351,8 +403,17 @@ export class Connection {
     this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd });
   }
   attach(sessionId: string, lastSeq?: number): void {
+    const subscribed = this.attached.has(sessionId);
     this.attached.add(sessionId);
     const seq = this.seen.get(sessionId) ?? lastSeq ?? 0;
+    // Persist the resume point so the reconnect replay (flushAndRestore) picks
+    // it up even when this attach happened while the transport was down.
+    if (!this.seen.has(sessionId)) this.seen.set(sessionId, seq);
+    // No frame when the server is already subscribed on this socket (remount /
+    // restored-tab re-attach): a duplicate attach only re-sends the backlog.
+    // No frame while the transport is down either: flushAndRestore re-attaches
+    // every bookkeeping entry on the next established connection.
+    if (subscribed || !this.transportReady()) return;
     this.send({ type: "attach", sessionId, lastSeq: seq });
   }
   sendInput(sessionId: string, data: Uint8Array): void {
@@ -420,7 +481,12 @@ export class Connection {
     return () => { this.resyncCbs = this.resyncCbs.filter((c) => c !== cb); };
   }
   detach(sessionId: string): void {
-    this.attached.delete(sessionId);
-    this.seen.delete(sessionId);
+    const wasAttached = this.attached.delete(sessionId);
+    // `seen` is kept on purpose: re-attaching later (back to the foreground)
+    // resumes the replay from the last received seq instead of refetching the
+    // whole backlog. While the transport is down no frame is needed — a fresh
+    // connection starts with an empty subscription set server-side anyway.
+    if (!wasAttached || !this.transportReady()) return;
+    this.send({ type: "detach", sessionId });
   }
 }

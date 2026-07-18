@@ -27,6 +27,7 @@ export interface Snippet {
 
 export type ClientMsg =
   | { type: "attach"; sessionId: string; lastSeq?: number }
+  | { type: "detach"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
   | { type: "newSession"; name: string; cmd?: string; cwd?: string }
@@ -53,7 +54,8 @@ export type ServerMsg =
   | { type: "devices"; devices: DeviceInfo[] }
   | { type: "snippets"; items: Snippet[] }
   | { type: "response"; id: string; ok: true; result: unknown }
-  | { type: "response"; id: string; ok: false; error: { code: string; message: string } };
+  | { type: "response"; id: string; ok: false; error: { code: string; message: string } }
+  | { type: "rpcChunk"; id: string; index: number; total: number; data: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);

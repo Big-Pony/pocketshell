@@ -30,6 +30,9 @@ export interface Snippet {
 
 export type ClientMsg =
   | { type: "attach"; sessionId: string; lastSeq?: number }
+  // detach: unsubscribe from a session's output (fire-and-forget, no response).
+  // Purely additive — old clients never send it and degrade to subscribe-only.
+  | { type: "detach"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
   | { type: "newSession"; name: string; cmd?: string; cwd?: string }
@@ -56,7 +59,14 @@ export type ServerMsg =
   | { type: "devices"; devices: DeviceInfo[] }
   | { type: "snippets"; items: Snippet[] }
   | { type: "response"; id: string; ok: true; result: unknown }
-  | { type: "response"; id: string; ok: false; error: { code: string; message: string } };
+  | { type: "response"; id: string; ok: false; error: { code: string; message: string } }
+  // rpcChunk: one shard of an oversize rpc success response (WP-6). `data` is
+  // base64 of a byte slice of the full `response` message's UTF-8 JSON; shards
+  // of one id go out in index order and the client reassembles the original
+  // response from the concatenated bytes. Purely additive — an old client would
+  // reject the unknown type, but app and agent ship as one versioned bundle
+  // (the agent serves the app), so there is no version-skew surface.
+  | { type: "rpcChunk"; id: string; index: number; total: number; data: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);

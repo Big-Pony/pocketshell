@@ -10,6 +10,17 @@ export default defineConfig({
   resolve: {
     alias: { "sodium-native": "sodium-javascript" },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // xterm is the largest dependency and only needed by the terminal view;
+        // give it its own vendor chunk (cacheable + parallel-downloadable).
+        manualChunks(id) {
+          if (id.includes("node_modules/@xterm/")) return "xterm";
+        },
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     exclude: ["node_modules", "e2e"],

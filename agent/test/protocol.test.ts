@@ -21,6 +21,11 @@ test("attach carries optional lastSeq", () => {
   expect(msg.lastSeq).toBe(42);
 });
 
+test("detach carries sessionId (fire-and-forget mirror)", () => {
+  const msg = decodeClient(encode({ type: "detach", sessionId: "s1" }));
+  expect(msg).toEqual({ type: "detach", sessionId: "s1" });
+});
+
 test("decodes a listSessions client message", () => {
   const msg = decodeClient(encode({ type: "listSessions" }));
   expect(msg.type).toBe("listSessions");

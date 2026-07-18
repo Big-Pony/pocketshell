@@ -14,6 +14,27 @@
 
 import { ptyEnv } from "./pty-env";
 
+// WP-5: resize idempotency gate (defense in depth — the client already
+// suppresses resize frames whose size did not change). Bun.Terminal.resize
+// plus the SIGWINCH nudge below are only pushed when the size actually differs
+// from the last applied one. The FIRST resize always goes through, even if it
+// matches the spawn size: tmux may have attached at a different size and needs
+// the SIGWINCH to renegotiate/repaint.
+export class ResizeGate {
+  private cols = -1;
+  private rows = -1;
+
+  // Records (cols, rows) as the last applied size and returns true when it
+  // differs from the previously recorded one (or none was recorded yet),
+  // i.e. when the PTY really needs terminal.resize + SIGWINCH.
+  shouldResize(cols: number, rows: number): boolean {
+    if (cols === this.cols && rows === this.rows) return false;
+    this.cols = cols;
+    this.rows = rows;
+    return true;
+  }
+}
+
 export interface PtyHandle {
   write(data: Uint8Array): void;
   resize(cols: number, rows: number): void;
@@ -26,6 +47,7 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
   let killed = false;
   const dataCbs: ((chunk: Uint8Array) => void)[] = [];
   const exitCbs: ((code: number) => void)[] = [];
+  const resizeGate = new ResizeGate();
 
   // Create the PTY terminal with data/exit callbacks.
   const terminal = new Bun.Terminal({
@@ -58,6 +80,10 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
     },
     resize(cols, rows) {
       if (killed) return;
+      // Idempotency gate: skip the winsize ioctl AND the SIGWINCH when the
+      // size did not change — a redundant SIGWINCH makes tmux repaint for
+      // nothing on every no-op resize frame.
+      if (!resizeGate.shouldResize(cols, rows)) return;
       terminal.resize(cols, rows);
       // Bun.Terminal.resize updates the PTY winsize (TIOCSWINSZ) but does NOT
       // deliver SIGWINCH to the child (verified: bash sees the new `stty size`

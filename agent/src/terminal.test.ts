@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { TerminalService, type TmuxRunner } from "./terminal";
+import { TerminalService, type TmuxResult, type TmuxRunner } from "./terminal";
+import { StateHysteresis } from "./state";
 
 const utf8 = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
 const ok = (s = "") => ({ exitCode: 0, stdout: utf8(s), stderr: new Uint8Array() });
@@ -24,14 +25,14 @@ export function fakeTmux(
   };
 }
 
-test("list() surfaces foreign tmux sessions as idle + attached:false", () => {
+test("list() surfaces foreign tmux sessions as idle + attached:false", async () => {
   const term = new TerminalService({
     tmux: fakeTmux({
       list: "work\t1700000000\t120\t40\nbuild\t1700000100\t80\t24\n",
       capture: { work: "$ vim main.ts", build: "npm run build" },
     }),
   });
-  const sessions = term.list();
+  const sessions = await term.list();
   term.dispose();
 
   expect(sessions).toHaveLength(2);
@@ -44,18 +45,18 @@ test("list() surfaces foreign tmux sessions as idle + attached:false", () => {
   expect(work.lastLine).toBe("$ vim main.ts");
 });
 
-test("list() tolerates a missing/failing tmux (roster query) -> empty", () => {
+test("list() tolerates a missing/failing tmux (roster query) -> empty", async () => {
   const term = new TerminalService({ tmux: () => fail() });
-  expect(term.list()).toEqual([]);
+  expect(await term.list()).toEqual([]);
   term.dispose();
 });
 
-test("roster + previews force tmux UTF-8 (-u) so launchd's C locale can't sanitize tab delimiters to _", () => {
+test("roster + previews force tmux UTF-8 (-u) so launchd's C locale can't sanitize tab delimiters to _", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: fakeTmux({ list: "work\t1700000000\t80\t24\n", capture: { work: "hi" } }, calls),
   });
-  term.list();
+  await term.list();
   term.dispose();
   // Both output-parsed commands must lead with the global -u flag.
   const ls = calls.find((a) => a.includes("list-sessions"))!;
@@ -199,4 +200,83 @@ test("ensure() does not inject LANG at new-session when there is no locale fallb
 
   const created = calls.find((a) => a.includes("new-session"))!;
   expect(created.some((a) => a.startsWith("LANG="))).toBe(false);
+});
+
+// --- WP-3a: async list() / scan() behaviour --------------------------------
+
+test("list() runs per-session capture probes concurrently (not serially)", async () => {
+  const started: string[] = [];
+  const resolvers: (() => void)[] = [];
+  const tmuxAsync = async (args: string[]): Promise<TmuxResult> => {
+    if (args.includes("list-sessions")) {
+      return ok("a\t1700000000\t80\t24\nb\t1700000001\t80\t24\nc\t1700000002\t80\t24\n");
+    }
+    if (args.includes("capture-pane")) {
+      started.push(args[args.indexOf("-t") + 1]);
+      return new Promise<TmuxResult>((res) => {
+        resolvers.push(() => res(ok("line")));
+        // Safety net: even a regressed (serial) implementation completes, so
+        // the test fails on the assertion below instead of hanging forever.
+        setTimeout(() => res(ok("line")), 50);
+      });
+    }
+    return ok();
+  };
+  const term = new TerminalService({ tmuxAsync });
+  const p = term.list();
+  // Let the roster resolve and the capture probes kick off. A serial
+  // implementation would have started only "a" before anything resolves.
+  const deadline = Date.now();
+  while (started.length < 3 && Date.now() - deadline < 2000) await Bun.sleep(5);
+  expect(started.sort()).toEqual(["a", "b", "c"]); // all started before ANY resolved
+  for (const r of resolvers) r();
+  const sessions = await p;
+  expect(sessions.map((s) => s.name).sort()).toEqual(["a", "b", "c"]);
+  term.dispose();
+});
+
+test("scan() never stacks: a tick during an in-flight probe round is skipped", async () => {
+  let probes = 0;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const tmuxAsync = async (args: string[]): Promise<TmuxResult> => {
+    if (args.includes("has-session")) {
+      probes++;
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Bun.sleep(30);
+      inFlight--;
+    }
+    return ok();
+  };
+  const term = new TerminalService({ tmuxAsync });
+  // Plant an owned session directly (ensure() would spawn a real attach PTY).
+  (term as any).sessions.set("s", {
+    pty: { write() {}, resize() {}, kill() {} },
+    meta: { name: "s", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true },
+    lastOutputAt: Date.now(),
+  });
+  (term as any).scan();
+  (term as any).scan(); // in flight -> must be skipped
+  await Bun.sleep(60);  // first round finishes (30ms probe)
+  (term as any).scan(); // guard released -> runs
+  await Bun.sleep(60);
+  expect(maxInFlight).toBe(1); // probes never overlapped
+  expect(probes).toBe(2);      // first + third tick only; the middle one was dropped
+  term.dispose();
+});
+
+test("list() reports the scanner-debounced state, not a fresh raw inference", async () => {
+  const term = new TerminalService({ tmux: fakeTmux({ list: "" }) });
+  (term as any).sessions.set("s", {
+    pty: { write() {}, resize() {}, kill() {} },
+    meta: { name: "s", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true },
+    lastOutputAt: Date.now(), // fresh output: a raw inferState would say "run"
+  });
+  // The scanner's debounced view has already settled on "wait" — list() must
+  // surface exactly that, or pushed frames would flap run/wait again.
+  (term as any).states.set("s", new StateHysteresis("wait"));
+  const sessions = await term.list();
+  expect(sessions.find((s) => s.name === "s")?.state).toBe("wait");
+  term.dispose();
 });

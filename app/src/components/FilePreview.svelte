@@ -9,12 +9,14 @@
 
   let lines = $state<string[]>([]);
   let html = $state("");
+  let plain = $state(false); // R4: large file degraded to plain text (no gutter)
   let hunks = $state<{ header: string; lines: { kind: "add" | "del" | "ctx"; text: string }[] }[]>([]);
   let notice = $state("");
   let loaded = "";
 
   async function load() {
     notice = "";
+    plain = false;
     if (mode === "diff") {
       try {
         const r = (await conn.rpc("fs.diff", { path })) as { hunks: typeof hunks };
@@ -34,11 +36,16 @@
       // HTML is rendered as ONE block so multi-line tokens (block comments,
       // template literals) keep their spans intact — splitting the HTML on "\n"
       // would cut those spans and corrupt the coloring.
-      lines = splitLines(r.content);
-      html = await highlightTo(r.lang, r.content);
+      // R4: oversized files come back plain → skip the per-line gutter (thousands
+      // of divs) and show a hint; the HTML is already escaped, no XSS risk.
+      const res = await highlightTo(r.lang, r.content);
+      plain = res.plain;
+      if (res.plain) notice = notice ? `${notice} · ${tr("preview.plainLarge")}` : tr("preview.plainLarge");
+      lines = res.plain ? [] : splitLines(r.content);
+      html = res.html;
     } catch (e: any) {
       notice = e?.message ?? tr("preview.readFailed");
-      lines = []; html = "";
+      lines = []; html = ""; plain = false;
     }
   }
 
@@ -56,7 +63,7 @@
     </div>
   {:else}
     <div class="codewrap">
-      <div class="gutter" aria-hidden="true">{#each lines as _, i}<div class="ln">{i + 1}</div>{/each}</div>
+      {#if !plain}<div class="gutter" aria-hidden="true">{#each lines as _, i}<div class="ln">{i + 1}</div>{/each}</div>{/if}
       <pre class="code"><code>{@html html}</code></pre>
     </div>
   {/if}

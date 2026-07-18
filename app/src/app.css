@@ -235,3 +235,13 @@ body {
 .col { flex-direction: column; }
 .grow { flex: 1; }
 .none { display: none; }
+
+/* R6: honor prefers-reduced-motion — kill the infinite pulse loops on tab
+   status dots (.dot-run/.dot-wait in TopTabs/TaskPanel) and the BottomBar
+   badge (.dot) so the page can go fully idle. Loading spinners (FileTree
+   .spinner) stay: they are transient feedback, not idle decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .dot-run, .dot-wait, .dot {
+    animation: none !important;
+  }
+}

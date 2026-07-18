@@ -9,6 +9,8 @@
     <meta name="theme-color" content="#0a0d13" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+    <!-- Terminal font is render-blocking; start the fetch before the CSS asks for it (Bold stays lazy). -->
+    <link rel="preload" href="/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
     <!-- iOS does not read the manifest; these keep "Add to Home Screen" decent there too -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

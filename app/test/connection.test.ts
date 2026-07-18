@@ -253,7 +253,7 @@ test("dispatches resync frames to onResync", () => {
 test("reconnects after close with exponential backoff", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.5, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
   completeHandshake(created[0]);
   expect(conn.status).toBe("online");
   created[0].close();
@@ -272,7 +272,7 @@ test("reconnects after close with exponential backoff", () => {
 test("ignores stale socket callbacks after reconnect", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.5, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
   completeHandshake(created[0]);
   created[0].close();
   advance(500);
@@ -292,7 +292,7 @@ test("ignores stale socket callbacks after reconnect", () => {
 test("re-attaches all attached sessions with lastSeq on reconnect", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.5, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
   completeHandshake(created[0]);
   conn.attach("s1");
   conn.attach("s2");
@@ -458,7 +458,7 @@ test("pairing: repeated pre-established closes clear the pending code", () => {
   const { sched, advance } = makeFakeScheduler();
   const created: FakeWS[] = [];
   const errors: { code: string; message: string }[] = [];
-  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.5, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
   conn.onError((e) => errors.push(e));
 
   // attempt 1: open sends M1, then close before M2 (agent rejected at handshake)
@@ -469,4 +469,149 @@ test("pairing: repeated pre-established closes clear the pending code", () => {
   advance(1100); created[2].open(); created[2].close();
   expect(getPendingPair()).toBeNull();       // third clears
   expect(errors.some((e) => e.code === "pair_failed")).toBe(true);
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-2b: detach sends a frame and drops the session from the reconnect replay
+// ──────────────────────────────────────────────────────────────
+test("detach sends a frame and removes the session from reconnect replay", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.5, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
+  conn.attach("s1");
+  conn.attach("s2");
+  created[0].sent.length = 0;
+  conn.detach("s1");
+  expect(decodeMsg(created[0].sent[0])).toEqual({ type: "detach", sessionId: "s1" });
+  created[0].close();
+  advance(500);
+  completeHandshake(created[1]);
+  const msgs = businessSent(created[1]).map((b) => decodeMsg(b));
+  expect(msgs.some((m: any) => m.type === "attach" && m.sessionId === "s1")).toBe(false);
+  expect(msgs).toContainEqual({ type: "attach", sessionId: "s2", lastSeq: 0 });
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-2b: a repeated detach (e.g. closeTopTab after toBackground) sends no
+// second frame — the server already unsubscribed on the first one
+// ──────────────────────────────────────────────────────────────
+test("repeated detach sends no duplicate frame", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  conn.attach("s1");
+  conn.detach("s1");
+  ws.sent.length = 0;
+  conn.detach("s1");
+  expect(ws.sent.length).toBe(0);
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-2b: re-attaching an already-subscribed session (Terminal remount,
+// restored-tab loop) sends no duplicate attach — that would only make the
+// agent replay the backlog twice
+// ──────────────────────────────────────────────────────────────
+test("re-attaching an already attached session sends no duplicate frame", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  conn.attach("s1");
+  ws.sent.length = 0;
+  conn.attach("s1");
+  expect(ws.sent.length).toBe(0);
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-2b: attach while the transport is down sends nothing and queues nothing;
+// flushAndRestore replays it exactly once, with the baseline lastSeq
+// ──────────────────────────────────────────────────────────────
+test("attach while offline is replayed exactly once on connect, with baseline lastSeq", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  conn.attach("s1", 7); // before the socket even opens (Terminal mounted while connecting)
+  expect(ws.sent.length).toBe(0);
+  completeHandshake(ws);
+  const msgs = businessSent(ws).map((b) => decodeMsg(b));
+  const attaches = msgs.filter((m: any) => m.type === "attach" && m.sessionId === "s1");
+  expect(attaches).toEqual([{ type: "attach", sessionId: "s1", lastSeq: 7 }]);
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-2b: detach while offline needs no frame — the next connection starts
+// with an empty subscription set server-side, and the session is gone from
+// the reconnect replay
+// ──────────────────────────────────────────────────────────────
+test("detach while offline queues nothing and is not replayed", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.5, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
+  conn.attach("s1");
+  created[0].close();
+  advance(500); // reconnect socket created, but not yet established
+  conn.detach("s1");
+  completeHandshake(created[1]);
+  const msgs = businessSent(created[1]).map((b) => decodeMsg(b));
+  expect(msgs.some((m: any) => m.type === "detach")).toBe(false);
+  expect(msgs.some((m: any) => m.type === "attach" && m.sessionId === "s1")).toBe(false);
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-2b: detach keeps the seq bookkeeping so re-attaching (back to the
+// foreground) resumes the replay from the last received seq
+// ──────────────────────────────────────────────────────────────
+test("re-attach after detach resumes from the last received seq", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  conn.attach("s1");
+  ws.emit(encode({ type: "output", sessionId: "s1", seq: 9, data: toB64(new Uint8Array([65])) }));
+  conn.detach("s1");
+  ws.sent.length = 0;
+  conn.attach("s1");
+  expect(decodeMsg(ws.sent[0])).toEqual({ type: "attach", sessionId: "s1", lastSeq: 9 });
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-3b (A9): the reconnect backoff carries ±20% jitter — random=0 pins the
+// 500ms first backoff to its 400ms floor
+// ──────────────────────────────────────────────────────────────
+test("reconnect backoff jitter: random=0 lands at the 0.8× floor", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
+  created[0].close();
+  advance(399);
+  expect(created.length).toBe(1); // below the jittered delay: no reconnect yet
+  advance(1);
+  expect(created.length).toBe(2); // exactly 400ms
+  conn.dispose();
+});
+
+// ──────────────────────────────────────────────────────────────
+// WP-3b (A9): random≈1 pins the same backoff to its 600ms ceiling
+// ──────────────────────────────────────────────────────────────
+test("reconnect backoff jitter: random=1 lands at the 1.2× ceiling", () => {
+  const { sched, advance } = makeFakeScheduler();
+  const created: FakeWS[] = [];
+  const conn = new Connection({ url: "ws://x", scheduler: sched, random: () => 0.999, wsFactory: () => { const w = new FakeWS(); created.push(w); return w; }, channelFactory: passthroughInitiator });
+  completeHandshake(created[0]);
+  created[0].close();
+  advance(599);
+  expect(created.length).toBe(1);
+  advance(1);
+  expect(created.length).toBe(2); // exactly 600ms
+  conn.dispose();
 });

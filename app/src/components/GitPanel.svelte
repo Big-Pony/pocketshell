@@ -19,9 +19,16 @@
     if (noRoot) return;
     notice = "";
     try {
-      branches = (await conn.rpc("git.branches", { cwd: root })) as any;
-      commits = ((await conn.rpc("git.log", { cwd: root, limit })) as any).commits;
-      changes = ((await conn.rpc("git.status", { cwd: root })) as any).files;
+      // A8: the three reads are independent — run them concurrently instead of
+      // serially (saves 2 RTTs; agent side spawns git for each).
+      const [b, l, s] = await Promise.all([
+        conn.rpc("git.branches", { cwd: root }),
+        conn.rpc("git.log", { cwd: root, limit }),
+        conn.rpc("git.status", { cwd: root }),
+      ]);
+      branches = b as any;
+      commits = (l as any).commits;
+      changes = (s as any).files;
     } catch (e: any) {
       notice = e?.code === "rpc_error" && /not_a_repo/.test(e?.message) ? tr("git.notRepo") : (e?.message ?? tr("git.loadFailed"));
     }

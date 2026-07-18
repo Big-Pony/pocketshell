@@ -1,5 +1,51 @@
+<script module lang="ts">
+  // R1 (hidden terminals): output that arrives while the terminal is inactive
+  // must not pay xterm's parse/render cost, so the raw bytes are stashed here
+  // and flushed as one concatenated write on activation. A hard cap bounds
+  // memory for chatty sessions: past the limit the stash is dropped and marked
+  // dirty, and activation reseeds from a full tmux snapshot instead of
+  // replaying a truncated byte stream.
+  export class PendingBuffer {
+    private chunks: Uint8Array[] = [];
+    private bytes = 0;
+    private limit: number;
+    dirty = false;
+
+    constructor(limit = 2 * 1024 * 1024) {
+      this.limit = limit;
+    }
+
+    push(data: Uint8Array): void {
+      if (this.dirty) return;
+      this.chunks.push(data);
+      this.bytes += data.byteLength;
+      if (this.bytes > this.limit) {
+        this.chunks = [];
+        this.bytes = 0;
+        this.dirty = true;
+      }
+    }
+
+    // Concatenated pending bytes (buffer reset), or null when empty. Callers
+    // must check `dirty` first — a dirty buffer keeps nothing to take.
+    take(): Uint8Array | null {
+      if (this.bytes === 0) return null;
+      const all = new Uint8Array(this.bytes);
+      let off = 0;
+      for (const c of this.chunks) { all.set(c, off); off += c.byteLength; }
+      this.chunks = [];
+      this.bytes = 0;
+      return all;
+    }
+
+    clearDirty(): void {
+      this.dirty = false;
+    }
+  }
+</script>
+
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { Connection } from "../lib/connection";
@@ -24,9 +70,21 @@
   let host: HTMLDivElement;
   let term: Terminal;
   let fit: FitAddon;
+  // Plain `let term/fit` are NOT reactive — a visibility $effect keyed on them
+  // would never re-fire after onMount assigns them, so for an initially-active
+  // terminal startPoll would never run (the first classify then only fires on
+  // an input burst, landing reloadHistory mid-typing and nuking any selection).
+  // This flag is the reactive "setup complete" signal for that effect.
+  let mounted = $state(false);
 
   // Assigned in onMount; callable from $effect blocks that react to active/font.
   let refit: () => void = () => {};
+  // Same lifecycle as refit: flushes/reseeds the output stashed while hidden.
+  let flushPending: () => void = () => {};
+  // Same lifecycle again: start/pause the classifyPane poll with visibility
+  // (A4 — only the active, live session polls tmux).
+  let startPoll: () => void = () => {};
+  let stopPoll: () => void = () => {};
 
   // Which tmux buffer the pane is in, driven by tmux's real alternate_on state.
   // Shells AND classic-renderer Claude Code live in the normal buffer (native
@@ -37,6 +95,17 @@
   type PaneMode = "normal" | "alt";
   type BufferType = "normal" | "alternate";
 
+  // onMount below is async (font preload), and Svelte only registers a cleanup
+  // returned SYNCHRONOUSLY — so teardown goes through onDestroy + this slot,
+  // assigned once setup completes. Without it an unmounted terminal would keep
+  // its resize listener and poll interval alive forever.
+  let teardown: (() => void) | undefined;
+  let destroyed = false;
+  onDestroy(() => {
+    destroyed = true;
+    teardown?.();
+  });
+
   onMount(async () => {
     // Ensure the bundled JetBrains Mono is ready before xterm measures cells.
     // Falls back silently if the font is unavailable or the API is missing.
@@ -45,6 +114,7 @@
     } catch {
       // ignore
     }
+    if (destroyed) return; // unmounted while the font loaded — set nothing up
 
     term = new Terminal({
       fontSize,
@@ -96,6 +166,12 @@
     // renderer, so its transcript accumulates in scrollback instead of a fixed
     // alt-screen). No virtual-row inflation → the input line stays the last row
     // and the cursor stays visible (no scroll-to-find-the-cursor).
+    // R3: the size the PTY was last told about. conn.resize only goes out on a
+    // real change — a duplicate frame is a wasted wake on the link, and the
+    // agent raises SIGWINCH (with its full-screen redraw storm) only when the
+    // size actually differs.
+    let lastSentCols = 0;
+    let lastSentRows = 0;
     refit = () => {
       const d = dims();
       if (term.cols !== d.cols || term.rows !== d.rows) term.resize(d.cols, d.rows);
@@ -107,12 +183,22 @@
       while (screen && screen.scrollWidth > host.clientWidth && term.cols > 20 && guard-- > 0) {
         term.resize(term.cols - 1, term.rows);
       }
-      conn.resize(sessionId, term.cols, term.rows);
+      if (term.cols !== lastSentCols || term.rows !== lastSentRows) {
+        lastSentCols = term.cols;
+        lastSentRows = term.rows;
+        conn.resize(sessionId, term.cols, term.rows);
+      }
     };
 
+    // R1: while hidden, stash raw bytes instead of writing to xterm (parse +
+    // render is the expensive part); activation flushes them in one write.
+    // Tombstoned sessions get no live stream anymore — drop their frames.
+    const pendingOut = new PendingBuffer();
     const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId !== sessionId) return;
-      term.write(f.data);
+      if (active) { term.write(f.data); return; }
+      if (closed) return;
+      pendingOut.push(f.data);
     });
 
     // Seed tmux history into the shell's normal buffer, replacing what xterm
@@ -132,6 +218,21 @@
       } catch { /* best-effort */ }
     };
 
+    // Activation path (R1). A dirty stash means the byte stream is incomplete,
+    // so replaying it would corrupt the screen: reseed from tmux instead — or,
+    // in the alternate buffer where capture-pane is useless, ask the pane app
+    // to repaint. Otherwise write the stashed bytes in one go.
+    flushPending = () => {
+      if (pendingOut.dirty) {
+        pendingOut.clearDirty();
+        if (currentBuffer === "normal") void reloadHistory();
+        else void conn.rpc("term.redraw", { session: sessionId }).catch(() => {});
+        return;
+      }
+      const data = pendingOut.take();
+      if (data) term.write(data);
+    };
+
     // Poll tmux's real alternate_on state and switch xterm's buffer to match,
     // ONLY on an actual change (edge-triggered). tmux does not forward 1049h/1049l
     // to an attach client, so we drive the buffer ourselves. Re-seeding history on
@@ -141,8 +242,12 @@
     let paneInfoSeq = 0;
     let appliedMode: PaneMode | null = null;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
-    const stopPoll = () => {
+    let classifyDebounce: ReturnType<typeof setTimeout> | undefined;
+    // A4: pausing also drops a pending input-debounced classify — a hidden or
+    // tombstoned session has no business polling tmux at all.
+    stopPoll = () => {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+      if (classifyDebounce) { clearTimeout(classifyDebounce); classifyDebounce = undefined; }
     };
     const classifyPane = async () => {
       const seq = ++paneInfoSeq;
@@ -178,6 +283,15 @@
       } catch { /* keep current mode */ }
     };
 
+    // A4: (re)start the 2s cadence with one immediate classify so an activated
+    // tab refreshes its pane mode right away instead of waiting out the interval.
+    // No-ops while already running or on a tombstoned session (closed/done).
+    startPoll = () => {
+      if (pollTimer !== undefined || closed) return;
+      void classifyPane();
+      pollTimer = setInterval(() => void classifyPane(), 2000);
+    };
+
     // Track xterm's buffer so reloadHistory knows it's in the normal buffer.
     term.buffer.onBufferChange((buf) => {
       currentBuffer = (buf.type as BufferType) === "alternate" ? "alternate" : "normal";
@@ -188,9 +302,9 @@
     // ~200ms after the last keystroke of a burst instead of waiting for the
     // next 2s poll, so the buffer switch + redraw feel immediate. Trailing
     // debounce keeps it to one paneInfo RPC per burst, not per keystroke.
-    let classifyDebounce: ReturnType<typeof setTimeout> | undefined;
+    // A4: a tombstoned session has no live pane — never re-classify for it.
     const unsubscribeInput = conn.onInput((sid) => {
-      if (sid !== sessionId) return;
+      if (sid !== sessionId || closed) return;
       if (classifyDebounce) clearTimeout(classifyDebounce);
       classifyDebounce = setTimeout(() => void classifyPane(), 200);
     });
@@ -201,31 +315,46 @@
     conn.attach(sessionId);
     refit();
     onReady?.(sessionId, term);
-    // Poll tmux pane state to keep xterm's buffer/layout in sync.
-    void classifyPane();
-    pollTimer = setInterval(() => void classifyPane(), 2000);
+    // The classifyPane poll is NOT started here: the visibility $effect below
+    // starts it when (and only while) this terminal is active + live (A4).
 
+    // R3: a window resize fires continuously during a drag — collapse the burst
+    // into one trailing refit (~150ms). The activation/font-size paths call
+    // refit directly and stay immediate.
+    let resizeDebounce: ReturnType<typeof setTimeout> | undefined;
     const onResize = () => {
       if (!active) return;
-      refit();
-      if (term.cols !== lastCols) { lastCols = term.cols; void reloadHistory(); }
+      if (resizeDebounce) clearTimeout(resizeDebounce);
+      resizeDebounce = setTimeout(() => {
+        resizeDebounce = undefined;
+        refit();
+        if (term.cols !== lastCols) { lastCols = term.cols; void reloadHistory(); }
+      }, 150);
     };
     window.addEventListener("resize", onResize);
 
-    return () => {
+    teardown = () => {
       window.removeEventListener("resize", onResize);
       unsubscribeOutput?.();
       unsubscribeInput?.();
-      if (classifyDebounce) clearTimeout(classifyDebounce);
-      stopPoll();
+      if (resizeDebounce) clearTimeout(resizeDebounce);
+      stopPoll(); // also drops a pending input-debounced classify
       term?.dispose();
     };
+    mounted = true;
   });
 
   // Re-fit when this session becomes visible (xterm can't measure while hidden).
+  // Flush/reseed the stashed output first (R1) so refit measures final content.
+  // A4: the classifyPane poll follows visibility — activation runs one classify
+  // right away (after flush + refit) and restarts the 2s cadence; hiding pauses
+  // it, and a tombstone (closed/done) stops it for good.
   $effect(() => {
-    if (active && term && fit) {
-      queueMicrotask(() => refit());
+    if (mounted && active && !closed && term && fit) {
+      flushPending();
+      queueMicrotask(() => { refit(); startPoll(); });
+    } else if (term) {
+      stopPoll();
     }
   });
 

@@ -40,7 +40,21 @@ export function shouldAdopt(s: LocalSession): boolean {
   return !s.closed && !s.attached;
 }
 
+// Field-equal check across everything the view reads (SessionMeta + the local
+// `closed` flag). `attached`/`closed` are normalized with !! so an absent flag
+// and an explicit false count as equal.
+function sameSession(a: LocalSession, b: LocalSession): boolean {
+  return a.name === b.name && a.state === b.state && a.cols === b.cols &&
+    a.rows === b.rows && a.lastLine === b.lastLine && a.createdAt === b.createdAt &&
+    !!a.attached === !!b.attached && !!a.closed === !!b.closed;
+}
+
 // Merge local sessions with incoming from server: upsert active, tombstone absent, append new.
+// R5: reference-preserving. The server rebroadcasts the full list every ~3s,
+// usually unchanged — keep the existing array/element references whenever the
+// content is identical so Svelte's $state sees no update and the tab strip,
+// TaskPanel and the persist $effect stay idle. New references only where a
+// field actually changed (or a session appeared/disappeared).
 export function mergeSessions(local: LocalSession[], incoming: SessionMeta[]): LocalSession[] {
   const inc = new Map(incoming.map((s) => [s.name, s]));
   const seen = new Set<string>();
@@ -48,15 +62,19 @@ export function mergeSessions(local: LocalSession[], incoming: SessionMeta[]): L
   for (const s of local) {
     const hit = inc.get(s.name);
     if (hit) {
-      result.push({ ...hit, closed: false });
+      const next: LocalSession = { ...hit, closed: false };
+      result.push(sameSession(s, next) ? s : next);
       seen.add(s.name);
     } else {
-      result.push({ ...s, closed: true, state: "done" });
+      // Already a tombstone (closed+done): keep the element ref, otherwise a
+      // dead session would force a fresh array on every broadcast forever.
+      result.push(s.closed && s.state === "done" ? s : { ...s, closed: true, state: "done" });
     }
   }
   for (const s of incoming) {
     if (!seen.has(s.name)) result.push({ ...s, closed: false });
   }
+  if (result.length === local.length && result.every((s, i) => s === local[i])) return local;
   return result;
 }
 

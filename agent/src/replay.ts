@@ -59,4 +59,11 @@ export class ReplayService {
     const s = this.sessions.get(sessionId);
     return s ? s.nextSeq - 1 : 0;
   }
+
+  // Seq of the oldest frame still retained (0 when nothing is held). Used as
+  // the `from` of a resync, matching the attach-gap path's semantics.
+  oldestSeq(sessionId: string): number {
+    const s = this.sessions.get(sessionId);
+    return s && s.ring.length > 0 ? s.oldestSeq : 0;
+  }
 }

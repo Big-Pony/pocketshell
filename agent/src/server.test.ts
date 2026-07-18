@@ -66,7 +66,7 @@ test("server does not broadcast to a socket that has not completed handshake", (
   srv.stop();
 });
 
-test("after marker handshake, client business frame is dispatched and reply is encrypted-through", () => {
+test("after marker handshake, client business frame is dispatched and reply is encrypted-through", async () => {
   const srv = startServer({ port: 0, channelFactory: passthroughResponder });
   const ws = fakeWs();
   srv.__test.open(ws as any);
@@ -74,6 +74,9 @@ test("after marker handshake, client business frame is dispatched and reply is e
   expect(ws.sent[0]).toEqual(M2);
   ws.sent.length = 0;
   srv.__test.message(ws as any, utf8(encode({ type: "listSessions" })));
+  // list() is async (WP-3a): wait for the probe round + response frame.
+  const start = Date.now();
+  while (ws.sent.length === 0 && Date.now() - start < 2000) await Bun.sleep(10);
   const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
   expect(reply.type).toBe("sessions");
   srv.stop();
@@ -350,7 +353,7 @@ test("rpc git.status routes through server", () => {
   srv.stop();
 });
 
-test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", () => {
+test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", async () => {
   const utf8b = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
   const okr = (s = "") => ({ exitCode: 0, stdout: utf8b(s), stderr: new Uint8Array() });
   const terminal = new TerminalService({
@@ -367,7 +370,7 @@ test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", 
   srv.__test.message(ws as any, M1); // marker handshake -> ready
   ws.sent.length = 0;
 
-  srv.__test.periodicPush();
+  await srv.__test.periodicPush();
 
   const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8")) as any;
   expect(reply.type).toBe("sessions");
@@ -375,6 +378,42 @@ test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", 
   expect(s.state).toBe("idle");
   expect(s.attached).toBe(false);
   expect(s.lastLine).toBe("$ vim");
+  srv.stop();
+});
+
+test("WP-3a: periodicPush diffs against the last broadcast — unchanged roster sends nothing", async () => {
+  const utf8b = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
+  const okr = (s = "") => ({ exitCode: 0, stdout: utf8b(s), stderr: new Uint8Array() });
+  let rosterText = "work\t1700000000\t80\t24\n";
+  const terminal = new TerminalService({
+    tmux: (args) => {
+      if (args.includes("list-sessions")) return okr(rosterText);
+      if (args.includes("capture-pane")) return okr("$ vim\n");
+      return okr();
+    },
+  });
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1); // marker handshake -> ready
+  ws.sent.length = 0;
+
+  await srv.__test.periodicPush(); // first push: no baseline -> broadcasts
+  expect(ws.sent.length).toBe(1);
+
+  await srv.__test.periodicPush(); // identical roster -> diff hit, no frame
+  expect(ws.sent.length).toBe(1);
+
+  rosterText = "work\t1700000000\t80\t24\nbuild\t1700000100\t80\t24\n"; // roster changed
+  await srv.__test.periodicPush(); // -> diff miss, broadcasts again
+  expect(ws.sent.length).toBe(2);
+
+  // listSessions unicast is never gated by the diff cache: request -> answer.
+  srv.__test.message(ws as any, utf8(encode({ type: "listSessions" })));
+  const start = Date.now();
+  while (ws.sent.length === 2 && Date.now() - start < 2000) await Bun.sleep(10);
+  expect(ws.sent.length).toBe(3);
+  expect(decodeServer(Buffer.from(ws.sent[2]).toString("utf8")).type).toBe("sessions");
   srv.stop();
 });
 

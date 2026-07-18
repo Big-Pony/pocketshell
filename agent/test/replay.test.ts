@@ -63,6 +63,33 @@ test("since with current latestSeq returns nothing", () => {
   expect(r.since("s", 1)).toEqual({ frames: [], gap: false, oldestSeq: 1 });
 });
 
+test("a batched frame (concatenated bursts) backfills as one frame with contiguous seq", () => {
+  // A2: the server ingests a multi-chunk batch as ONE frame; since() must hand
+  // it back verbatim so seq bookkeeping stays contiguous across the batch.
+  const r = new ReplayService();
+  const parts = [b("ab"), b("cd"), b("e")];
+  const joined = new Uint8Array(5);
+  joined.set(parts[0], 0); joined.set(parts[1], 2); joined.set(parts[2], 4);
+  r.ingest("s", joined); // seq1 covers "abcde"
+  r.ingest("s", b("f")); // seq2
+  const { frames, gap } = r.since("s", 0);
+  expect(gap).toBe(false);
+  expect(frames.map((f) => f.seq)).toEqual([1, 2]);
+  expect(Buffer.from(frames[0].data).toString()).toBe("abcde");
+  expect(Buffer.from(frames[1].data).toString()).toBe("f");
+});
+
+test("oldestSeq tracks the retained window (0 when empty)", () => {
+  const r = new ReplayService(2); // 2-byte cap
+  expect(r.oldestSeq("s")).toBe(0);
+  r.ingest("s", b("a")); // seq1
+  expect(r.oldestSeq("s")).toBe(1);
+  r.ingest("s", b("b")); // seq2
+  r.ingest("s", b("c")); // seq3, evict seq1
+  r.ingest("s", b("d")); // seq4, evict seq2
+  expect(r.oldestSeq("s")).toBe(3);
+});
+
 test("since reports oldestSeq of the retained buffer on gap", () => {
   const r = new ReplayService(2); // 2-byte cap
   r.ingest("s", b("a")); // seq1

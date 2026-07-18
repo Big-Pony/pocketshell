@@ -7,12 +7,15 @@ import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise, advertiseToHttp } from "./config";
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
+import { OutputBatcher } from "./output-batcher";
 import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp } from "./fs-service";
 import { gitLog, gitBranches, gitStatus } from "./git-service";
-import { decodeClient, encode, type ServerMsg, type DeviceInfo } from "./protocol";
+import { RPC_FIT_SAFE_BYTES, chunkRpcPayload } from "./rpc-fit";
+import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
+import { sessionListsEqual } from "./sessions-diff";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
-import { resolveStatic } from "./static-serve";
+import { resolveStatic, contentEtag, isNotModified } from "./static-serve";
 import { ASSETS } from "./embedded-manifest";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 import { buildReadiness, isNonLocalBind } from "./readiness";
@@ -53,6 +56,18 @@ export function startServer(deps: Deps = {}) {
   const pairTimeoutMs = deps.pairTimeoutMs ?? 10_000;
   const assets = deps.assets ?? ASSETS;
   const assetKeys = new Set(Object.keys(assets));
+  // Content-addressed validators: hash each served file once (lazily), then
+  // reuse for If-None-Match checks. The hashed body is the served variant
+  // itself, so .br/.gz variants get their own ETags automatically.
+  const etagCache = new Map<string, string>();
+  const etagFor = async (assetKey: string): Promise<string> => {
+    let etag = etagCache.get(assetKey);
+    if (!etag) {
+      etag = contentEtag(await Bun.file(assets[assetKey]).arrayBuffer());
+      etagCache.set(assetKey, etag);
+    }
+    return etag;
+  };
 
   interface Conn {
     ws: ServerWebSocket<unknown>;
@@ -62,6 +77,13 @@ export function startServer(deps: Deps = {}) {
     remoteStatic: string | null;
     ip: string;
     pairTimer?: ReturnType<typeof setTimeout>;
+    // A3: sessions this conn receives output/exit for. attach adds, detach
+    // removes; old clients never detach, so their set only grows (≈ old
+    // broadcast behaviour, minus sessions they never attached to).
+    subscriptions: Set<string>;
+    // A6: sessions whose output frames were dropped for this conn while its
+    // socket was backed up; each earns a resync once the buffer drains.
+    needsResyncSessions: Set<string>;
   }
   const conns = new Map<ServerWebSocket<unknown>, Conn>();
 
@@ -70,25 +92,100 @@ export function startServer(deps: Deps = {}) {
     conn.ws.send(conn.channel.send(new Uint8Array(Buffer.from(encode(msg), "utf8"))));
   };
 
-  // Number every output chunk, then fan out to attached clients.
-  terminal.onOutput((name, chunk) => {
-    const frame = replay.ingest(name, chunk);
-    const msg: ServerMsg = { type: "output", sessionId: name, seq: frame.seq, data: toB64(chunk) };
-    for (const conn of conns.values()) sendSecure(conn, msg);
+  // Number every output chunk, then fan out to subscribed clients.
+  // A2: bursts are batched per session (>=4KB or 8ms window) into ONE replay
+  // frame, so seq semantics and the wire protocol are unchanged.
+  // A6 backpressure: a conn whose socket buffer exceeds HIGH_WATER has output
+  // frames dropped (control messages still go through); once the buffer drains
+  // below LOW_WATER the conn gets a resync per affected session, then normal
+  // delivery resumes. This cannot confuse the client's seq bookkeeping: the
+  // client keeps a per-session max(seq) used only as lastSeq on (re)attach, it
+  // never asserts contiguity, and on resync it keeps that max — exactly the
+  // state a replay-eviction gap already produces, which a later attach heals
+  // via replay.since(lastSeq).
+  const HIGH_WATER_BYTES = 1024 * 1024;
+  const LOW_WATER_BYTES = 256 * 1024;
+  const bufferedAmount = (conn: Conn) => conn.ws.bufferedAmount ?? 0;
+  const maybeResync = (conn: Conn) => {
+    if (conn.needsResyncSessions.size === 0) return;
+    if (bufferedAmount(conn) > LOW_WATER_BYTES) return;
+    for (const id of conn.needsResyncSessions) {
+      if (conn.subscriptions.has(id)) {
+        sendSecure(conn, { type: "resync", sessionId: id, from: replay.oldestSeq(id) });
+      }
+    }
+    conn.needsResyncSessions.clear();
+  };
+  const deliverOutput = (conn: Conn, msg: ServerMsg & { type: "output" }) => {
+    maybeResync(conn); // no-op unless the buffer has drained below low water
+    if (conn.needsResyncSessions.size > 0 || bufferedAmount(conn) > HIGH_WATER_BYTES) {
+      // Drop this frame for this conn only; replay still holds it, so a later
+      // resync/reattach can backfill the hole.
+      conn.needsResyncSessions.add(msg.sessionId);
+      return;
+    }
+    sendSecure(conn, msg);
+  };
+  const batcher = new OutputBatcher((name, data) => {
+    const frame = replay.ingest(name, data);
+    const msg = { type: "output", sessionId: name, seq: frame.seq, data: toB64(data) } as const;
+    for (const conn of conns.values()) {
+      if (conn.subscriptions.has(name)) deliverOutput(conn, msg);
+    }
   });
-  terminal.onExit((name, code) => {
-    for (const conn of conns.values()) sendSecure(conn, { type: "exit", sessionId: name, code });
-  });
+  const onTermOutput = (name: string, chunk: Uint8Array) => batcher.push(name, chunk);
+  terminal.onOutput(onTermOutput);
+  const onTermExit = (name: string, code: number) => {
+    batcher.flush(name); // deliver the session's tail bytes before the exit notice
+    batcher.clear(name);
+    for (const conn of conns.values()) {
+      if (conn.subscriptions.has(name)) sendSecure(conn, { type: "exit", sessionId: name, code });
+    }
+  };
+  terminal.onExit(onTermExit);
 
-  const pushSessions = () => {
-    for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions: terminal.list() });
+  // WP-3a: list() is async (non-blocking tmux probes) and broadcasts are
+  // diffed against the last push — an unchanged roster is neither encoded nor
+  // sent (kills the 3s full-roster re-encode and the client re-render cascade
+  // it caused). A trigger arriving mid-push asks for one trailing rerun: the
+  // in-flight list() may have started before the change it would miss.
+  let lastPushed: SessionMeta[] | null = null;
+  let pushInFlight: Promise<void> | null = null;
+  let pushAgain = false;
+  const pushSessions = (): Promise<void> => {
+    // Nobody to push to: skip the probe round entirely (matches the old code,
+    // where list() was only evaluated inside the per-conn loop). The scanner
+    // fires onSessionsChange regardless of connections, so without this gate
+    // an idle agent would pay a full list() round for zero recipients.
+    if (conns.size === 0) return Promise.resolve();
+    if (pushInFlight) {
+      pushAgain = true;
+      return pushInFlight;
+    }
+    pushInFlight = (async () => {
+      try {
+        do {
+          pushAgain = false;
+          const sessions = await terminal.list();
+          if (lastPushed && sessionListsEqual(lastPushed, sessions)) continue;
+          lastPushed = sessions;
+          for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions });
+        } while (pushAgain);
+      } catch {
+        // A failed probe round must not reject callers or kill the interval;
+        // the next trigger retries. (tmux runners are fail-safe by contract.)
+      } finally {
+        pushInFlight = null;
+      }
+    })();
+    return pushInFlight;
   };
   terminal.onSessionsChange(pushSessions);
 
   // Refresh the whole-machine roster + previews for connected clients. Skipped
   // entirely when nobody is connected (pushSessions only targets live conns,
   // but this also avoids the tmux spawns list() would do).
-  const periodicPush = () => { if (conns.size > 0) pushSessions(); };
+  const periodicPush = (): Promise<void> => (conns.size > 0 ? pushSessions() : Promise.resolve());
   const pushTimer = setInterval(periodicPush, 3000);
   (pushTimer as unknown as { unref?: () => void }).unref?.();
 
@@ -116,6 +213,26 @@ export function startServer(deps: Deps = {}) {
     config.audit.log({ event: "pair_ok", pub: conn.remoteStatic, ip: conn.ip });
   };
 
+  // WP-6 rpc chunking. Noise caps one frame at 65535B ciphertext (65519B
+  // plaintext), so an oversize success response cannot ride a single frame —
+  // instead of truncating it (the WP-1 stop-gap, now removed) the encoded
+  // response bytes are sliced into an rpcChunk sequence the client reassembles.
+  // Method-agnostic: covers fs.read/fs.diff/git.log/term.history and any future
+  // large result. At/under RPC_FIT_SAFE_BYTES the single-frame fast path is
+  // unchanged; ok:false replies are small and always go single-frame.
+  const sendRpcResult = (conn: Conn, id: string, result: unknown) => {
+    const payload = encode({ type: "response", id, ok: true, result });
+    if (Buffer.byteLength(payload, "utf8") <= RPC_FIT_SAFE_BYTES) {
+      sendSecure(conn, { type: "response", id, ok: true, result });
+      return;
+    }
+    // rpcChunk rides sendSecure like every control message — the WP-2
+    // backpressure drop path only covers output frames, so shards cannot be
+    // lost mid-sequence. They go out back-to-back in index order with no extra
+    // flow control; the client's rpc timeout is the backstop.
+    for (const chunk of chunkRpcPayload(id, payload)) sendSecure(conn, chunk);
+  };
+
   const handleClient = (conn: Conn, raw: string) => {
     let msg;
     try { msg = decodeClient(raw); }
@@ -126,18 +243,41 @@ export function startServer(deps: Deps = {}) {
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
         break;
       case "listSessions":
-        sendSecure(conn, { type: "sessions", sessions: terminal.list() });
+        // Unicast request/response: always answered with a fresh list, never
+        // gated by the push diff cache.
+        void terminal
+          .list()
+          .then((sessions) => sendSecure(conn, { type: "sessions", sessions }))
+          .catch(() => { /* runners are fail-safe; never crash the handler */ });
         break;
       case "renameSession":
-        try { terminal.rename(msg.sessionId, msg.name); }
+        try {
+          terminal.rename(msg.sessionId, msg.name);
+          // Subscriptions follow the session identity across a rename: output
+          // is emitted under the new name from now on and clients do not
+          // re-attach, so without this the session would silently stop
+          // streaming to every subscribed conn.
+          for (const c of conns.values()) {
+            if (c.subscriptions.delete(msg.sessionId)) c.subscriptions.add(msg.name);
+            if (c.needsResyncSessions.delete(msg.sessionId)) c.needsResyncSessions.add(msg.name);
+          }
+        }
         catch (e) { sendSecure(conn, { type: "error", code: "rename_failed", message: String(e) }); }
         break;
       case "attach": {
+        conn.subscriptions.add(msg.sessionId);
+        // The replay backfill below is itself the resync for this conn, so any
+        // pending backpressure-resync flag for the session is stale.
+        conn.needsResyncSessions.delete(msg.sessionId);
         const { frames, gap, oldestSeq } = replay.since(msg.sessionId, msg.lastSeq ?? 0);
         if (gap) sendSecure(conn, { type: "resync", sessionId: msg.sessionId, from: oldestSeq });
         for (const f of frames) sendSecure(conn, { type: "output", sessionId: f.sessionId, seq: f.seq, data: toB64(f.data) });
         break;
       }
+      case "detach":
+        conn.subscriptions.delete(msg.sessionId);
+        conn.needsResyncSessions.delete(msg.sessionId);
+        break;
       case "pair":
         // Reaching handleClient means this conn is already authorized (its device
         // is registered) — the pending-pairing path is handled earlier in
@@ -207,7 +347,7 @@ export function startServer(deps: Deps = {}) {
               sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
               return;
           }
-          sendSecure(conn, { type: "response", id, ok: true, result });
+          sendRpcResult(conn, id, result);
         } catch (e) {
           sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } });
         }
@@ -219,7 +359,7 @@ export function startServer(deps: Deps = {}) {
 
   const onOpen = (ws: ServerWebSocket<unknown>, ip = "", factory = channelFactory) => {
     if (ip && config.rateLimiter.isLocked(ip)) { ws.close(); return; }
-    const conn: Conn = { ws, channel: factory(), ready: false, pending: false, remoteStatic: null, ip };
+    const conn: Conn = { ws, channel: factory(), ready: false, pending: false, remoteStatic: null, ip, subscriptions: new Set(), needsResyncSessions: new Set() };
     conns.set(ws, conn);
     const m1 = conn.channel.start();
     if (m1) ws.send(m1); // responder returns null; kept for symmetry
@@ -328,9 +468,22 @@ export function startServer(deps: Deps = {}) {
         if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
         return handleAdmin(url, req);
       }
-      const r = resolveStatic(url.pathname, req.headers.get("accept") ?? "", assetKeys);
+      const r = resolveStatic(
+        url.pathname,
+        req.headers.get("accept") ?? "",
+        assetKeys,
+        req.headers.get("accept-encoding") ?? "",
+      );
       if (r.status === 200 && r.assetKey) {
-        return new Response(Bun.file(assets[r.assetKey]), { headers: r.headers });
+        const etag = await etagFor(r.assetKey);
+        if (isNotModified(req.headers.get("if-none-match"), etag)) {
+          return new Response(null, { status: 304, headers: { ...r.headers, ETag: etag } });
+        }
+        const headers: Record<string, string> = { ...r.headers, ETag: etag };
+        // .br/.gz variants: Bun.file infers Content-Type from the variant
+        // extension, so the resolver passes the original type explicitly.
+        if (r.contentType) headers["content-type"] = r.contentType;
+        return new Response(Bun.file(assets[r.assetKey]), { headers });
       }
       return new Response("Not found", { status: 404 });
     },
@@ -338,6 +491,8 @@ export function startServer(deps: Deps = {}) {
       open(ws) { onOpen(ws, (ws as any).remoteAddress ?? ""); },
       close(ws) { conns.delete(ws); console.log("[pocketshell] disconnect"); },
       message(ws, raw) { onMessage(ws, raw as any); },
+      // Socket drained after backpressure: recover any dropped-output sessions.
+      drain(ws) { const conn = conns.get(ws); if (conn) maybeResync(conn); },
     },
   });
 
@@ -347,6 +502,7 @@ export function startServer(deps: Deps = {}) {
     stop() {
       clearInterval(pushTimer);
       clearInterval(sweepTimer);
+      batcher.clearAll();
       terminal.dispose();
       server.stop(true);
     },
@@ -356,6 +512,10 @@ export function startServer(deps: Deps = {}) {
       message: onMessage,
       broadcastOutputForTest: () => { for (const conn of conns.values()) sendSecure(conn, { type: "pong" }); },
       periodicPush,
+      emitOutput: onTermOutput,
+      emitExit: onTermExit,
+      flushOutput: (name: string) => batcher.flush(name),
+      drain: (ws: any) => { const conn = conns.get(ws); if (conn) maybeResync(conn); },
       config,
     },
   };
