@@ -8,7 +8,7 @@ import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, r
 import { TerminalService } from "./terminal";
 import { ReplayService } from "./replay";
 import { OutputBatcher } from "./output-batcher";
-import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp } from "./fs-service";
+import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp, fsWrite } from "./fs-service";
 import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { RPC_FIT_SAFE_BYTES, chunkRpcPayload } from "./rpc-fit";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
@@ -334,6 +334,7 @@ export function startServer(deps: Deps = {}) {
             case "fs.uploadCheck": result = fsUploadCheck(String(p.dir), (p.names ?? []) as string[]); break;
             case "fs.resolveName": result = fsResolveName(String(p.dir), String(p.name)); break;
             case "fs.uploadChunk": result = fsUploadChunk(config.tmpDir, String(p.uploadId), String(p.dataB64), { first: !!p.first, last: !!p.last, destPath: p.destPath ? String(p.destPath) : undefined }); break;
+            case "fs.write": result = fsWrite(config.tmpDir, String(p.writeId), String(p.dataB64), { first: !!p.first, last: !!p.last, path: p.path ? String(p.path) : undefined, expectMtime: p.expectMtime == null ? undefined : Number(p.expectMtime) }); break;
             case "fs.downloadChunk": result = fsDownloadChunk(String(p.path), Number(p.offset), Number(p.len)); break;
             case "fs.archive": result = fsArchive(config.tmpDir, String(p.path)); break;
             case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;

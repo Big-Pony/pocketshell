@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync as statS, readFileSync as rfSync, utimesSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp } from "./fs-service";
+import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp, fsWrite } from "./fs-service";
 import { runGit, isRepo } from "./git-service";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
@@ -351,5 +351,71 @@ test("fsRead returns file mtime (epoch ms), also on binary early-return", () => 
   const rb = fsRead(b);
   expect(rb.binary).toBe(true);
   expect(rb.mtime).toBe(1700000002000);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsWrite single chunk creates file and returns mtime", () => {
+  const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
+  const dest = join(d, "out.txt");
+  const r = fsWrite(tmpD, "w1", Buffer.from("hello").toString("base64"), { first: true, last: true, path: dest });
+  expect(rfSync(dest, "utf8")).toBe("hello");
+  expect((r as any).ok).toBe(true);
+  expect((r as any).mtime).toBe(Math.floor(statS(dest).mtimeMs));
+  expect(readdirSync(tmpD)).toEqual([]); // part cleaned up
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsWrite multi-chunk concatenates in order", () => {
+  const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
+  const dest = join(d, "out.txt");
+  fsWrite(tmpD, "w2", Buffer.from("你好").toString("base64"), { first: true });
+  fsWrite(tmpD, "w2", Buffer.from("世界").toString("base64"), {});
+  fsWrite(tmpD, "w2", Buffer.from("!").toString("base64"), { last: true, path: dest });
+  expect(rfSync(dest, "utf8")).toBe("你好世界!");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsWrite rejects on mtime mismatch, leaves target untouched, cleans part", () => {
+  const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
+  const dest = join(d, "out.txt");
+  writeFileSync(dest, "original");
+  const stale = Math.floor(statS(dest).mtimeMs) - 1000; // simulate outdated snapshot
+  expect(() => fsWrite(tmpD, "w3", Buffer.from("new").toString("base64"),
+    { first: true, last: true, path: dest, expectMtime: stale })).toThrow(/^conflict/);
+  expect(rfSync(dest, "utf8")).toBe("original");
+  expect(readdirSync(tmpD)).toEqual([]);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsWrite with matching expectMtime overwrites and returns new mtime", () => {
+  const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
+  const dest = join(d, "out.txt");
+  writeFileSync(dest, "original");
+  const cur = Math.floor(statS(dest).mtimeMs);
+  const r = fsWrite(tmpD, "w4", Buffer.from("updated").toString("base64"),
+    { first: true, last: true, path: dest, expectMtime: cur });
+  expect(rfSync(dest, "utf8")).toBe("updated");
+  expect((r as any).mtime).toBe(Math.floor(statS(dest).mtimeMs));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("fsWrite without expectMtime force-overwrites; with expectMtime but target deleted → conflict", () => {
+  const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
+  const dest = join(d, "out.txt");
+  writeFileSync(dest, "x");
+  fsWrite(tmpD, "w5", Buffer.from("forced").toString("base64"), { first: true, last: true, path: dest });
+  expect(rfSync(dest, "utf8")).toBe("forced");
+  const gone = join(d, "gone.txt");
+  expect(() => fsWrite(tmpD, "w6", Buffer.from("y").toString("base64"),
+    { first: true, last: true, path: gone, expectMtime: 123 })).toThrow(/^conflict/);
+  expect(existsSync(gone)).toBe(false);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("sweepTmp removes stale pswrite- parts", () => {
+  const d = tmp();
+  writeFileSync(join(d, "pswrite-old.part"), "x");
+  utimesSync(join(d, "pswrite-old.part"), new Date(0), new Date(0));
+  expect(sweepTmp(d, 1000, Date.now()).removed).toBe(1);
   rmSync(d, { recursive: true, force: true });
 });

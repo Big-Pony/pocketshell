@@ -167,6 +167,42 @@ export function fsUploadChunk(
   return { written };
 }
 
+// Editor save: chunked write with optional optimistic-lock on mtime. Chunks
+// accumulate in a tmp part file; the target is only touched on the last chunk,
+// after the expectMtime check — a mid-sequence failure never corrupts the file.
+export function fsWrite(
+  tmpDir: string, writeId: string, dataB64: string,
+  opts: { first?: boolean; last?: boolean; path?: string; expectMtime?: number } = {}
+): { written: number } | { ok: true; mtime: number } {
+  const safeId = writeId.replace(/[^a-z0-9-]/gi, "");
+  const part = join(resolve(tmpDir), `pswrite-${safeId}.part`);
+  const buf = Buffer.from(dataB64, "base64");
+  if (opts.first) writeFileSync(part, buf);
+  else appendFileSync(part, buf);
+  const written = statSync(part).size;
+  if (written > MAX_TRANSFER_BYTES) {
+    try { unlinkSync(part); } catch {}
+    throw new Error(`write exceeds ${MAX_TRANSFER_BYTES} bytes`);
+  }
+  if (!opts.last) return { written };
+  if (!opts.path) {
+    try { unlinkSync(part); } catch {}
+    throw new Error("last chunk requires path");
+  }
+  const dest = resolve(opts.path);
+  if (opts.expectMtime !== undefined) {
+    let cur: number | null = null;
+    try { cur = Math.floor(statSync(dest).mtimeMs); } catch { cur = null; } // deleted counts as changed
+    if (cur !== opts.expectMtime) {
+      try { unlinkSync(part); } catch {}
+      throw new Error("conflict: file changed on disk");
+    }
+  }
+  copyFileSync(part, dest); // local copy = same landing pattern as fsUploadChunk
+  unlinkSync(part);
+  return { ok: true, mtime: Math.floor(statSync(dest).mtimeMs) };
+}
+
 export function fsDownloadChunk(path: string, offset: number, len: number): { dataB64: string; eof: boolean; size: number } {
   const abs = resolve(path);
   const size = statSync(abs).size;
@@ -203,7 +239,7 @@ export function sweepTmp(tmpDir: string, maxAgeMs: number, now: number): { remov
   try { entries = readdirSync(resolve(tmpDir)); } catch { return { removed: 0 }; }
   let removed = 0;
   for (const name of entries) {
-    if (!name.startsWith("psupload-") && !name.startsWith("psarchive-")) continue;
+    if (!name.startsWith("psupload-") && !name.startsWith("psarchive-") && !name.startsWith("pswrite-")) continue;
     const p = join(resolve(tmpDir), name);
     try {
       const st = statSync(p);
