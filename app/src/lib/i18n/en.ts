@@ -309,6 +309,7 @@ export default {
     closeTitle: "Close “{title}”?",
     closeTermHint: "Only closes the tab; the session keeps running in the background and can be reopened from the task panel.",
     closeFileHint: "Closes this file preview tab.",
+    closeDirty: "This file has unsaved changes; closing will lose them.",
   },
   git: {
     notRepo: "The project root is not a Git repository",

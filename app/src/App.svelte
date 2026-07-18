@@ -55,7 +55,15 @@
   let sel = $state<SelState>(reset());
   let selCount = $state(0);
   let rootTick = $state(0);
+  let treeTick = $state(0);
+  let fileDirty = $state(new Set<string>());
+  let pendingEdit = $state<string | null>(null);
   let topEl: HTMLDivElement | null = null;
+  function setFileDirty(id: string, d: boolean) {
+    const next = new Set(fileDirty);
+    if (d) next.add(id); else next.delete(id);
+    fileDirty = next;
+  }
   let selecting = $derived(sel.mode !== "idle");
   let selMode = $derived(sel.mode);
 
@@ -280,6 +288,7 @@
     if (fullscreen) fullscreen = false;
   }
   function closeFile(id: string) {
+    setFileDirty(id, false);
     fileTabs = closeFileTab(fileTabs, id);
     tabOrder = removeOrder(tabOrder, id);
     if (activeTop === id) activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
@@ -549,7 +558,7 @@
   </div>
 
   <div class="tabs-wrap">
-    <TopTabs tabs={topTabsView} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onCloseTab={closeTopTab} />
+    <TopTabs tabs={topTabsView} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onCloseTab={closeTopTab} dirtyIds={fileDirty} />
   </div>
 
   {#if notice}<div class="notice">{notice}</div>{/if}
@@ -569,7 +578,12 @@
       />
     {/each}
     {#each fileTabs as t (t.id)}
-      <FilePreview {conn} path={t.path} mode={t.mode} active={activeTopId === t.id} />
+      <FilePreview {conn} path={t.path} mode={t.mode} active={activeTopId === t.id}
+        onToast={showToast}
+        onEditingChange={(e) => { if (activeTopId === t.id) fullscreen = e; }}
+        onDirtyChange={(d) => setFileDirty(t.id, d)}
+        autoEdit={pendingEdit === t.path && t.mode === "code"}
+        onAutoEdit={() => (pendingEdit = null)} />
     {/each}
     {#if topSessions.length === 0 && fileTabs.length === 0}
       <div class="hint">

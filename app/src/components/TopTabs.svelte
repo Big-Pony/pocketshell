@@ -7,11 +7,12 @@
     | { kind: "term"; id: string; title: string; state: SessionState; closed: boolean }
     | { kind: "file"; id: string; title: string };
 
-  let { tabs, activeId, onSelect, onNew, onCloseTab }: {
+  let { tabs, activeId, onSelect, onNew, onCloseTab, dirtyIds }: {
     tabs: TabView[]; activeId: string;
     onSelect: (id: string) => void;
     onNew: (name: string) => void;
     onCloseTab: (id: string) => void;
+    dirtyIds?: Set<string>;
   } = $props();
 
   // New-session modal
@@ -128,6 +129,9 @@
       <div class="dlg-title">{$t('tabs.closeTitle', { values: { title: closing.title } })}</div>
       <div class="dlg-hint">
         {closing.kind === "term" ? $t('tabs.closeTermHint') : $t('tabs.closeFileHint')}
+        {#if closing.kind === "file" && dirtyIds?.has(closing.id)}
+          <div class="dirty-warn">{$t('tabs.closeDirty')}</div>
+        {/if}
       </div>
       <div class="dlg-btns">
         <button onclick={() => (closing = null)}>{$t('common.cancel')}</button>
@@ -175,5 +179,6 @@
   .dlg-input:focus { border-color: var(--accent); }
   .dlg-btns { display: flex; gap: 8px; }
   .dlg-btns button { flex: 1; padding: 9px 0; border-radius: var(--radius-md); border: 1px solid var(--line); font-size: 0.75rem; background: var(--key); color: var(--text); }
+  .dirty-warn { color: var(--amber); font-size: 0.7rem; margin-top: 6px; }
   .dlg-btns button.primary { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; font-weight: 600; }
 </style>

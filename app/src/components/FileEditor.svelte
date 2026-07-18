@@ -23,9 +23,11 @@
   let saving = $state(false);
   let conflictOpen = $state(false);
   let unsavedOpen = $state(false);
-  let curMtime = mtime;
+  // curMtime is intentionally a mutable snapshot of the prop; the file's open-time mtime never changes.
+  // svelte-ignore state_referenced_locally
+  let curMtime = $state(mtime);
   let closeAfterSave = false;
-  const fileName = path.split("/").pop() ?? path;
+  const fileName = $derived(path.split("/").pop() ?? path);
 
   function setDirty(d: boolean) { if (dirty !== d) { dirty = d; onDirty(d); } }
 
@@ -172,7 +174,7 @@
 
   {#if conflictOpen}
     <div class="ed-overlay" role="presentation" onclick={() => (conflictOpen = false)}>
-      <div class="ed-dlg" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+      <div class="ed-dlg" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === "Escape") conflictOpen = false; }}>
         <div class="dlg-title">{$t('editor.conflictTitle')}</div>
         <div class="dlg-body">{$t('editor.conflictBody')}</div>
         <div class="dlg-btns">
@@ -186,7 +188,7 @@
 
   {#if unsavedOpen}
     <div class="ed-overlay" role="presentation" onclick={() => (unsavedOpen = false)}>
-      <div class="ed-dlg" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+      <div class="ed-dlg" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === "Escape") unsavedOpen = false; }}>
         <div class="dlg-title">{$t('editor.unsavedTitle')}</div>
         <div class="dlg-body">{$t('editor.unsavedBody')}</div>
         <div class="dlg-btns">

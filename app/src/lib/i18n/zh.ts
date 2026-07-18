@@ -309,6 +309,7 @@ export default {
     closeTitle: "关闭「{title}」？",
     closeTermHint: "仅关闭标签，会话仍在后台运行，可从任务面板重新打开。",
     closeFileHint: "关闭该文件预览标签。",
+    closeDirty: "该文件有未保存的修改，关闭将丢失。",
   },
   git: {
     notRepo: "当前项目根不是 Git 仓库",
