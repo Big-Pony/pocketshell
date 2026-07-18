@@ -350,7 +350,10 @@ export function startServer(deps: Deps = {}) {
           }
           sendRpcResult(conn, id, result);
         } catch (e) {
-          sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } });
+          // Preserve a structured conflict tag so the client can key off the
+          // code instead of pattern-matching the message text.
+          const code = e instanceof Error && (e as Error & { code?: string }).code === "conflict" ? "conflict" : "rpc_error";
+          sendSecure(conn, { type: "response", id, ok: false, error: { code, message: String(e) } });
         }
         break;
       }

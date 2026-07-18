@@ -168,8 +168,13 @@ export function fsUploadChunk(
 }
 
 // Editor save: chunked write with optional optimistic-lock on mtime. Chunks
-// accumulate in a tmp part file; the target is only touched on the last chunk,
-// after the expectMtime check — a mid-sequence failure never corrupts the file.
+// accumulate in a tmp part file; the final chunk lands atomically via a
+// same-dir temp + rename, so a crash mid-write leaves the original file intact.
+// A conflict (expectMtime mismatch) throws an Error tagged code="conflict" so
+// the client distinguishes it from a generic failure without matching message
+// text. Known limit: mtime granularity (ms, or seconds on some filesystems)
+// means an external write within the same tick as the open snapshot can slip
+// through undetected — acceptable for the human-edit-vs-agent-write case.
 export function fsWrite(
   tmpDir: string, writeId: string, dataB64: string,
   opts: { first?: boolean; last?: boolean; path?: string; expectMtime?: number } = {}
@@ -195,10 +200,23 @@ export function fsWrite(
     try { cur = Math.floor(statSync(dest).mtimeMs); } catch { cur = null; } // deleted counts as changed
     if (cur !== opts.expectMtime) {
       try { unlinkSync(part); } catch {}
-      throw new Error("conflict: file changed on disk");
+      const err = new Error("conflict: file changed on disk") as Error & { code?: string };
+      err.code = "conflict"; // structured tag — the client keys off this, not the message
+      throw err;
     }
   }
-  copyFileSync(part, dest); // local copy = same landing pattern as fsUploadChunk
+  // Atomic landing: copy into a same-dir temp, then rename over dest. A failed
+  // copy touches only the temp; a rename within one filesystem is atomic, so a
+  // crash never leaves dest half-written.
+  const staging = join(dirname(dest), `.pswrite-${safeId}.tmp`);
+  try {
+    copyFileSync(part, staging);
+    renameSync(staging, dest);
+  } catch (e) {
+    try { unlinkSync(staging); } catch {}
+    try { unlinkSync(part); } catch {}
+    throw e;
+  }
   unlinkSync(part);
   return { ok: true, mtime: Math.floor(statSync(dest).mtimeMs) };
 }

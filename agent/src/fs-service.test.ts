@@ -387,6 +387,23 @@ test("fsWrite rejects on mtime mismatch, leaves target untouched, cleans part", 
   rmSync(d, { recursive: true, force: true });
 });
 
+test("fsWrite conflict error carries code 'conflict'; success leaves no staging temp", () => {
+  const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
+  const dest = join(d, "out.txt");
+  writeFileSync(dest, "original");
+  const stale = Math.floor(statS(dest).mtimeMs) - 1000;
+  let caught: any = null;
+  try {
+    fsWrite(tmpD, "wc", Buffer.from("x").toString("base64"), { first: true, last: true, path: dest, expectMtime: stale });
+  } catch (e) { caught = e; }
+  expect(caught?.code).toBe("conflict");
+  // A successful atomic write must not leave a .pswrite-*.tmp staging file behind.
+  fsWrite(tmpD, "wc2", Buffer.from("done").toString("base64"), { first: true, last: true, path: dest });
+  expect(rfSync(dest, "utf8")).toBe("done");
+  expect(readdirSync(d).filter((n) => n.startsWith(".pswrite"))).toEqual([]);
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("fsWrite with matching expectMtime overwrites and returns new mtime", () => {
   const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
   const dest = join(d, "out.txt");
