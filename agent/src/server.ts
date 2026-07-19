@@ -25,6 +25,8 @@ import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
 import { AGENT_VERSION } from "./version";
+import { checkLatest } from "./update-check";
+import { readCache, writeCache, isFresh, CHECK_TTL_MS, type CachedCheck } from "./update-cache";
 
 interface Deps {
   port?: number;
@@ -365,6 +367,34 @@ export function startServer(deps: Deps = {}) {
               result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
               break;
             }
+            case "update.check": {
+              // The switch(method) block above this line is synchronous end to
+              // end, but checkLatest() needs to await a network call. Rather
+              // than promote handleClient/onMessage to async (touching every
+              // other case's control flow), this case sends its own response
+              // from an async IIFE and returns immediately — mirroring the
+              // `default:` branch below, which already returns early to bypass
+              // the post-switch sendRpcResult(...) call.
+              const force = !!p.force;
+              void (async () => {
+                try {
+                  const cached = readCache(config.keyDir);
+                  let out: CachedCheck;
+                  if (!force && isFresh(cached, Date.now(), CHECK_TTL_MS)) {
+                    out = cached as CachedCheck;
+                  } else {
+                    const r = await checkLatest({ repo: config.update?.repo ?? null, current: AGENT_VERSION });
+                    out = { ...r, checkedAt: Date.now() };
+                    writeCache(config.keyDir, out);
+                  }
+                  sendRpcResult(conn, id, out);
+                } catch (e) {
+                  const code = e instanceof Error && (e as Error & { code?: string }).code === "conflict" ? "conflict" : "rpc_error";
+                  sendSecure(conn, { type: "response", id, ok: false, error: { code, message: String(e) } });
+                }
+              })();
+              return;
+            }
             default:
               sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
               return;
@@ -531,6 +561,25 @@ export function startServer(deps: Deps = {}) {
       drain(ws) { const conn = conns.get(ws); if (conn) maybeResync(conn); },
     },
   });
+
+  // Startup update check: warms the cache so the first client `update.check`
+  // RPC after boot can serve a fresh result without waiting on GitHub.
+  // Fire-and-forget, failure-silent (checkLatest already swallows its own
+  // network/parse errors into a CheckResult with a `reason`, but this outer
+  // guard also covers writeCache/config surprises).
+  // config.update is always populated by loadConfig(), but several server.test.ts
+  // suites construct a minimal `cfg: any` without it — optional-chain the guard
+  // so those keep exercising unrelated behavior without also opting into a
+  // startup network call.
+  if (config.update?.repo) {
+    const repo = config.update.repo;
+    void (async () => {
+      try {
+        const r = await checkLatest({ repo, current: AGENT_VERSION });
+        writeCache(config.keyDir, { ...r, checkedAt: Date.now() });
+      } catch { /* best-effort warmup; a later update.check RPC will retry */ }
+    })();
+  }
 
   return {
     port: server.port,
