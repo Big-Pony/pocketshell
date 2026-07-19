@@ -594,6 +594,7 @@
     {/each}
     {#each fileTabs as t (t.id)}
       <FilePreview {conn} path={t.path} mode={t.mode} active={activeTopId === t.id}
+        base={(rootTick, loadProjectRoot())}
         onToast={showToast}
         onEditingChange={(e) => {
           editingId = e ? t.id : (editingId === t.id ? null : editingId);

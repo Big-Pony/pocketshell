@@ -3,9 +3,11 @@
   import { tr } from "../lib/i18n";
   import { Connection } from "../lib/connection";
   import { splitLines, highlightTo } from "../lib/highlight";
+  import { previewKind, previewOrigin, previewUrl, relFromBase } from "../lib/preview";
 
-  let { conn, path, mode, active, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit }: {
+  let { conn, path, mode, active, base, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit }: {
     conn: Connection; path: string; mode: "code" | "diff"; active: boolean;
+    base?: string;
     onToast: (m: string) => void;
     onEditingChange?: (editing: boolean) => void;
     onDirtyChange?: (dirty: boolean) => void;
@@ -25,6 +27,32 @@
   let editing = $state(false);
   let FileEditorComp = $state<any>(null);
   let loaded = $state("");
+  // render/source view toggle for md/html/image; plain code stays "source".
+  let view = $state<"render" | "source">("source");
+  let imgSrc = $state("");
+
+  const kind = $derived(previewKind(path));
+  const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
+  // scope = the token's base subtree. Use the project-root bookmark ONLY when it
+  // is an ancestor of this file (else relFromBase escapes base → the /preview
+  // route's traversal guard 403s). Otherwise fall back to the file's own dir.
+  const scope = $derived(
+    base && (path === base || path.startsWith((base.endsWith("/") ? base : base + "/")))
+      ? base
+      : dirOf(path),
+  );
+
+  function origin(): string {
+    return previewOrigin(import.meta.env.DEV, window.location);
+  }
+  async function mintUrl(relpath: string): Promise<string> {
+    const { token } = (await conn.rpc("preview.mint", { base: scope })) as { token: string };
+    return previewUrl(origin(), token, relpath);
+  }
+  async function loadImage() {
+    try { imgSrc = await mintUrl(relFromBase(scope, path)); }
+    catch { notice = tr("preview.imageFailed"); }
+  }
 
   async function load() {
     notice = "";
@@ -41,6 +69,8 @@
       }
       return;
     }
+    if (kind === "image") { view = "render"; await loadImage(); return; }
+    view = "source";
     try {
       const r = (await conn.rpc("fs.read", { path })) as { content: string; lang: string; mtime: number; truncated?: boolean; binary?: boolean };
       if (r.binary) { notice = tr("preview.binary"); lines = []; html = ""; canEdit = false; return; }
@@ -78,6 +108,13 @@
     onDirtyChange?.(false);
     loaded = ""; // force re-read on next $effect tick — the file may have changed
   }
+  // Refresh: re-mint token + reload content. Covers token expiry (reconnect /
+  // session change) and external edits (terminal / Claude touched the file).
+  async function refresh() {
+    if (kind === "image") { await loadImage(); return; }
+    loaded = ""; // force re-read/re-render on next $effect tick
+  }
+
   $effect(() => { if (autoEdit && active && canEdit && !editing) { void startEdit(); onAutoEdit?.(); } });
   $effect(() => { if (active && loaded !== path + mode) { loaded = path + mode; void load(); } });
 </script>
@@ -87,32 +124,65 @@
     <FileEditorComp {conn} {path} lang={fileLang} initialContent={raw} mtime={fileMtime}
       onClose={exitEdit} onDirty={(d: boolean) => onDirtyChange?.(d)} {onToast} />
   {:else}
-    {#if canEdit && mode === "code"}
-      <button class="edit-btn" onclick={startEdit}>{$t('editor.edit')}</button>
-    {/if}
-    {#if notice}<div class="pv-notice">{notice}</div>{/if}
-    {#if mode === "diff"}
-      <div class="diff">
-        {#each hunks as h}
-          <div class="hh mono">{h.header}</div>
-          {#each h.lines as l}<div class="dl {l.kind}"><span class="sign">{l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}</span>{l.text}</div>{/each}
-        {/each}
+    {#if mode === "code"}
+      <div class="pv-bar">
+        {#if kind === "markdown" || kind === "html"}
+          <div class="seg">
+            <button class:on={view === "render"} onclick={() => (view = "render")}>{$t('preview.viewRender')}</button>
+            <button class:on={view === "source"} onclick={() => (view = "source")}>{$t('preview.viewSource')}</button>
+          </div>
+        {:else if kind === "image"}
+          <span class="pv-label">{$t('preview.imageLabel')}</span>
+        {/if}
+        <span class="sp"></span>
+        {#if kind !== "image" && canEdit}
+          <button class="pv-btn" onclick={startEdit}>{$t('editor.edit')}</button>
+        {/if}
+        {#if kind !== "code"}
+          <button class="pv-btn" aria-label={$t('preview.refresh')} onclick={refresh}>⟳</button>
+        {/if}
       </div>
-    {:else}
-      <div class="codewrap">
-        {#if !plain}<div class="gutter" aria-hidden="true">{#each lines as _, i}<div class="ln">{i + 1}</div>{/each}</div>{/if}
-        <pre class="code"><code>{@html html}</code></pre>
-      </div>
     {/if}
+
+    <div class="pv-content" data-view={view}>
+      {#if kind === "image"}
+        <div class="img-wrap">{#if imgSrc}<img src={imgSrc} alt={path} />{/if}</div>
+      {:else}
+        {#if notice}<div class="pv-notice">{notice}</div>{/if}
+        {#if mode === "diff"}
+          <div class="diff">
+            {#each hunks as h}
+              <div class="hh mono">{h.header}</div>
+              {#each h.lines as l}<div class="dl {l.kind}"><span class="sign">{l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}</span>{l.text}</div>{/each}
+            {/each}
+          </div>
+        {:else}
+          <div class="codewrap">
+            {#if !plain}<div class="gutter" aria-hidden="true">{#each lines as _, i}<div class="ln">{i + 1}</div>{/each}</div>{/if}
+            <pre class="code"><code>{@html html}</code></pre>
+          </div>
+        {/if}
+      {/if}
+    </div>
   {/if}
 </div>
 
 <style>
   /* 代码区跟随主题（--code-*）；终端区仍固定深色 --term-* */
-  .preview { width: 100%; height: 100%; overflow: auto; background: var(--code-bg); color: var(--code-fg); position: relative; }
+  .preview { width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--code-bg); color: var(--code-fg); }
   .hidden { display: none; }
+  /* 常驻头部栏：与 FileEditor 的 .ed-bar 同规格（同高、同底色/边框）防切换抖动 */
+  .pv-bar { display: flex; align-items: center; gap: 4px; height: 40px; box-sizing: border-box; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  .pv-bar .sp { flex: 1; }
+  .pv-content { flex: 1; min-height: 0; overflow: auto; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-md, 8px); overflow: hidden; }
+  .seg button { height: 30px; padding: 0 12px; background: transparent; color: var(--dim); border: none; font-size: 0.72rem; }
+  .seg button.on { background: var(--primary-bg); color: var(--primary-text); }
+  .pv-btn { min-width: 40px; height: 32px; border: 1px solid var(--line); border-radius: var(--radius-md, 8px); background: transparent; color: var(--text); font-size: 0.78rem; }
+  .pv-label { font-size: 0.72rem; color: var(--dim); }
+  .img-wrap { display: flex; justify-content: center; padding: 12px; }
+  .img-wrap img { max-width: 100%; height: auto; }
   .pv-notice { font-size: 0.7rem; color: var(--amber); padding: 6px 10px; }
-  .edit-btn { position: sticky; top: 6px; float: right; margin-right: 8px; z-index: 5; height: 30px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius-md, 8px); background: var(--panel); color: var(--text); font-size: 0.74rem; }
   .codewrap { display: flex; align-items: flex-start; padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
   .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--code-gutter); user-select: none; }
   .gutter .ln { min-width: 2.2em; }
