@@ -43,7 +43,7 @@ export type AppCommand =
   | { type: "lineDown" }
   | { type: "selCancel" }
   | { type: "selCopy" }
-  | { type: "copyAfter" }
+  | { type: "copyMode" }
   | { type: "selectAllCopy" }
   | { type: "paste" }
   | { type: "togglePageFullscreen" }

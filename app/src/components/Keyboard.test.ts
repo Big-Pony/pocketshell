@@ -22,14 +22,14 @@ test("ops sub-tab: when selecting, toggle shows 取消 and dispatches selCancel"
   expect(onCommand).toHaveBeenCalledWith({ type: "selCancel" });
 });
 
-test("ops sub-tab: paste / copyAfter / selectAllCopy buttons dispatch commands", async () => {
+test("ops sub-tab: paste / selectText / selectAllCopy buttons dispatch commands", async () => {
   const { onCommand } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
   await fireEvent.click(screen.getByText("粘贴"));
-  await fireEvent.click(screen.getByText("复制后续"));
+  await fireEvent.click(screen.getByText("选择文本"));
   await fireEvent.click(screen.getByText("全选复制"));
   expect(onCommand).toHaveBeenCalledWith({ type: "paste" });
-  expect(onCommand).toHaveBeenCalledWith({ type: "copyAfter" });
+  expect(onCommand).toHaveBeenCalledWith({ type: "copyMode" });
   expect(onCommand).toHaveBeenCalledWith({ type: "selectAllCopy" });
 });
 
