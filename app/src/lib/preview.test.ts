@@ -14,13 +14,15 @@ describe("previewKind", () => {
 });
 
 describe("previewOrigin", () => {
-  it("dev points at agent :8722", () => {
-    expect(previewOrigin(true, { protocol: "http:", host: "localhost:5173", hostname: "localhost" }))
-      .toBe("http://localhost:8722");
+  it("derives http origin from the ws agent url (any port)", () => {
+    expect(previewOrigin("ws://localhost:8722")).toBe("http://localhost:8722");
+    expect(previewOrigin("ws://127.0.0.1:8799")).toBe("http://127.0.0.1:8799");
   });
-  it("prod uses same origin", () => {
-    expect(previewOrigin(false, { protocol: "https:", host: "mac.cf-blog.com", hostname: "mac.cf-blog.com" }))
-      .toBe("https://mac.cf-blog.com");
+  it("maps wss → https (prod same origin)", () => {
+    expect(previewOrigin("wss://mac.cf-blog.com")).toBe("https://mac.cf-blog.com");
+  });
+  it("falls back to the raw string on unparseable input", () => {
+    expect(previewOrigin("not-a-url")).toBe("not-a-url");
   });
 });
 

@@ -4,6 +4,7 @@ import FilePreview from "./FilePreview.svelte";
 
 function connStub(overrides: Record<string, any> = {}) {
   return {
+    agentUrl: "ws://localhost:8722",
     rpc: vi.fn(async (m: string) => {
       if (m === "preview.mint") return { token: "TOK" };
       return {};

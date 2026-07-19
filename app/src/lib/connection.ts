@@ -103,6 +103,8 @@ export class Connection {
   private onPaired?: () => void;
 
   get status(): ConnStatus { return this._status; }
+  /** The agent WebSocket URL this connection targets (for deriving the preview HTTP origin). */
+  get agentUrl(): string { return this.url; }
 
   onStatus(cb: (s: ConnStatus) => void): () => void {
     this.statusCbs.push(cb);

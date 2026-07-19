@@ -51,7 +51,7 @@
   );
 
   function origin(): string {
-    return previewOrigin(import.meta.env.DEV, window.location);
+    return previewOrigin(conn.agentUrl);
   }
   async function mintUrl(relpath: string): Promise<string> {
     const { token } = (await conn.rpc("preview.mint", { base: scope })) as { token: string };

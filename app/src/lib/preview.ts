@@ -18,12 +18,17 @@ export function previewKind(path: string): PreviewKind {
   return "code";
 }
 
-export function previewOrigin(
-  isDev: boolean,
-  location: { protocol: string; host: string; hostname: string },
-): string {
-  if (isDev) return `http://${location.hostname}:8722`;
-  return `${location.protocol}//${location.host}`;
+// Derive the preview HTTP origin from the agent's WebSocket URL, so the
+// /preview route always hits the SAME agent that minted the token — whatever
+// host/port it runs on (dev :8722, an alt port, or prod same-origin wss).
+export function previewOrigin(agentWsUrl: string): string {
+  try {
+    const u = new URL(agentWsUrl);
+    const scheme = u.protocol === "wss:" ? "https:" : "http:";
+    return `${scheme}//${u.host}`;
+  } catch {
+    return agentWsUrl;
+  }
 }
 
 export function previewUrl(origin: string, token: string, relpath: string): string {

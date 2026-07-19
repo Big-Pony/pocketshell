@@ -21,6 +21,16 @@ const LOADERS: Record<string, () => Promise<{ default: any }>> = {
   ini: () => import("highlight.js/lib/languages/ini"),
 };
 
+// Common short aliases (markdown code fences, editors) → LOADERS keys. Full
+// names pass through unchanged, so existing callers are unaffected.
+const LANG_ALIAS: Record<string, string> = {
+  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript", node: "javascript",
+  py: "python", sh: "bash", shell: "bash", zsh: "bash",
+  yml: "yaml", rs: "rust", md: "markdown", golang: "go",
+  html: "xml", htm: "xml", svg: "xml", toml: "ini",
+};
+
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -59,15 +69,16 @@ export async function highlightTo(lang: string, content: string): Promise<Highli
   if (shouldDeferHighlight(utf8Bytes(content), splitLines(content).length)) {
     return { html: escapeHtml(content), plain: true };
   }
-  const loader = LOADERS[lang];
+  const key = LANG_ALIAS[lang] ?? lang;
+  const loader = LOADERS[key];
   if (!loader) return { html: escapeHtml(content), plain: false };
   try {
-    if (!registered.has(lang)) {
+    if (!registered.has(key)) {
       const mod = await loader();
-      hljs.registerLanguage(lang, mod.default);
-      registered.add(lang);
+      hljs.registerLanguage(key, mod.default);
+      registered.add(key);
     }
-    return { html: hljs.highlight(content, { language: lang }).value, plain: false };
+    return { html: hljs.highlight(content, { language: key }).value, plain: false };
   } catch {
     return { html: escapeHtml(content), plain: false };
   }
