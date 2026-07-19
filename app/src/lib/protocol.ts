@@ -41,7 +41,7 @@ export type ClientMsg =
   | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "removeSnippet"; id: string }
   | { type: "revokeDevice"; pubKey: string }
-  // rpc methods mirror agent/src/protocol.ts: fs.* / git.* / term.* / preview.mint
+  // rpc methods mirror agent/src/protocol.ts: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply
   | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =
@@ -56,7 +56,11 @@ export type ServerMsg =
   | { type: "snippets"; items: Snippet[] }
   | { type: "response"; id: string; ok: true; result: unknown }
   | { type: "response"; id: string; ok: false; error: { code: string; message: string } }
-  | { type: "rpcChunk"; id: string; index: number; total: number; data: string };
+  | { type: "rpcChunk"; id: string; index: number; total: number; data: string }
+  // OTA progress broadcast — one per phase transition during update.apply.
+  // Purely additive; old clients ignore the unknown type. `pct` present only
+  // during downloading when content-length is known.
+  | { type: "update"; phase: "downloading" | "verifying" | "signing" | "applying" | "restarting" | "error"; pct?: number; message?: string; version?: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);

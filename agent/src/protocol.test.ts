@@ -61,3 +61,9 @@ test("rpcChunk round-trips through decodeServer", () => {
   const msg = decodeServer(raw);
   expect(msg).toEqual({ type: "rpcChunk", id: "7", index: 1, total: 3, data: "QUJD" });
 });
+
+test("update broadcast round-trips", () => {
+  const msg = { type: "update", phase: "downloading", pct: 42, version: "0.4.0" } as const;
+  const back = decodeServer(encode(msg));
+  expect(back).toEqual(msg);
+});

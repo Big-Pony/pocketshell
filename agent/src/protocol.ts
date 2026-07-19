@@ -46,7 +46,7 @@ export type ClientMsg =
   | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "removeSnippet"; id: string }
   | { type: "revokeDevice"; pubKey: string }
-  // rpc methods: fs.* / git.* / term.* / terminal.pwd / preview.mint
+  // rpc methods: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply
   | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =
@@ -67,7 +67,11 @@ export type ServerMsg =
   // response from the concatenated bytes. Purely additive — an old client would
   // reject the unknown type, but app and agent ship as one versioned bundle
   // (the agent serves the app), so there is no version-skew surface.
-  | { type: "rpcChunk"; id: string; index: number; total: number; data: string };
+  | { type: "rpcChunk"; id: string; index: number; total: number; data: string }
+  // OTA progress broadcast — one per phase transition during update.apply.
+  // Purely additive; old clients ignore the unknown type. `pct` present only
+  // during downloading when content-length is known.
+  | { type: "update"; phase: "downloading" | "verifying" | "signing" | "applying" | "restarting" | "error"; pct?: number; message?: string; version?: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
   return JSON.stringify(msg);
