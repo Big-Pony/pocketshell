@@ -4,6 +4,7 @@
   import { Connection } from "../lib/connection";
   import { splitLines, highlightTo } from "../lib/highlight";
   import { previewKind, previewOrigin, previewUrl, relFromBase } from "../lib/preview";
+  import HtmlView from "./HtmlView.svelte";
 
   let { conn, path, mode, active, base, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit }: {
     conn: Connection; path: string; mode: "code" | "diff"; active: boolean;
@@ -30,6 +31,7 @@
   // render/source view toggle for md/html/image; plain code stays "source".
   let view = $state<"render" | "source">("source");
   let imgSrc = $state("");
+  let htmlSrc = $state("");
   let MarkdownComp = $state<any>(null);
 
   const kind = $derived(previewKind(path));
@@ -87,7 +89,7 @@
       return;
     }
     if (kind === "image") { view = "render"; await loadImage(); return; }
-    view = kind === "markdown" ? "render" : "source";
+    view = kind === "markdown" || kind === "html" ? "render" : "source";
     try {
       const r = (await conn.rpc("fs.read", { path })) as { content: string; lang: string; mtime: number; truncated?: boolean; binary?: boolean };
       if (r.binary) { notice = tr("preview.binary"); lines = []; html = ""; canEdit = false; return; }
@@ -108,6 +110,11 @@
       if (kind === "markdown") {
         try { MarkdownComp = (await import("./MarkdownView.svelte")).default; } // lazy chunk
         catch { onToast(tr("preview.mdFailed")); view = "source"; }
+      }
+      if (kind === "html") {
+        // cache-bust so ⟳ / re-mint always reloads the iframe with fresh bytes.
+        try { htmlSrc = (await mintUrl(relFromBase(scope, path))) + `?_=${Date.now()}`; }
+        catch { onToast(tr("preview.htmlFailed")); view = "source"; }
       }
     } catch (e: any) {
       notice = e?.message ?? tr("preview.readFailed");
@@ -172,6 +179,8 @@
         <MarkdownComp source={raw} mdFileDir={dirOf(path)}
           buildImageUrl={mintUrlForMdImage}
           onFail={() => { view = "source"; onToast(tr("preview.mdFailed")); }} />
+      {:else if kind === "html" && view === "render"}
+        <HtmlView src={htmlSrc} />
       {:else}
         {#if notice}<div class="pv-notice">{notice}</div>{/if}
         {#if mode === "diff"}
