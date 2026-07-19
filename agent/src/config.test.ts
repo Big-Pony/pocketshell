@@ -169,3 +169,29 @@ test("adminEnabled is false when POCKETSHELL_ADMIN=0", () => {
   expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_ADMIN: "0" }).adminEnabled).toBe(false);
   rmSync(keyDir, { recursive: true, force: true });
 });
+
+function envWith(over: Record<string, string | undefined>) {
+  return { POCKETSHELL_KEY_DIR: mkdtempSync(join(tmpdir(), "ps-")), ...over };
+}
+
+test("update defaults: enabled + Big-Pony repo", () => {
+  const c = loadConfig(envWith({}));
+  expect(c.update.enabled).toBe(true);
+  expect(c.update.repo).toBe("Big-Pony/pocketshell");
+});
+
+test("POCKETSHELL_UPDATE=0 disables OTA", () => {
+  const c = loadConfig(envWith({ POCKETSHELL_UPDATE: "0" }));
+  expect(c.update.enabled).toBe(false);
+  expect(c.update.repo).toBeNull();
+});
+
+test("POCKETSHELL_UPDATE_REPO=off disables OTA", () => {
+  const c = loadConfig(envWith({ POCKETSHELL_UPDATE_REPO: "off" }));
+  expect(c.update.enabled).toBe(false);
+});
+
+test("custom repo honored", () => {
+  const c = loadConfig(envWith({ POCKETSHELL_UPDATE_REPO: "me/fork" }));
+  expect(c.update.repo).toBe("me/fork");
+});

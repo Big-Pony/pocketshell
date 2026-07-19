@@ -28,6 +28,7 @@ export interface AgentConfig {
   snippets: SnippetStore;
   tmpDir: string;
   adminEnabled: boolean;
+  update: { enabled: boolean; repo: string | null };
 }
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
@@ -151,6 +152,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (tls.key) toWrite.tlsKey = tls.key;
   persistAgentJson(keyDir, toWrite);
 
+  const updateRepoRaw = env.POCKETSHELL_UPDATE_REPO ?? "Big-Pony/pocketshell";
+  const updateEnabled = env.POCKETSHELL_UPDATE !== "0" && updateRepoRaw !== "off";
+  const update = { enabled: updateEnabled, repo: updateEnabled ? updateRepoRaw : null };
+
   return {
     listen: { host, port },
     advertise,
@@ -168,5 +173,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     snippets,
     tmpDir,
     adminEnabled,
+    update,
   };
 }
