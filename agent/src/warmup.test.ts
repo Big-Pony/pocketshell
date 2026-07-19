@@ -83,3 +83,13 @@ test("buildFdaGuidance is honest: no promise of a prompt, points at System Setti
   expect(text).toContain("Privacy & Security");
   expect(text).toContain("Cmd+Shift+G");
 });
+
+test("buildFdaGuidance reads as an optional hint, not an alarm", () => {
+  const text = buildFdaGuidance().join("\n").toLowerCase();
+  // Framed as opt-in so users who never touch protected paths aren't alarmed.
+  expect(text).toContain("optional");
+  expect(text).toContain("only if you");
+  // No alarm-style "NOT granted / will fail" wording.
+  expect(text).not.toContain("not granted");
+  expect(text).not.toContain("will fail");
+});

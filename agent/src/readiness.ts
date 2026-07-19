@@ -35,13 +35,15 @@ export function buildReadiness(i: ReadinessInput): string[] {
   return lines;
 }
 
-// Manual Full Disk Access setup steps, printed when the warmup probe finds
-// FDA missing. macOS offers no programmatic FDA prompt, so honest guidance is
-// the only option — never pretend a prompt will appear.
+// Optional Full Disk Access hint, printed when the warmup probe finds FDA off.
+// FDA is only needed to browse TCC-protected locations (Documents, Desktop,
+// external volumes); most users never do, so this reads as an opt-in hint, not
+// an alarm. macOS offers no programmatic FDA prompt, so honest guidance is the
+// only option — never pretend a prompt will appear.
 export function buildFdaGuidance(binPath = "~/.local/bin/pocketshell-agent"): string[] {
   return [
-    "[pocketshell] Full Disk Access is NOT granted — protected volumes/folders will fail to read.",
-    "[pocketshell] one-time manual setup: System Settings → Privacy & Security → Full Disk Access → + →",
+    "[pocketshell] Full Disk Access is off (optional) — grant it only if you need to browse protected locations like Documents, Desktop, or external volumes.",
+    "[pocketshell] to enable: System Settings → Privacy & Security → Full Disk Access → + →",
     `[pocketshell]   press Cmd+Shift+G, enter ${binPath}, enable it, then restart the agent.`,
   ];
 }
