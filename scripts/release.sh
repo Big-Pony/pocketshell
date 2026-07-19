@@ -68,9 +68,13 @@ fi
 
 # --- build all target binaries ----------------------------------------------
 # build:bin: vite build -> gen:embedded -> compile each target into agent/dist
-# -> sign darwin (if the identity exists) -> restore the committed manifest stub.
-echo "[release] building binaries (bun run build:bin)…"
-( cd "$AGENT" && bun run build:bin )
+# -> restore the committed manifest stub. POCKETSHELL_BUILD_SIGN=0 keeps the
+# darwin binaries ad-hoc: the self-signed cert lives only in the release
+# machine's keychain, so signing public artifacts with it buys end users
+# nothing (their macOS doesn't trust it) and OTA re-signs on their machine —
+# while a background codesign here would block on the keychain auth prompt.
+echo "[release] building binaries (bun run build:bin, ad-hoc darwin)…"
+( cd "$AGENT" && POCKETSHELL_BUILD_SIGN=0 bun run build:bin )
 
 # --- package + checksums -----------------------------------------------------
 rm -f "$DIST"/*.tar.gz "$DIST/SHA256SUMS.txt"

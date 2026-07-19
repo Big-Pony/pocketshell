@@ -29,8 +29,18 @@ async function findSigningIdentity(): Promise<boolean> {
 await $`cd ${APP} && bun run build`;
 await $`cd ${AGENT} && bun run gen:embedded`;
 
-const canSign = await findSigningIdentity();
-if (!canSign) {
+// POCKETSHELL_BUILD_SIGN=0 forces ad-hoc darwin binaries even when the identity
+// exists. This is correct for PUBLIC RELEASE builds (scripts/release.sh sets it):
+// the self-signed cert lives only in this machine's keychain, so signing with it
+// gives end users nothing (their macOS doesn't trust it) and OTA re-signs on
+// their own machine anyway — while a background `codesign` here would block on
+// the keychain private-key auth prompt. Local/prod deploys (update-local.sh)
+// sign independently and don't go through this path.
+const signOptOut = process.env.POCKETSHELL_BUILD_SIGN === "0";
+const canSign = !signOptOut && (await findSigningIdentity());
+if (signOptOut) {
+  console.log(`[build:bin] POCKETSHELL_BUILD_SIGN=0 — darwin binaries stay ad-hoc (public release: end users don't have this cert; OTA re-signs on their machine).`);
+} else if (!canSign) {
   console.log(`[build:bin] WARNING: "${SIGN_IDENTITY}" not found (or not macOS); darwin binaries stay ad-hoc signed (TCC grants won't persist).`);
 }
 
