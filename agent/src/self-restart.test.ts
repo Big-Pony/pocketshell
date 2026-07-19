@@ -3,7 +3,7 @@ import { isSupervised, restartSelf } from "./self-restart";
 
 test("systemd INVOCATION_ID marks supervised", () => {
   expect(isSupervised({ INVOCATION_ID: "abc" })).toBe(true);
-  expect(isSupervised({})).toBe(false);
+  expect(isSupervised({}, () => "otherd")).toBe(false);
 });
 
 test("supervised restart just exits(0), no spawn", () => {
