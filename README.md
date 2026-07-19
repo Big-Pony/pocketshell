@@ -127,6 +127,13 @@ Agent 内置一个**仅限本机访问**的管理页：在运行 Agent 的机器
 
 需要从公网访问（不在同一局域网）？见 **[部署指南 DEPLOYMENT.md](./DEPLOYMENT.md)**，涵盖四种方式：纯 IP+端口直连、服务器直接部署（Caddy / Nginx 反代）、Cloudflare Tunnel（无公网 IP）、frp 中转服务器，以及 systemd / launchd 常驻运行示例。
 
+### 自动更新
+
+Agent 内置基于 GitHub Releases 的应用内自动更新：启动、以及手机端每次连接时静默检查新版本（结果缓存 6 小时，检查失败不影响正常使用）。有新版本时 App 顶栏品牌旁出现更新徽标，点击打开确认弹窗，点「更新」即自动完成下载、校验、（macOS 上）重签名、替换二进制、重启，全程无需手动操作二进制文件。
+
+- 用 `POCKETSHELL_UPDATE=0` 关闭该功能；`POCKETSHELL_UPDATE_REPO` 可改指向自己 fork 的仓库，设为 `off` 效果等同关闭。
+- 应用内更新完成后的自重启依赖进程被 systemd / launchd 等 supervisor 托管；macOS 上首次授予的 Full Disk Access 权限在 OTA 后不会丢失。细节见 **[部署指南 § 自动更新（OTA）](./DEPLOYMENT.md#自动更新ota)**。
+
 ### 安全
 
 端到端加密：每次连接做 Noise IK 握手，双向身份认证 + 前向保密，未登记设备握手就过不了；穿透/反代链路只是传输密文，解不开明文。**认证边界即安全边界**——过握手+配对的设备可浏览 Agent 进程权限内的文件（不做额外沙箱，请以进程权限约束访问面）。生产环境建议把 TLS 交给边缘（Cloudflare/Caddy）终结；加密密钥仅存于 `KEY_DIR`，从不入库。
@@ -233,6 +240,13 @@ The admin page only answers requests from `127.0.0.1`; access via a reverse prox
 ### Deployment
 
 Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)** — it covers four setups: bare IP+port, direct server deployment behind Caddy / Nginx, Cloudflare Tunnel (no public IP needed), and an frp relay server, plus systemd / launchd service examples.
+
+### Auto-update
+
+The Agent has built-in in-app auto-update backed by GitHub Releases: it silently checks for a newer version on startup and again every time a phone connects (result cached 6h; a failed check never breaks normal use). When a newer version exists, an update badge appears next to the brand in the top bar; tap it to open a confirmation dialog, then tap "Update" — download, verify, (on macOS) re-sign, swap the binary, and restart all happen automatically, no manual binary handling required.
+
+- Set `POCKETSHELL_UPDATE=0` to disable it; point `POCKETSHELL_UPDATE_REPO` at your own fork, or set it to `off` for the same effect as disabling.
+- The self-restart after an in-app update relies on the process being supervisor-managed (systemd / launchd); on macOS, a Full Disk Access grant made before an update survives OTA. Details: **[DEPLOYMENT.md § Auto-update (OTA)](./DEPLOYMENT.md#auto-update-ota)**.
 
 ### Security
 
