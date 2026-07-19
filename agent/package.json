@@ -1,6 +1,6 @@
 {
   "name": "pocketshell-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "PocketShell Agent — Bun backend that serves the embedded frontend and manages tmux-backed PTY sessions over an encrypted WebSocket.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "https://github.com/Big-Pony/pocketshell.git" },
