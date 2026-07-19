@@ -278,6 +278,24 @@ Agent 启动时、以及手机端每次连接时，会静默向 GitHub Releases 
 - **开关与来源**：`POCKETSHELL_UPDATE=0` 整体关闭 OTA（不检查、不可更新）；`POCKETSHELL_UPDATE_REPO` 指定检查更新所用的 GitHub 仓库（默认 `Big-Pony/pocketshell`，设为 `off` 效果等同 `POCKETSHELL_UPDATE=0`，也可指向自己 fork 后的仓库）；检查请求走 `https://api.github.com/repos/<repo>/releases/latest`，遵循进程环境里的 `HTTPS_PROXY`/`HTTP_PROXY`。
 - **macOS：首次 FDA 授权不会因 OTA 丢失。** 新二进制会用本机一份稳定的自签名身份（`PocketShell Self-Signed`）重新签名，签名的 Designated Requirement 不随每次构建变化，系统之前对旧二进制授予的 Full Disk Access 等 TCC 权限在更新后继续生效，不会被重新弹窗要求授权。这份签名身份需要**一次性、交互式**地建立（后台进程无法自动创建/信任证书）——运行 `pocketshell-agent --warmup` 完成；跳过这一步也不影响 OTA 正常更新，只是新二进制不会被签名，届时 TCC 权限可能需要重新授予。
 
+### 命令行设备管理（无桌面运维）
+
+`/admin` 管理页只监听 `127.0.0.1`，在纯 Linux / SSH 服务器上不方便打开。Agent 二进制内置了等效的命令行子命令，直接读写同一个 `POCKETSHELL_KEY_DIR`（务必用与常驻进程相同的 `POCKETSHELL_KEY_DIR` 环境变量运行）：
+
+```bash
+# 列出已配对设备（指纹、名称、加入时间、最近在线、最近 IP）
+pocketshell-agent devices list
+
+# 生成一个新的配对码并打印配对串；正在运行的 Agent 会自动采纳它，
+# 无需重启即可让新手机配对（配对码 TTL 300 秒）
+pocketshell-agent pair [--name <设备名>]
+
+# 吊销某台设备（参数可用公钥全串，或列表里指纹的前缀）
+pocketshell-agent devices remove <pubkey-or-fingerprint>
+```
+
+> `pair` 会把待配对码原子写入 `<keyDir>/pairing.pending.json`（0600）；常驻 Agent 在下一次有未授权设备尝试握手时读取并采纳它，配对成功后自动清盘。适合 Linux 无桌面场景，替代仅监听 localhost 的 `/admin` 页。
+
 ### 常见排查
 
 | 现象 | 方向 |
@@ -563,6 +581,25 @@ On startup, and again each time a phone connects, the Agent silently checks GitH
 - **The self-restart requires the process to be supervisor-managed.** Once the swap lands, the Agent tries to restart itself; if it's under systemd (`Restart=always`, above) or launchd (`KeepAlive`, above), the supervisor relaunches the new binary automatically. Otherwise it falls back to spawning a detached replacement process and exiting — a less reliable path than supervisor management. **Production deployments should set `Restart=always` / `KeepAlive` as shown above** so in-app updates can reliably come back up as the new version.
 - **Env vars:** `POCKETSHELL_UPDATE=0` disables OTA entirely (no checks, no updates). `POCKETSHELL_UPDATE_REPO` sets the GitHub repo checked for releases (default `Big-Pony/pocketshell`; `off` disables OTA the same as `POCKETSHELL_UPDATE=0`; can also point at your own fork). Checks hit `https://api.github.com/repos/<repo>/releases/latest` and honor `HTTPS_PROXY`/`HTTP_PROXY` from the process environment.
 - **macOS: the first Full Disk Access grant survives OTA updates.** Each new binary is re-signed with a stable local self-signed identity (`PocketShell Self-Signed`), so its codesign designated requirement doesn't change between builds — TCC permissions (like Full Disk Access) granted to the previous binary carry over without a re-prompt. Provisioning that signing identity is a **one-time, interactive** step (a background process can't create/trust a certificate on its own) — run `pocketshell-agent --warmup` to set it up. Skipping this doesn't block OTA updates; the new binary just won't be signed, and TCC permissions may need to be re-granted.
+
+### CLI device management (headless ops)
+
+The `/admin` page only listens on `127.0.0.1`, which is awkward to reach on a headless Linux / SSH server. The Agent binary ships equivalent CLI subcommands that read and write the same `POCKETSHELL_KEY_DIR` (run them with the same `POCKETSHELL_KEY_DIR` env var as the resident process):
+
+```bash
+# list paired devices (fingerprint, name, added time, last-seen, last IP)
+pocketshell-agent devices list
+
+# mint a new pairing code and print the pairing string; a running Agent
+# adopts it automatically, so a new phone can pair with no restart
+# (the pairing code has a 300 s TTL)
+pocketshell-agent pair [--name <device-name>]
+
+# revoke a device (pass the full public key, or a prefix of its fingerprint from the list)
+pocketshell-agent devices remove <pubkey-or-fingerprint>
+```
+
+> `pair` atomically writes the pending code to `<keyDir>/pairing.pending.json` (0600); the resident Agent reads and adopts it the next time an unregistered device attempts the handshake, and clears it on a successful pairing. This suits headless Linux and replaces the localhost-only `/admin` page.
 
 ### Troubleshooting
 

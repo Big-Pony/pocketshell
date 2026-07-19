@@ -20,7 +20,8 @@ import { ASSETS } from "./embedded-manifest";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 import { buildReadiness, isNonLocalBind } from "./readiness";
 import { runWarmup } from "./warmup";
-import { createPairing } from "./pairing";
+import { createPairing, generatePairingCode, readPendingPairing, writePendingPairing, clearPendingPairing } from "./pairing";
+import { parseArgv, formatDeviceList, matchDevice, fingerprint } from "./cli-devices";
 import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
@@ -65,12 +66,28 @@ export function startServer(deps: Deps = {}) {
   const replay = deps.replay ?? new ReplayService(config.replayBufferBytes);
 
   const envKeys = new Set(config.authorizedKeys);
+  const adoptDiskPairing = () => {
+    // req 7-1: a CLI-minted pending pairing (pairing.pending.json) lets an
+    // already-running agent accept a code it didn't mint itself. Only adopt
+    // when our in-memory pairing isn't live; brute force is still bounded by
+    // rate-limit.ts at the handshake layer.
+    const rec = readPendingPairing(config.keyDir, Date.now());
+    if (!rec) return;
+    config.pairing = createPairing({
+      code: rec.code,
+      ttlMs: Math.max(0, rec.expiresAt - Date.now()),
+      maxAttempts: rec.maxAttempts,
+      now: () => Date.now(),
+    });
+    config.pairingMode = true;
+  };
   const authorize = (pub: string): "authorized" | "pending" | "reject" => {
     if (config.registry.has(pub) || envKeys.has(pub)) return "authorized";
     // Admit an unregistered peer to the pending window only while the pairing
     // code is still live (not consumed/expired). Once spent, unregistered peers
     // are rejected at the handshake rather than kept admissible for the whole
     // process lifetime.
+    if (!config.pairing?.isLive()) adoptDiskPairing();
     if (config.pairingMode && config.pairing?.isLive()) return "pending";
     return "reject";
   };
@@ -315,6 +332,7 @@ export function startServer(deps: Deps = {}) {
     conn.ready = true;
     if (conn.pairTimer) clearTimeout(conn.pairTimer);
     sendSecure(conn, { type: "paired", ok: true });
+    clearPendingPairing(config.keyDir); // req 7-1: consume any disk pending too
     config.audit.log({ event: "pair_ok", pub: conn.remoteStatic, ip: conn.ip });
   };
 
@@ -709,17 +727,48 @@ export function startServer(deps: Deps = {}) {
   };
 }
 
+// req 7-1: `pocketshell-agent devices|pair` CLI subcommands. Pure helpers from
+// cli-devices.ts wired to loadConfig()/registry/pairing; never boots the server.
+async function runCliDevices(argv: string[]): Promise<number> {
+  const action = parseArgv(argv);
+  if (action.cmd === "unknown") { console.error(action.usage); return 1; }
+  const cfg = loadConfig();
+  if (action.cmd === "devices-list") {
+    console.log(formatDeviceList(cfg.registry.list()));
+    return 0;
+  }
+  if (action.cmd === "devices-remove") {
+    const m = matchDevice(cfg.registry.list(), action.query);
+    if (m.kind === "none") { console.error(`No device matching "${action.query}".`); return 1; }
+    if (m.kind === "ambiguous") { console.error(`Ambiguous: ${m.matches.length} devices match "${action.query}". Use a longer fingerprint.`); return 1; }
+    cfg.registry.remove(m.record.pubKey);
+    console.log(`Removed ${fingerprint(m.record.pubKey)} (${m.record.name}).`);
+    return 0;
+  }
+  // action.cmd === "pair"
+  const now = Date.now();
+  const code = generatePairingCode();
+  writePendingPairing(cfg.keyDir, { code, expiresAt: now + 300_000, maxAttempts: 5 });
+  const advertise = resolveAdvertise(cfg);
+  console.log(buildPairingString(cfg.identity.publicKey, advertise, code));
+  console.log("\nPairing code valid for 300s. Paste the string above into the app; a running agent picks it up automatically.");
+  return 0;
+}
+
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
-  if (process.argv.includes("--version")) {
+  const cliArgv = process.argv.slice(2);
+  if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
+    // CLI subcommand path never boots the server.
+    void runCliDevices(cliArgv).then((code) => process.exit(code));
+  } else if (process.argv.includes("--version")) {
     console.log(AGENT_VERSION);
     process.exit(0);
-  }
+  } else if (process.argv.includes("--warmup")) {
   // `pocketshell-agent --warmup`: foreground TCC warmup, then exit. TCC
   // prompts from a launchd background process are not always reliable, so
   // running this once in a real terminal is the dependable fallback (and the
   // only way to batch the prompts ahead of first use). See warmup.ts.
-  if (process.argv.includes("--warmup")) {
     const lines = runWarmup();
     for (const l of lines) console.log(l);
     if (lines.length === 0) console.log("[pocketshell] warmup done — no manual steps needed.");
