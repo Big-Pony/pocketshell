@@ -16,6 +16,8 @@
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
+  import UpdateDialog from "./components/UpdateDialog.svelte";
+  import type { CheckResult } from "./lib/update";
   import type { AppCommand } from "./lib/input-router";
   import { begin, beginLine, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
   import { detectSwipe } from "./lib/swipe";
@@ -88,6 +90,14 @@
 
   const conn = new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");
+  let updInfo = $state<CheckResult | null>(null);
+  let updOpen = $state(false);
+  let updPhase = $state<string | null>(null);
+  let updPct = $state<number | null>(null);
+  let updMsg = $state<string | null>(null);
+  async function refreshUpdate(force = false) {
+    try { updInfo = (await conn.checkUpdate(force)) as CheckResult; } catch { /* silent */ }
+  }
   const terms = new Map<string, Terminal>();
   const cmdLines = new Map<string, CmdLineState>();
   let hints = $state<string[]>([]);
@@ -102,7 +112,28 @@
     hints = s && s.trusted ? suggest(s.line, s.history, CATALOG) : [];
   }
 
-  conn.onStatus((s) => (status = s));
+  conn.onStatus((s) => {
+    const wasOnline = status === "online";
+    status = s;
+    if (s === "online" && !wasOnline) {
+      // Fresh connect (incl. reconnect after a self-restart update): re-check.
+      // If we were mid-update and the reconnect shows we're now current, the
+      // restart finished successfully — clear the in-progress UI + badge and
+      // let the user know.
+      void refreshUpdate().then(() => {
+        if (updPhase && updInfo && !updInfo.hasUpdate) {
+          showToast(tr("update.done", { version: updInfo.current }));
+          updOpen = false;
+          updPhase = null;
+        }
+      });
+    }
+  });
+  conn.onUpdate((u) => {
+    updPhase = u.phase;
+    updPct = u.pct ?? null;
+    updMsg = u.message ?? null;
+  });
   // Guard so restored session tabs are re-attached exactly once (on the first
   // sessions snapshot after a reload). `sessions` is re-broadcast every ~3s, and
   // TerminalView attaches on its own mount + Connection re-attaches on reconnect,
@@ -558,7 +589,10 @@
 <div class="shell">
   <div class="topbar">
     <span class="brand mono">◧ Pocket<b>Shell</b></span>
-    <span class="version">S5</span>
+    <span class="version mono">v{updInfo?.current ?? ""}</span>
+    {#if updInfo?.hasUpdate}
+      <button class="upd-badge" onclick={() => (updOpen = true)} aria-label={$t('update.badge')} title={$t('update.badge')}>●</button>
+    {/if}
     <div class="conn conn-{status}">
       <span class="conn-dot"></span>
       <span class="conn-text mono">{$t('app.status.' + status)}</span>
@@ -630,7 +664,13 @@
       />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "set"}>
-      <SettingsPanel {conn} {settings} onChange={applySettings} />
+      <SettingsPanel {conn} {settings} onChange={applySettings}
+        currentVersion={updInfo?.current ?? ""}
+        onCheckUpdate={async () => {
+          await refreshUpdate(true);
+          if (updInfo?.hasUpdate) updOpen = true;
+          else showToast(tr("update.upToDate"));
+        }} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "kbd"}>
       <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
@@ -645,6 +685,17 @@
 
 {#if toastVisible}
   <div class="toast" class:visible={toastVisible}>{toastText}</div>
+{/if}
+
+{#if updOpen && updInfo}
+  <UpdateDialog info={updInfo} phase={updPhase} pct={updPct} message={updMsg}
+    onCancel={() => { if (!updPhase) updOpen = false; }}
+    onConfirm={async () => {
+      if (updPhase === "error") updPhase = null;
+      updPhase = "downloading";
+      const r = (await conn.applyUpdate()) as { started: boolean; reason?: string };
+      if (!r.started) { updPhase = "error"; updMsg = r.reason ?? "failed"; }
+    }} />
 {/if}
 
 <style>
@@ -677,6 +728,23 @@
     color: var(--dimmer);
     font-weight: 600;
     margin-top: 2px;
+  }
+  .upd-badge {
+    color: var(--accent);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 0 4px;
+    animation: upd-pulse 2s infinite;
+  }
+  @keyframes upd-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .upd-badge { animation: none; }
   }
   .conn {
     margin-left: auto;

@@ -5,8 +5,9 @@
   import type { Settings } from "../lib/settings";
   import DeviceManager from "./DeviceManager.svelte";
 
-  let { conn, settings, onChange }: {
+  let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
+    currentVersion: string; onCheckUpdate: () => Promise<void>;
   } = $props();
 
   function update<K extends keyof Settings>(k: K, v: Settings[K]) {
@@ -14,6 +15,11 @@
   }
 
   let showDevices = $state(false);
+  let checkingUpdate = $state(false);
+  async function checkNow() {
+    checkingUpdate = true;
+    try { await onCheckUpdate(); } finally { checkingUpdate = false; }
+  }
 </script>
 
 <div class="stg">
@@ -77,13 +83,24 @@
   </div>
 
   <!-- Device management -->
-  <div class="set" style="border:none">
+  <div class="set">
     <div class="grow">
       <div class="label">{$t('settings.devices.label')}</div>
       <div class="desc">{$t('settings.devices.desc')}</div>
     </div>
     <button class="btn" onclick={() => (showDevices = !showDevices)}>
       {showDevices ? $t('settings.devices.close') : $t('settings.devices.manage')}
+    </button>
+  </div>
+
+  <!-- Update check -->
+  <div class="set" style="border:none">
+    <div class="grow">
+      <div class="label">{$t('update.checkNow')}</div>
+      <div class="desc">v{currentVersion}</div>
+    </div>
+    <button class="btn" disabled={checkingUpdate} onclick={checkNow}>
+      {checkingUpdate ? $t('update.checking') : $t('update.checkNow')}
     </button>
   </div>
 </div>
@@ -161,5 +178,7 @@
     padding: 7px 14px;
     font-size: 13px;
     font-weight: 600;
+    cursor: pointer;
   }
+  .btn:disabled { opacity: 0.5; cursor: default; }
 </style>
