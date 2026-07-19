@@ -37,7 +37,7 @@ import { $ } from "bun";
 // Pure precondition gate for update.apply — kept outside startServer so it is
 // unit-testable without spinning up a server or touching the real download/
 // sign/swap/restart pipeline (that part is verified manually on real hardware,
-// see docs/superpowers/sdd/task-10-report.md).
+// see .superpowers/sdd/task-10-report.md).
 export function applyGate(
   repo: string | null,
   cache: CachedCheck | null,

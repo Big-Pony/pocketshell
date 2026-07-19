@@ -507,7 +507,7 @@ test("admin-api/pair generates a new pairing code", async () => {
 // update.apply precondition gate — pure, exported specifically so this can be
 // unit-tested without driving the real download/sign/swap/restart pipeline
 // (that pipeline is verified manually on real hardware; see
-// docs/superpowers/sdd/task-10-report.md).
+// .superpowers/sdd/task-10-report.md).
 test("applyGate: refuses when OTA is disabled (no repo)", () => {
   const out = applyGate(null, { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() }, false);
   expect(out).toEqual({ started: false, reason: "disabled" });

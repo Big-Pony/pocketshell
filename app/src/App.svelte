@@ -125,6 +125,14 @@
           showToast(tr("update.done", { version: updInfo.current }));
           updOpen = false;
           updPhase = null;
+        } else if (updPhase && updInfo?.hasUpdate) {
+          // Update was in flight but didn't take effect (e.g. new binary failed
+          // to boot and the supervisor fell back to the old one). Clear the
+          // in-progress state so the dialog becomes dismissable again instead
+          // of trapping the user in a perpetual progress modal.
+          updPhase = null;
+          updPct = null;
+          updMsg = null;
         }
       });
     }
