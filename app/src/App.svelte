@@ -605,7 +605,7 @@
     <span class="brand mono">◧ Pocket<b>Shell</b></span>
     <span class="version mono">v{updInfo?.current ?? ""}</span>
     {#if updInfo?.hasUpdate}
-      <button class="upd-badge" onclick={() => (updOpen = true)} aria-label={$t('update.badge')} title={$t('update.badge')}>●</button>
+      <button class="upd-badge" onclick={() => (updOpen = true)} aria-label={$t('update.badge')} title={$t('update.badge')}><span class="upd-dot">●</span>{$t('update.badge')}</button>
     {/if}
     <div class="conn conn-{status}">
       <span class="conn-dot"></span>
@@ -744,13 +744,22 @@
     margin-top: 2px;
   }
   .upd-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     color: var(--accent);
     background: transparent;
-    border: none;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
-    padding: 0 4px;
+    padding: 2px 8px;
+  }
+  /* Keep the attention-drawing pulse on the dot only, so the "有新版本" text
+     stays steady and readable (req: the bare dot was too subtle). */
+  .upd-badge .upd-dot {
+    font-size: 12px;
     animation: upd-pulse 2s infinite;
   }
   @keyframes upd-pulse {
@@ -758,7 +767,7 @@
     50% { opacity: 0.35; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .upd-badge { animation: none; }
+    .upd-badge .upd-dot { animation: none; }
   }
   .conn {
     margin-left: auto;
