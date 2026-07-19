@@ -24,6 +24,7 @@ import { createPairing } from "./pairing";
 import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
+import { AGENT_VERSION } from "./version";
 
 interface Deps {
   port?: number;
@@ -559,6 +560,10 @@ export function startServer(deps: Deps = {}) {
 
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
+  if (process.argv.includes("--version")) {
+    console.log(AGENT_VERSION);
+    process.exit(0);
+  }
   // `pocketshell-agent --warmup`: foreground TCC warmup, then exit. TCC
   // prompts from a launchd background process are not always reliable, so
   // running this once in a real terminal is the dependable fallback (and the
