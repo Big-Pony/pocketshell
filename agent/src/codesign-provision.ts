@@ -21,9 +21,20 @@ import { join } from "node:path";
 export const SIGN_IDENTITY = "PocketShell Self-Signed";
 export const SIGN_IDENTIFIER = "com.myt.pocketshell";
 
-export async function hasSigningIdentity(name = SIGN_IDENTITY): Promise<boolean> {
-  if (process.platform !== "darwin") return false;
-  const out = await $`security find-identity -v -p codesigning`.nothrow().text();
+// Injectable seams for hasSigningIdentity/signBinary so tests are deterministic
+// and never touch the real keychain or codesign. Production callers pass none,
+// getting the real `security`/`codesign` invocations.
+export interface SignDeps {
+  platform?: string;
+  findIdentity?: () => Promise<string>; // stdout of `security find-identity -v -p codesigning`
+  codesign?: (path: string) => Promise<number>; // codesign exit code
+}
+
+export async function hasSigningIdentity(name = SIGN_IDENTITY, deps: SignDeps = {}): Promise<boolean> {
+  if ((deps.platform ?? process.platform) !== "darwin") return false;
+  const out = deps.findIdentity
+    ? await deps.findIdentity()
+    : await $`security find-identity -v -p codesigning`.nothrow().text();
   return out.includes(name);
 }
 
@@ -61,9 +72,11 @@ export async function ensureLocalIdentity(): Promise<boolean> {
 // Background-safe re-sign: uses an already-provisioned, already-trusted
 // identity only. Returns false (skip signing, degrade — OTA is not blocked)
 // if the identity isn't present; never attempts to provision one itself.
-export async function signBinary(path: string): Promise<boolean> {
-  if (process.platform !== "darwin") return false;
-  if (!(await hasSigningIdentity())) return false;
-  const r = await $`codesign --force --sign ${SIGN_IDENTITY} --identifier ${SIGN_IDENTIFIER} ${path}`.nothrow().quiet();
-  return r.exitCode === 0;
+export async function signBinary(path: string, deps: SignDeps = {}): Promise<boolean> {
+  if ((deps.platform ?? process.platform) !== "darwin") return false;
+  if (!(await hasSigningIdentity(SIGN_IDENTITY, deps))) return false;
+  const code = deps.codesign
+    ? await deps.codesign(path)
+    : (await $`codesign --force --sign ${SIGN_IDENTITY} --identifier ${SIGN_IDENTIFIER} ${path}`.nothrow().quiet()).exitCode;
+  return code === 0;
 }
