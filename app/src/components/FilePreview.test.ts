@@ -28,3 +28,28 @@ describe("FilePreview image", () => {
     });
   });
 });
+
+describe("FilePreview markdown view toggle", () => {
+  it("defaults to render and switches via the segmented control", async () => {
+    const conn = connStub({
+      rpc: vi.fn(async (m: string) => {
+        if (m === "preview.mint") return { token: "TOK" };
+        if (m === "fs.read") return { content: "# Hi", lang: "markdown", mtime: 1 };
+        return {};
+      }),
+    });
+    const { container, getByText } = render(FilePreview, {
+      props: {
+        conn, path: "/root/proj/a.md", mode: "code", active: true,
+        base: "/root/proj", onToast: () => {},
+      },
+    });
+    // default view is render
+    await waitFor(() =>
+      expect(container.querySelector(".pv-content")?.getAttribute("data-view")).toBe("render"));
+    // clicking 源码 switches to source
+    getByText("源码").click();
+    await waitFor(() =>
+      expect(container.querySelector(".pv-content")?.getAttribute("data-view")).toBe("source"));
+  });
+});

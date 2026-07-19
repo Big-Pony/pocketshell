@@ -30,6 +30,11 @@
   let loaded = $state("");
   // render/source view toggle for md/html/image; plain code stays "source".
   let view = $state<"render" | "source">("source");
+  // The kind-default view is applied only on the FIRST load of this tab; reloads
+  // (⟳ / exit-edit) preserve whatever view the user is on, so editing then
+  // closing returns to the view they entered from instead of snapping to render.
+  let initialViewSet = $state(false);
+  let enterView = $state<"render" | "source">("source");
   let imgSrc = $state("");
   let htmlSrc = $state("");
   let MarkdownComp = $state<any>(null);
@@ -89,7 +94,10 @@
       return;
     }
     if (kind === "image") { view = "render"; await loadImage(); return; }
-    view = kind === "markdown" || kind === "html" ? "render" : "source";
+    if (!initialViewSet) {
+      view = kind === "markdown" || kind === "html" ? "render" : "source";
+      initialViewSet = true;
+    }
     try {
       const r = (await conn.rpc("fs.read", { path })) as { content: string; lang: string; mtime: number; truncated?: boolean; binary?: boolean };
       if (r.binary) { notice = tr("preview.binary"); lines = []; html = ""; canEdit = false; return; }
@@ -124,6 +132,7 @@
 
   async function startEdit() {
     if (!canEdit || editing) return;
+    enterView = view; // remember where to land when the editor closes
     try {
       FileEditorComp = (await import("./FileEditor.svelte")).default; // lazy chunk boundary
     } catch { onToast(tr("editor.loadFailed")); return; }
@@ -134,6 +143,7 @@
     editing = false;
     onEditingChange?.(false);
     onDirtyChange?.(false);
+    view = enterView; // return to the read view we entered edit from
     loaded = ""; // force re-read on next $effect tick — the file may have changed
   }
   // Refresh: re-mint token + reload content. Covers token expiry (reconnect /

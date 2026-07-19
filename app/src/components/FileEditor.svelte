@@ -203,7 +203,8 @@
 
 <style>
   .ed-root { display: flex; flex-direction: column; width: 100%; height: 100%; background: var(--code-bg); }
-  .ed-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  /* height fixed to match FilePreview's .pv-bar so preview↔edit does not jitter */
+  .ed-bar { display: flex; align-items: center; gap: 4px; height: 40px; box-sizing: border-box; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
   .ed-name { font-size: 0.72rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; display: flex; align-items: center; gap: 5px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); flex: 0 0 auto; }
   .sp { flex: 1; }
