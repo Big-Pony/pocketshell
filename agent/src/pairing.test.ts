@@ -45,3 +45,36 @@ test("isLive is true while fresh, false once consumed / expired / attempts spent
   spentP.verify("WRONG000"); // last attempt burned
   expect(spentP.isLive()).toBe(false);
 });
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  writePendingPairing, readPendingPairing, clearPendingPairing,
+} from "./pairing";
+
+test("pending pairing round-trips through disk", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-pair-"));
+  try {
+    const now = 1_000_000;
+    writePendingPairing(dir, { code: "ABCD2345", expiresAt: now + 300_000, maxAttempts: 5 });
+    const r = readPendingPairing(dir, now);
+    expect(r).toEqual({ code: "ABCD2345", expiresAt: now + 300_000, maxAttempts: 5 });
+    // expired -> null
+    expect(readPendingPairing(dir, now + 300_001)).toBeNull();
+    // cleared -> null
+    clearPendingPairing(dir);
+    expect(readPendingPairing(dir, now)).toBeNull();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readPendingPairing tolerates a missing/corrupt file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-pair-"));
+  try {
+    expect(readPendingPairing(dir, 0)).toBeNull(); // missing
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

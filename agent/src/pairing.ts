@@ -1,6 +1,8 @@
 // A7 Pairing — one-time, TTL-bounded, attempt-limited pairing code. Process-
 // level singleton (attempts persist across a client's reconnect attempts).
 import { randomBytes } from "node:crypto";
+import { writeFileSync, readFileSync, unlinkSync, renameSync } from "node:fs";
+import { join } from "node:path";
 
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -37,4 +39,33 @@ export function createPairing(opts: { code?: string; ttlMs?: number; maxAttempts
       return { ok: true };
     },
   };
+}
+
+// req 7-1: a pending pairing minted by the CLI (`pocketshell-agent pair`) is
+// persisted here so an already-running agent can adopt it (server.ts reads it
+// in authorize()). File lives beside devices.json; 0600 like other keyDir state.
+export interface PendingPairingRecord { code: string; expiresAt: number; maxAttempts: number; }
+
+const PENDING_FILE = "pairing.pending.json";
+
+export function writePendingPairing(keyDir: string, rec: PendingPairingRecord): void {
+  const path = join(keyDir, PENDING_FILE);
+  const tmp = path + ".tmp";
+  writeFileSync(tmp, JSON.stringify(rec), { mode: 0o600 });
+  renameSync(tmp, path); // atomic replace
+}
+
+export function readPendingPairing(keyDir: string, now: number): PendingPairingRecord | null {
+  try {
+    const rec = JSON.parse(readFileSync(join(keyDir, PENDING_FILE), "utf8")) as PendingPairingRecord;
+    if (!rec || typeof rec.code !== "string" || typeof rec.expiresAt !== "number") return null;
+    if (now > rec.expiresAt) return null;
+    return rec;
+  } catch {
+    return null; // missing or corrupt — treat as no pending pairing
+  }
+}
+
+export function clearPendingPairing(keyDir: string): void {
+  try { unlinkSync(join(keyDir, PENDING_FILE)); } catch { /* absent is fine */ }
 }
