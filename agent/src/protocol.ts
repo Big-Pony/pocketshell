@@ -46,6 +46,7 @@ export type ClientMsg =
   | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "removeSnippet"; id: string }
   | { type: "revokeDevice"; pubKey: string }
+  // rpc methods: fs.* / git.* / term.* / terminal.pwd / preview.mint
   | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =

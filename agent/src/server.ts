@@ -22,6 +22,8 @@ import { buildReadiness, isNonLocalBind } from "./readiness";
 import { runWarmup } from "./warmup";
 import { createPairing } from "./pairing";
 import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
+import { PreviewTokens } from "./preview-service";
+import { buildPreviewResponse } from "./server-preview";
 
 interface Deps {
   port?: number;
@@ -86,6 +88,10 @@ export function startServer(deps: Deps = {}) {
     needsResyncSessions: Set<string>;
   }
   const conns = new Map<ServerWebSocket<unknown>, Conn>();
+  // Token-scoped HTTP preview access, minted over the authed WS (below) and
+  // consumed by the /preview route. Tokens are bound to the device pubkey and
+  // reclaimed when that device has no live connections left.
+  const previewTokens = new PreviewTokens();
 
   const sendSecure = (conn: Conn, msg: ServerMsg) => {
     if (!conn.ready) return;
@@ -344,6 +350,14 @@ export function startServer(deps: Deps = {}) {
             case "term.paneInfo": result = terminal.paneInfo(String(p.session)); break;
             case "term.redraw": result = terminal.redraw(String(p.session)); break;
             case "terminal.pwd": result = terminal.pwd(String(p.session)); break;
+            case "preview.mint": {
+              // base is chosen by the client (project-root bookmark or the
+              // file's dir). An authed device can already fs.read anything, so
+              // scoping a token to any dir it names adds no new exposure.
+              const dev = conn.remoteStatic ?? "unknown";
+              result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
+              break;
+            }
             default:
               sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
               return;
@@ -466,6 +480,9 @@ export function startServer(deps: Deps = {}) {
     async fetch(req, srv) {
       if (srv.upgrade(req)) return;
       const url = new URL(req.url);
+      if (url.pathname.startsWith("/preview/")) {
+        return buildPreviewResponse(previewTokens, url, Date.now());
+      }
       if (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin-api/")) {
         if (!config.adminEnabled) return new Response("Not found", { status: 404 });
         const ip = srv.requestIP(req)?.address ?? "";
@@ -493,7 +510,15 @@ export function startServer(deps: Deps = {}) {
     },
     websocket: {
       open(ws) { onOpen(ws, (ws as any).remoteAddress ?? ""); },
-      close(ws) { conns.delete(ws); console.log("[pocketshell] disconnect"); },
+      close(ws) {
+        const conn = conns.get(ws);
+        conns.delete(ws);
+        // Reclaim this device's preview tokens once it has no live socket left.
+        if (conn?.remoteStatic && ![...conns.values()].some((c) => c.remoteStatic === conn.remoteStatic)) {
+          previewTokens.revokeDevice(conn.remoteStatic);
+        }
+        console.log("[pocketshell] disconnect");
+      },
       message(ws, raw) { onMessage(ws, raw as any); },
       // Socket drained after backpressure: recover any dropped-output sessions.
       drain(ws) { const conn = conns.get(ws); if (conn) maybeResync(conn); },
