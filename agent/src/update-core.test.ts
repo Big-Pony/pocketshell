@@ -24,11 +24,17 @@ test("assetNameForPlatform maps the 4 supported targets", () => {
 });
 
 test("parseSha256Sums reads shasum output with or without ./ prefix", () => {
+  const linuxHash = "a".repeat(64);
+  const darwinHash = "b".repeat(64);
   const txt = [
-    "aaaa1111  ./pocketshell-agent-linux-x64.tar.gz",
-    "bbbb2222  pocketshell-agent-darwin-arm64.tar.gz",
+    `${linuxHash}  ./pocketshell-agent-linux-x64.tar.gz`,
+    `${darwinHash}  pocketshell-agent-darwin-arm64.tar.gz`,
   ].join("\n");
   const m = parseSha256Sums(txt);
-  expect(m.get("pocketshell-agent-linux-x64.tar.gz")).toBe("aaaa1111");
-  expect(m.get("pocketshell-agent-darwin-arm64.tar.gz")).toBe("bbbb2222");
+  expect(m.get("pocketshell-agent-linux-x64.tar.gz")).toBe(linuxHash);
+  expect(m.get("pocketshell-agent-darwin-arm64.tar.gz")).toBe(darwinHash);
+  // Verify that truncated (8-char) hashes are rejected
+  const badTxt = "12345678  pocketshell-agent-linux-x64.tar.gz";
+  const badM = parseSha256Sums(badTxt);
+  expect(badM.get("pocketshell-agent-linux-x64.tar.gz")).toBeUndefined();
 });

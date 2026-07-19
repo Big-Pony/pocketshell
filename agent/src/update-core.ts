@@ -32,7 +32,7 @@ export function assetNameForPlatform(platform: string, arch: string): string | n
 export function parseSha256Sums(text: string): Map<string, string> {
   const out = new Map<string, string>();
   for (const line of text.split("\n")) {
-    const m = line.trim().match(/^([0-9a-fA-F]+)\s+\.?\/?(.+)$/);
+    const m = line.trim().match(/^([0-9a-fA-F]{64})\s+\.?\/?(.+)$/);
     if (m) out.set(m[2].trim(), m[1].toLowerCase());
   }
   return out;
