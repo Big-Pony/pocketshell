@@ -154,6 +154,20 @@
       helper.setAttribute("tabindex", "-1");
       helper.blur();
     }
+    // req 7-5: static terminal text can't be selected by a mobile long-press.
+    // Root cause (diagnosed via elementsFromPoint + a synthetic-event probe): the
+    // text rows ARE on top with user-select:text, but xterm's SelectionService
+    // calls preventDefault() on mousedown over .xterm-screen to run its own
+    // mouse-drag selection. A mobile long-press fires a synthetic mousedown, and
+    // that preventDefault cancels the OS long-press/selection gesture — so no
+    // selection handles ever appear (a JS preventDefault CSS can't override).
+    // This pane is display-only (disableStdin) and the ops panel selects via the
+    // term.select() API, so xterm's interactive mouse selection is redundant:
+    // swallow mousedown in the capture phase before it reaches xterm and let the
+    // browser's native selection take over (smartCopy already reads
+    // window.getSelection()). Scroll is untouched (wheel/touch on .xterm-viewport,
+    // whose pointer-events stay default), so touch scrolling is unaffected.
+    host.addEventListener("mousedown", (e) => { e.stopPropagation(); }, true);
     fit.fit();
 
     // Buffer the pane is in; gates history seeding (only in the normal buffer).
