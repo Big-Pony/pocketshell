@@ -27,6 +27,27 @@ import { buildPreviewResponse } from "./server-preview";
 import { AGENT_VERSION } from "./version";
 import { checkLatest } from "./update-check";
 import { readCache, writeCache, isFresh, CHECK_TTL_MS, type CachedCheck } from "./update-cache";
+import { downloadAndVerify, type Phase } from "./update-apply";
+import { signBinary, ensureLocalIdentity } from "./codesign-provision";
+import { restartSelf } from "./self-restart";
+import { renameSync, copyFileSync, chmodSync } from "node:fs";
+import { dirname, join as pathJoin } from "node:path";
+import { $ } from "bun";
+
+// Pure precondition gate for update.apply — kept outside startServer so it is
+// unit-testable without spinning up a server or touching the real download/
+// sign/swap/restart pipeline (that part is verified manually on real hardware,
+// see docs/superpowers/sdd/task-10-report.md).
+export function applyGate(
+  repo: string | null,
+  cache: CachedCheck | null,
+  applying: boolean,
+): { started: false; reason: string } | { started: true; latest: string } {
+  if (!repo) return { started: false, reason: "disabled" };
+  if (applying) return { started: false, reason: "in_progress" };
+  if (!cache?.canApply || !cache.latest) return { started: false, reason: cache?.reason ?? "no_release_info" };
+  return { started: true, latest: cache.latest };
+}
 
 interface Deps {
   port?: number;
@@ -99,6 +120,14 @@ export function startServer(deps: Deps = {}) {
   const sendSecure = (conn: Conn, msg: ServerMsg) => {
     if (!conn.ready) return;
     conn.ws.send(conn.channel.send(new Uint8Array(Buffer.from(encode(msg), "utf8"))));
+  };
+
+  // Fan a message out to every connected device (mirrors the sessions/snippets
+  // broadcast loops below — same conns set, same sendSecure, no new delivery
+  // path). Used by the update.apply orchestration to push `update{phase}`
+  // progress frames.
+  const broadcastAll = (msg: ServerMsg) => {
+    for (const conn of conns.values()) sendSecure(conn, msg);
   };
 
   // Number every output chunk, then fan out to subscribed clients.
@@ -217,6 +246,67 @@ export function startServer(deps: Deps = {}) {
     if (target) sendSecure(target, msg);
     else for (const conn of conns.values()) sendSecure(conn, msg);
   };
+
+  // update.apply orchestration: download+verify -> (macOS) re-sign -> smoke
+  // check -> atomic same-dir swap -> restart. `applying` gates concurrent
+  // triggers; the promise is fire-and-forget (the RPC caller only learns
+  // whether the run *started* — progress rides `update{phase}` broadcasts).
+  let applying = false;
+  async function runApply(): Promise<{ started: boolean; reason?: string }> {
+    const cache = readCache(config.keyDir);
+    const gate = applyGate(config.update.repo, cache, applying);
+    if (!gate.started) return gate;
+    applying = true;
+    const tag = `v${gate.latest}`;
+    const emit = (phase: Phase, extra?: { pct?: number; message?: string }) =>
+      broadcastAll({ type: "update", phase, version: gate.latest, ...extra });
+    void (async () => {
+      const target = process.execPath;
+      const newPath = pathJoin(dirname(target), ".pocketshell.new");
+      let swapped = false;
+      try {
+        // Download + checksum-verify into keyDir/updates/ (may be on a
+        // different filesystem than execPath — see the copy+rename below).
+        const { binaryPath } = await downloadAndVerify({
+          repo: config.update.repo!,
+          tag,
+          keyDir: config.keyDir,
+          onPhase: emit,
+        });
+        // Copy (not rename) into execPath's own directory so the final swap
+        // below is a same-filesystem rename (atomic, no EXDEV). Sign the
+        // *copy* here, never the keyDir original — signing then cross-mount
+        // renaming would invalidate the signature's path assumptions and
+        // risks EXDEV on the final move.
+        copyFileSync(binaryPath, newPath);
+        chmodSync(newPath, 0o755);
+        emit("signing");
+        await signBinary(newPath); // best-effort: false on non-darwin / no identity, degrades gracefully
+        // Smoke check: refuse to swap over a binary that doesn't even run or
+        // reports the wrong version.
+        const out = await $`${newPath} --version`.nothrow().text();
+        if (out.trim() !== gate.latest) {
+          throw new Error(`smoke check failed: got "${out.trim()}", want "${gate.latest}"`);
+        }
+        emit("applying");
+        try { copyFileSync(target, `${target}.prev`); } catch { /* best-effort backup */ }
+        renameSync(newPath, target); // same-dir rename: atomic
+        swapped = true;
+        emit("restarting");
+        restartSelf();
+      } catch (e) {
+        if (swapped) {
+          // Swap succeeded but something after it failed (e.g. restart threw
+          // instead of exiting) — restore the previous binary rather than
+          // leave the box on an unverified swap with no rollback.
+          try { renameSync(`${target}.prev`, target); } catch { /* best-effort rollback */ }
+        }
+        applying = false;
+        emit("error", { message: e instanceof Error ? e.message : String(e) });
+      }
+    })();
+    return { started: true };
+  }
 
   const finishPairing = (conn: Conn, deviceName: string) => {
     config.registry.add(conn.remoteStatic!, deviceName || "device");
@@ -393,6 +483,18 @@ export function startServer(deps: Deps = {}) {
                   sendSecure(conn, { type: "response", id, ok: false, error: { code, message: String(e) } });
                 }
               })();
+              return;
+            }
+            case "update.apply": {
+              // runApply is async (readCache/applyGate resolve synchronously,
+              // but it's declared async so the caller always awaits a
+              // Promise) — mirrors the update.check case above: this case
+              // sends its own response and returns early rather than falling
+              // through to the post-switch sendRpcResult(...) call.
+              void runApply().then(
+                (out) => sendRpcResult(conn, id, out),
+                (e) => sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } }),
+              );
               return;
             }
             default:
@@ -621,32 +723,44 @@ if (import.meta.main) {
     const lines = runWarmup();
     for (const l of lines) console.log(l);
     if (lines.length === 0) console.log("[pocketshell] warmup done — no manual steps needed.");
-    process.exit(0);
+    // Foreground-only: provisioning a self-signed codesign identity needs an
+    // operator present for the Keychain trust/auth prompts (see
+    // codesign-provision.ts) — never call this from the background startup
+    // path below. Note this exit is async (post-await), so the rest of this
+    // `if (import.meta.main)` block must live in the `else` below rather than
+    // falling through after this branch, or the background agent would also
+    // boot in the same process while this awaits.
+    void (async () => {
+      const ok = await ensureLocalIdentity();
+      console.log(ok ? "[pocketshell] signing identity present — OTA re-signs will run." : "[pocketshell] no signing identity — OTA updates will apply unsigned (see Keychain guidance above).");
+      process.exit(0);
+    })();
+  } else {
+    const cfg = loadConfig();
+    ensureTmux(realTmuxDeps());
+    const advertise = resolveAdvertise(cfg);
+    const appUrl = advertiseToHttp(advertise);
+    startServer({ config: cfg });
+    const pairingString =
+      cfg.pairingMode && cfg.pairing
+        ? buildPairingString(cfg.identity.publicKey, advertise, cfg.pairing.code)
+        : undefined;
+    const lines = buildReadiness({
+      advertise,
+      appUrl,
+      pubKeyB64: toB64(cfg.identity.publicKey),
+      pairingString,
+      pairingTtlSec: 300,
+      advertiseExplicit: !!cfg.advertise,
+      bindNonLocal: isNonLocalBind(cfg.listen.host),
+    });
+    console.log(`[pocketshell] listening on ${cfg.listen.host}:${cfg.listen.port} (TLS ${cfg.tls.enabled ? "on" : "off"})`);
+    for (const l of lines) console.log(l);
+    // macOS TCC warmup after boot: batch any permission prompts at startup.
+    // Async + silent on failure; prints FDA guidance lines when FDA is missing.
+    // Full no-op on non-darwin (see warmup.ts).
+    setTimeout(() => {
+      try { for (const l of runWarmup()) console.log(l); } catch { /* probes must never crash the agent */ }
+    }, 0);
   }
-  const cfg = loadConfig();
-  ensureTmux(realTmuxDeps());
-  const advertise = resolveAdvertise(cfg);
-  const appUrl = advertiseToHttp(advertise);
-  startServer({ config: cfg });
-  const pairingString =
-    cfg.pairingMode && cfg.pairing
-      ? buildPairingString(cfg.identity.publicKey, advertise, cfg.pairing.code)
-      : undefined;
-  const lines = buildReadiness({
-    advertise,
-    appUrl,
-    pubKeyB64: toB64(cfg.identity.publicKey),
-    pairingString,
-    pairingTtlSec: 300,
-    advertiseExplicit: !!cfg.advertise,
-    bindNonLocal: isNonLocalBind(cfg.listen.host),
-  });
-  console.log(`[pocketshell] listening on ${cfg.listen.host}:${cfg.listen.port} (TLS ${cfg.tls.enabled ? "on" : "off"})`);
-  for (const l of lines) console.log(l);
-  // macOS TCC warmup after boot: batch any permission prompts at startup.
-  // Async + silent on failure; prints FDA guidance lines when FDA is missing.
-  // Full no-op on non-darwin (see warmup.ts).
-  setTimeout(() => {
-    try { for (const l of runWarmup()) console.log(l); } catch { /* probes must never crash the agent */ }
-  }, 0);
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { startServer } from "./server";
+import { startServer, applyGate } from "./server";
 import type { SecureChannel } from "./secure-channel";
 import { encode, decodeServer } from "./protocol";
 import { loadDeviceRegistry } from "./device-registry";
@@ -502,4 +502,33 @@ test("admin-api/pair generates a new pairing code", async () => {
   expect(body.pairString.length).toBeGreaterThan(0);
   srv.stop();
   rmSync(file, { force: true });
+});
+
+// update.apply precondition gate — pure, exported specifically so this can be
+// unit-tested without driving the real download/sign/swap/restart pipeline
+// (that pipeline is verified manually on real hardware; see
+// docs/superpowers/sdd/task-10-report.md).
+test("applyGate: refuses when OTA is disabled (no repo)", () => {
+  const out = applyGate(null, { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() }, false);
+  expect(out).toEqual({ started: false, reason: "disabled" });
+});
+
+test("applyGate: refuses when a run is already in progress", () => {
+  const out = applyGate("org/repo", { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() }, true);
+  expect(out).toEqual({ started: false, reason: "in_progress" });
+});
+
+test("applyGate: refuses when there is no cached check yet", () => {
+  const out = applyGate("org/repo", null, false);
+  expect(out).toEqual({ started: false, reason: "no_release_info" });
+});
+
+test("applyGate: refuses when the cached check says canApply is false, surfacing its reason", () => {
+  const out = applyGate("org/repo", { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: false, reason: "unsupported_platform", checkedAt: Date.now() }, false);
+  expect(out).toEqual({ started: false, reason: "unsupported_platform" });
+});
+
+test("applyGate: starts when repo is set, cache is applicable, and nothing is in flight", () => {
+  const out = applyGate("org/repo", { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() }, false);
+  expect(out).toEqual({ started: true, latest: "1.1.0" });
 });
