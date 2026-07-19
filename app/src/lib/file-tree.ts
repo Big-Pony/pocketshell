@@ -34,7 +34,9 @@ export function pushRootHistory(path: string): void {
 }
 
 export function loadRootFollow(store: Storage = localStorage): boolean {
-  return store.getItem(ROOT_FOLLOW_KEY) === "1";
+  // req 7-4: follow-focused-tab is ON by default. Only an explicit opt-out
+  // (saved "0") keeps it off; existing opt-ins ("1") stay on.
+  return store.getItem(ROOT_FOLLOW_KEY) !== "0";
 }
 
 export function saveRootFollow(on: boolean, store: Storage = localStorage): void {

@@ -62,14 +62,16 @@ test("loadRootHistory tolerates corrupt storage", () => {
 });
 
 describe("root follow flag", () => {
-  test("defaults to false", () => {
-    expect(loadRootFollow()).toBe(false);
-  });
-  test("round-trips true/false", () => {
-    saveRootFollow(true);
+  test("defaults to ON when never set (req 7-4)", () => {
     expect(loadRootFollow()).toBe(true);
+  });
+  test("stays OFF when the user explicitly turned it off", () => {
     saveRootFollow(false);
     expect(loadRootFollow()).toBe(false);
+  });
+  test("is ON when explicitly turned on", () => {
+    saveRootFollow(true);
+    expect(loadRootFollow()).toBe(true);
   });
 });
 
