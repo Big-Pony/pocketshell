@@ -57,6 +57,7 @@ type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
 type InputCb = (sessionId: string) => void;
+type UpdateCb = (u: { phase: string; pct?: number; message?: string; version?: string }) => void;
 
 export class Connection {
   private ws!: WebSocketLike;
@@ -73,6 +74,7 @@ export class Connection {
   private pairing = false;
   private devicesCbs: ((d: DeviceInfo[]) => void)[] = [];
   private snippetsCbs: ((s: Snippet[]) => void)[] = [];
+  private updateCbs: UpdateCb[] = [];
   private establishedThisSocket = false;
   private pairFailStreak = 0;
   private rpcSeq = 0;
@@ -344,6 +346,9 @@ export class Connection {
       }
     } else if (msg.type === "rpcChunk") {
       this.handleRpcChunk(msg);
+    } else if (msg.type === "update") {
+      const u = { phase: msg.phase, pct: msg.pct, message: msg.message, version: msg.version };
+      for (const cb of this.updateCbs) cb(u);
     } else if (msg.type === "error") {
       // A rejected pairing (expired/wrong/exhausted code) must not be retried:
       // the agent closes right after, and re-sending the same dead code on every
@@ -454,6 +459,12 @@ export class Connection {
     this.devicesCbs.push(cb);
     return () => { this.devicesCbs = this.devicesCbs.filter((c) => c !== cb); };
   }
+  onUpdate(cb: UpdateCb): () => void {
+    this.updateCbs.push(cb);
+    return () => { this.updateCbs = this.updateCbs.filter((c) => c !== cb); };
+  }
+  checkUpdate(force = false): Promise<unknown> { return this.rpc("update.check", { force }); }
+  applyUpdate(): Promise<unknown> { return this.rpc("update.apply"); }
   onOutput(cb: OutputCb): () => void {
     this.outputCbs.push(cb);
     return () => {

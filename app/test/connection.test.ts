@@ -615,3 +615,17 @@ test("reconnect backoff jitter: random=1 lands at the 1.2× ceiling", () => {
   expect(created.length).toBe(2); // exactly 600ms
   conn.dispose();
 });
+
+// ──────────────────────────────────────────────────────────────
+// Task 11: OTA `update` broadcast frames dispatch to onUpdate subscribers
+// ──────────────────────────────────────────────────────────────
+test("dispatches an update frame to onUpdate", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  const seen: unknown[] = [];
+  conn.onUpdate((u) => seen.push(u));
+  ws.emit(encode({ type: "update", phase: "downloading", pct: 10, version: "0.4.0" }));
+  expect(seen).toEqual([{ phase: "downloading", pct: 10, message: undefined, version: "0.4.0" }]);
+});
