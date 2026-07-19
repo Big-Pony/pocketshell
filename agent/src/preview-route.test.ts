@@ -21,6 +21,10 @@ test("valid token serves file with hardening headers", async () => {
   expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   expect(res.headers.get("cache-control")).toBe("no-store");
   expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  // Defence-in-depth headers: CSP sandbox neutralises a top-level HTML load,
+  // nosniff stops MIME sniffing octet-stream into an executable document.
+  expect(res.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
+  expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   expect(await res.text()).toBe("PNGDATA");
 });
 
@@ -28,6 +32,14 @@ test("bad token → 403", () => {
   const pt = new PreviewTokens();
   const res = buildPreviewResponse(pt, new URL("http://x/preview/nope/a.png"), 0);
   expect(res.status).toBe(403);
+});
+
+test("malformed percent-escape → 400 (not 500)", () => {
+  const dir = fx();
+  const pt = new PreviewTokens();
+  const tok = pt.mint(dir, "devA", 0);
+  const res = buildPreviewResponse(pt, new URL(`http://x/preview/${tok}/%ZZ`), 0);
+  expect(res.status).toBe(400);
 });
 
 test("traversal → 403", () => {

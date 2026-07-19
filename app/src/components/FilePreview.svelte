@@ -38,6 +38,7 @@
   let imgSrc = $state("");
   let htmlSrc = $state("");
   let MarkdownComp = $state<any>(null);
+  let mdToken = $state(""); // one token per md render, reused for all local images
 
   const kind = $derived(previewKind(path));
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
@@ -73,9 +74,11 @@
     }
     return "/" + out.join("/");
   }
-  async function mintUrlForMdImage(relToDir: string): Promise<string> {
+  // Sync: reuse the single token minted for this render (mdToken) instead of one
+  // preview.mint RPC per image. Same scope subtree, so one token covers them all.
+  function mdImageUrl(relToDir: string): string {
     const abs = joinResolve(dirOf(path), relToDir);
-    return mintUrl(relFromBase(scope, abs));
+    return previewUrl(origin(), mdToken, relFromBase(scope, abs));
   }
 
   async function load() {
@@ -116,8 +119,12 @@
       lines = res.plain ? [] : splitLines(r.content);
       html = res.html;
       if (kind === "markdown") {
-        try { MarkdownComp = (await import("./MarkdownView.svelte")).default; } // lazy chunk
-        catch { onToast(tr("preview.mdFailed")); view = "source"; }
+        try {
+          // Mint ONE token up-front; every local image reuses it (no per-image RPC).
+          const { token } = (await conn.rpc("preview.mint", { base: scope })) as { token: string };
+          mdToken = token;
+          MarkdownComp = (await import("./MarkdownView.svelte")).default; // lazy chunk
+        } catch { onToast(tr("preview.mdFailed")); view = "source"; }
       }
       if (kind === "html") {
         // cache-bust so ⟳ / re-mint always reloads the iframe with fresh bytes.
@@ -187,7 +194,7 @@
         <div class="img-wrap">{#if imgSrc}<img src={imgSrc} alt={path} />{/if}</div>
       {:else if kind === "markdown" && view === "render" && MarkdownComp}
         <MarkdownComp source={raw} mdFileDir={dirOf(path)}
-          buildImageUrl={mintUrlForMdImage}
+          buildImageUrl={mdImageUrl}
           onFail={() => { view = "source"; onToast(tr("preview.mdFailed")); }} />
       {:else if kind === "html" && view === "render"}
         <HtmlView src={htmlSrc} />

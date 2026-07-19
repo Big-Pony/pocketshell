@@ -7,7 +7,9 @@
 
   let { source, mdFileDir, buildImageUrl, onFail }: {
     source: string; mdFileDir: string;
-    buildImageUrl: (relToDir: string) => Promise<string>;
+    // Sync builder: the parent mints ONE token per render and this just assembles
+    // the URL, so N local images cost 0 extra RPC round-trips (was 1 mint each).
+    buildImageUrl: (relToDir: string) => string;
     onFail: () => void;
   } = $props();
 
@@ -16,6 +18,17 @@
 
   // html:false blocks raw HTML tags entirely; DOMPurify is the second layer.
   const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
+
+  // The preview is rendered inline in the App's own page — without target/rel a
+  // link tap would navigate the whole PWA away. Force external links to a new
+  // tab with noopener so they never hijack the app.
+  const defaultLinkOpen = md.renderer.rules.link_open
+    ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+    tokens[idx].attrSet("target", "_blank");
+    tokens[idx].attrSet("rel", "noopener noreferrer");
+    return defaultLinkOpen(tokens, idx, options, env, self);
+  };
 
   // Highlight code blocks + swap local <img> to token URLs after the HTML lands.
   async function enhance() {
@@ -28,7 +41,7 @@
     for (const img of hostEl.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";
       const r = resolveMdImageSrc(mdFileDir, src);
-      if (r) { try { img.setAttribute("src", await buildImageUrl(r.relToDir)); } catch {} }
+      if (r) { try { img.setAttribute("src", buildImageUrl(r.relToDir)); } catch {} }
     }
   }
 
@@ -39,7 +52,7 @@
     (async () => {
       try {
         const dirty = md.render(src);
-        html = DOMPurify.sanitize(dirty, { ADD_ATTR: ["target"] });
+        html = DOMPurify.sanitize(dirty, { ADD_ATTR: ["target", "rel"] });
       } catch { onFail(); return; }
       await tick();
       await enhance();

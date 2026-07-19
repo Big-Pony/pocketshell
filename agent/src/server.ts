@@ -200,6 +200,12 @@ export function startServer(deps: Deps = {}) {
   const sweepTimer = setInterval(() => sweepTmp(config.tmpDir, 3_600_000, Date.now()), 1_800_000);
   (sweepTimer as unknown as { unref?: () => void }).unref?.();
 
+  // Preview tokens expire lazily on access; this proactively reclaims tokens
+  // that are minted but never hit again (e.g. tab closed) so the map stays
+  // bounded for long-lived connections instead of growing until disconnect.
+  const previewSweepTimer = setInterval(() => previewTokens.sweep(Date.now()), 300_000);
+  (previewSweepTimer as unknown as { unref?: () => void }).unref?.();
+
   const pushSnippets = (target?: Conn) => {
     const items = config.snippets.list().map((r) => ({
       id: r.id, group: r.group, label: r.label, command: r.command, autoEnter: r.autoEnter,
@@ -531,6 +537,7 @@ export function startServer(deps: Deps = {}) {
     stop() {
       clearInterval(pushTimer);
       clearInterval(sweepTimer);
+      clearInterval(previewSweepTimer);
       batcher.clearAll();
       terminal.dispose();
       server.stop(true);
