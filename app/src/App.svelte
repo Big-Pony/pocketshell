@@ -31,6 +31,7 @@
   import { fullscreenAction } from "./lib/fullscreen";
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
   import { suggest, delta } from "./lib/command-suggest";
+  import { suggestSlash } from "./lib/slash-catalog";
   import { CATALOG } from "./lib/command-catalog";
   import { t } from "svelte-i18n";
   import { applyLanguage, tr } from "./lib/i18n";
@@ -109,7 +110,12 @@
   }
   function recomputeHints() {
     const s = cmdLines.get(activeId);
-    hints = s && s.trusted ? suggest(s.line, s.history, CATALOG) : [];
+    // req 7-2: a line starting with '/' means the user is composing a
+    // CC/Codex slash command → suggest from the built-in slash catalog instead
+    // of shell history/catalog. delta()/onHint reuse unchanged.
+    hints = s && s.trusted
+      ? (s.line.startsWith("/") ? suggestSlash(s.line) : suggest(s.line, s.history, CATALOG))
+      : [];
   }
 
   conn.onStatus((s) => {
