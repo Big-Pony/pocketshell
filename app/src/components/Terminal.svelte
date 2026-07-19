@@ -50,6 +50,7 @@
   import { FitAddon } from "@xterm/addon-fit";
   import { Connection } from "../lib/connection";
   import { fromB64 } from "../lib/bytes";
+  import { withinTouchSlop } from "../lib/touch-select";
 
   let {
     conn,
@@ -154,19 +155,44 @@
       helper.setAttribute("tabindex", "-1");
       helper.blur();
     }
-    // req 7-5: static terminal text can't be selected by a mobile long-press.
-    // Root cause (diagnosed via elementsFromPoint + a synthetic-event probe): the
-    // text rows ARE on top with user-select:text, but xterm's SelectionService
-    // calls preventDefault() on mousedown over .xterm-screen to run its own
-    // mouse-drag selection. A mobile long-press fires a synthetic mousedown, and
-    // that preventDefault cancels the OS long-press/selection gesture — so no
-    // selection handles ever appear (a JS preventDefault CSS can't override).
-    // This pane is display-only (disableStdin) and the ops panel selects via the
-    // term.select() API, so xterm's interactive mouse selection is redundant:
-    // swallow mousedown in the capture phase before it reaches xterm and let the
-    // browser's native selection take over (smartCopy already reads
-    // window.getSelection()). Scroll is untouched (wheel/touch on .xterm-viewport,
-    // whose pointer-events stay default), so touch scrolling is unaffected.
+    // req 7-5: static terminal text can't be selected by a mobile long-press,
+    // even though the file preview (plain <pre>) selects fine. Root cause found by
+    // instrumenting xterm's DOM listeners: the text rows ARE the topmost hit target
+    // with user-select:text, but xterm reimplements TOUCH SCROLLING on the root
+    // .xterm element — its `touchmove` handler runs `viewport.scrollTop += delta`
+    // on any finger movement (the DOM renderer only keeps visible rows in the DOM,
+    // so scrollback needs manual scrolling). During a stationary long-press the
+    // finger jitters a few px → that touchmove scrolls a pixel → the browser
+    // reclassifies the gesture as a pan and never raises the OS selection handles.
+    // (The earlier mousedown theory was wrong: a long-press dispatches no mousedown,
+    // and xterm's cancel() is a no-op unless cancelEvents is set.)
+    //
+    // Two capture-phase gates on host, both running before xterm's own listeners
+    // (which sit on descendants .xterm/.xterm-screen):
+    // 1. touchstart/touchmove — swallow the touchmove while the finger stays within
+    //    the slop box (near-stationary long-press) so xterm never scrolls and native
+    //    selection can begin; release it once the finger clearly moves so a real
+    //    drag still scrolls scrollback. See lib/touch-select.ts for the rationale.
+    // 2. mousedown — this pane is display-only (disableStdin) and the ops panel
+    //    selects via term.select(), so xterm's mouse-drag selection is redundant;
+    //    swallowing mousedown also stops the trailing synthetic mouse events (fired
+    //    when the finger lifts) from clearing the fresh native selection.
+    // smartCopy already reads window.getSelection(), so the native selection flows
+    // straight into copy.
+    let tsX = 0, tsY = 0, touchGate = false;
+    host.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) { touchGate = false; return; }
+      tsX = e.touches[0].clientX; tsY = e.touches[0].clientY;
+      touchGate = true;
+    }, true);
+    host.addEventListener("touchmove", (e) => {
+      if (!touchGate || e.touches.length !== 1) return;
+      if (withinTouchSlop(e.touches[0].clientX - tsX, e.touches[0].clientY - tsY)) {
+        e.stopPropagation(); // keep the jitter from xterm's scroll → allow selection
+      } else {
+        touchGate = false; // real drag: let xterm scroll from here on
+      }
+    }, true);
     host.addEventListener("mousedown", (e) => { e.stopPropagation(); }, true);
     fit.fit();
 
