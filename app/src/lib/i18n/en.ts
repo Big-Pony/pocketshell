@@ -181,11 +181,19 @@ export default {
       enter: "Enter",
       enterAria: "Enter (return)",
       copySel: "Copy sel.",
-      copyAfter: "Copy after",
+      selectText: "Select text",
       copyAll: "Copy all",
       copyOutput: "Copy output",
       paste: "Paste",
     },
+  },
+  copymode: {
+    title: "Copy mode",
+    hint: "Long-press to select",
+    selectAll: "All",
+    copy: "Copy",
+    done: "Done",
+    empty: "Nothing to copy",
   },
   tasks: {
     state: {

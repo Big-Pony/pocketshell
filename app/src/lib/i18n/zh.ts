@@ -181,11 +181,19 @@ export default {
       enter: "确认",
       enterAria: "确认（回车）",
       copySel: "复制选区",
-      copyAfter: "复制后续",
+      selectText: "选择文本",
       copyAll: "全选复制",
       copyOutput: "复制输出",
       paste: "粘贴",
     },
+  },
+  copymode: {
+    title: "复制模式",
+    hint: "长按选中文本",
+    selectAll: "全选",
+    copy: "复制选中",
+    done: "完成",
+    empty: "无可复制内容",
   },
   tasks: {
     state: {

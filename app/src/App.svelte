@@ -6,6 +6,7 @@
   import { mergeSessions, tombstone, closeTab as closeTabFn, nextSessionName, shouldAdopt, type LocalSession } from "./lib/session-view";
   import { clampSplit, type BottomPanel } from "./lib/shell";
   import TerminalView from "./components/Terminal.svelte";
+  import TermCopyOverlay from "./components/TermCopyOverlay.svelte";
   import TopTabs from "./components/TopTabs.svelte";
   import TaskPanel from "./components/TaskPanel.svelte";
   import FilePanel from "./components/FilePanel.svelte";
@@ -44,6 +45,7 @@
   let bottomPanel = $state<BottomPanel>("kbd");
   let splitRatio = $state(0.6);
   let fullscreen = $state(false);
+  let copyMode = $state(false); // req 7-5: terminal "copy mode" overlay is open
   let pageFullscreen = $state(false);
   function togglePageFullscreen() {
     const action = fullscreenAction(document);
@@ -363,6 +365,7 @@
   }
   function selectTop(id: string) {
     cancelSelection();
+    copyMode = false; // leaving the tab drops the copy-mode overlay (clone is stale)
     if (id.startsWith("file:")) { activeTop = id; }
     else { activeTop = ""; selectSession(id); }
     // An open editor forces fullscreen; leaving its tab must release it (the
@@ -410,6 +413,7 @@
   function toBackground() {
     if (!activeId) return;
     cancelSelection();
+    copyMode = false;
     conn.detach(activeId); // R2: unsubscribe; reopening re-attaches via Terminal mount
     backgrounded.add(activeId);
     backgrounded = new Set(backgrounded);
@@ -456,7 +460,7 @@
       case "toBackground": toBackground(); break;
       case "scrollUp": terms.get(activeId)?.scrollPages(-1); break;
       case "scrollDown": terms.get(activeId)?.scrollPages(1); break;
-      case "toggleFullscreen": cancelSelection(); fullscreen = !fullscreen; break;
+      case "toggleFullscreen": cancelSelection(); copyMode = false; fullscreen = !fullscreen; break;
       case "copyVisible": {
         const t = activeTerm(); if (!t) { showToast(tr("app.toast.noTerminal")); break; }
         const text = lastOutput(t.buffer.active, t.rows);
@@ -510,17 +514,14 @@
         cancelSelection();
         break;
       }
-      case "copyAfter": {
-        const t = activeTerm(); if (!t) break;
-        const b = t.buffer.active;
-        const startRow = b.baseY + b.cursorY, startCol = b.cursorX;
-        let text = "";
-        for (let i = startRow; i < b.length; i++) {
-          const line = b.getLine(i)?.translateToString(true) ?? "";
-          text += (i === startRow ? line.slice(startCol) : line) + "\n";
-        }
-        writeClip(text.replace(/\n+$/, "\n"), tr("app.toast.copiedAfter"));
+      case "copyMode": {
+        // req 7-5: open the copy-mode overlay over the active terminal so a
+        // mobile long-press can select static text natively. File tabs have no
+        // terminal to clone.
+        if (activeTopId.startsWith("file:")) { showToast(tr("app.toast.noTerminal")); break; }
+        const t = activeTerm(); if (!t) { showToast(tr("app.toast.noTerminal")); break; }
         cancelSelection();
+        copyMode = true;
         break;
       }
       case "selectAllCopy": {
@@ -657,6 +658,14 @@
         <div class="hint-title">{$t('app.empty.title')}</div>
         <div class="hint-body">{$t('app.empty.body')}</div>
       </div>
+    {/if}
+    {#if copyMode}
+      <TermCopyOverlay term={activeTerm()}
+        onClose={() => (copyMode = false)}
+        onCopy={(text) => {
+          if (text.trim()) { writeClip(text, tr("app.toast.copiedSelection")); copyMode = false; }
+          else showToast(tr("app.toast.noSelection"));
+        }} />
     {/if}
   </div>
 

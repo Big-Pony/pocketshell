@@ -212,7 +212,7 @@
       </div>
       <div class="ops-bottom">
         <button class="act" onclick={() => onCommand({ type: "selCopy" })}>{$t('keyboard.ops.copySel')}</button>
-        <button class="act" onclick={() => onCommand({ type: "copyAfter" })}>{$t('keyboard.ops.copyAfter')}</button>
+        <button class="act" onclick={() => onCommand({ type: "copyMode" })}>{$t('keyboard.ops.selectText')}</button>
         <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>{$t('keyboard.ops.copyAll')}</button>
         <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>{$t('keyboard.ops.copyOutput')}</button>
         <button class="act" onclick={() => onCommand({ type: "paste" })}>{$t('keyboard.ops.paste')}</button>
