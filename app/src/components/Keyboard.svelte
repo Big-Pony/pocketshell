@@ -5,6 +5,7 @@
   import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/key-repeat";
+  import { imeSendText } from "../lib/ime-send";
 
   let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
@@ -68,8 +69,7 @@
   }
 
   function sendIme() {
-    if (!imeBuf) return;
-    onText(imeBuf + "\r");
+    onText(imeSendText(imeBuf));
     imeBuf = "";
   }
 
