@@ -30,6 +30,7 @@
   // render/source view toggle for md/html/image; plain code stays "source".
   let view = $state<"render" | "source">("source");
   let imgSrc = $state("");
+  let MarkdownComp = $state<any>(null);
 
   const kind = $derived(previewKind(path));
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
@@ -54,6 +55,22 @@
     catch { notice = tr("preview.imageFailed"); }
   }
 
+  // md images are relative to the md file's dir, but the token base is `scope`
+  // (project root). Resolve the image to an absolute path, then re-express it
+  // relative to scope so the /preview route serves it within the token subtree.
+  function joinResolve(dir: string, rel: string): string {
+    const out: string[] = [];
+    for (const p of (dir + "/" + rel).split("/")) {
+      if (p === "" || p === ".") continue;
+      if (p === "..") out.pop(); else out.push(p);
+    }
+    return "/" + out.join("/");
+  }
+  async function mintUrlForMdImage(relToDir: string): Promise<string> {
+    const abs = joinResolve(dirOf(path), relToDir);
+    return mintUrl(relFromBase(scope, abs));
+  }
+
   async function load() {
     notice = "";
     plain = false;
@@ -70,7 +87,7 @@
       return;
     }
     if (kind === "image") { view = "render"; await loadImage(); return; }
-    view = "source";
+    view = kind === "markdown" ? "render" : "source";
     try {
       const r = (await conn.rpc("fs.read", { path })) as { content: string; lang: string; mtime: number; truncated?: boolean; binary?: boolean };
       if (r.binary) { notice = tr("preview.binary"); lines = []; html = ""; canEdit = false; return; }
@@ -88,6 +105,10 @@
       if (res.plain) notice = notice ? `${notice} · ${tr("preview.plainLarge")}` : tr("preview.plainLarge");
       lines = res.plain ? [] : splitLines(r.content);
       html = res.html;
+      if (kind === "markdown") {
+        try { MarkdownComp = (await import("./MarkdownView.svelte")).default; } // lazy chunk
+        catch { onToast(tr("preview.mdFailed")); view = "source"; }
+      }
     } catch (e: any) {
       notice = e?.message ?? tr("preview.readFailed");
       lines = []; html = ""; plain = false; canEdit = false;
@@ -147,6 +168,10 @@
     <div class="pv-content" data-view={view}>
       {#if kind === "image"}
         <div class="img-wrap">{#if imgSrc}<img src={imgSrc} alt={path} />{/if}</div>
+      {:else if kind === "markdown" && view === "render" && MarkdownComp}
+        <MarkdownComp source={raw} mdFileDir={dirOf(path)}
+          buildImageUrl={mintUrlForMdImage}
+          onFail={() => { view = "source"; onToast(tr("preview.mdFailed")); }} />
       {:else}
         {#if notice}<div class="pv-notice">{notice}</div>{/if}
         {#if mode === "diff"}
