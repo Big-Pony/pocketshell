@@ -806,7 +806,27 @@ async function runCliDevices(argv: string[]): Promise<number> {
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
   const cliArgv = process.argv.slice(2);
-  if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
+  if (cliArgv[0] === "notify") {
+    void (async () => {
+      try {
+        const { parseNotifyPayload } = await import("./notify-subcommand");
+        let stdin = "";
+        try { stdin = await Bun.stdin.text(); } catch { /* no stdin (tty) */ }
+        const p = parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
+        if (!p) { process.exit(0); }              // not a PocketShell session
+        const url = process.env.POCKETSHELL_NOTIFY_URL;
+        const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
+        if (url && token) {
+          await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+            body: JSON.stringify(p),
+          }).catch(() => {});
+        }
+      } catch { /* never disturb the agent's normal run */ }
+      process.exit(0);
+    })();
+  } else if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
     // CLI subcommand path never boots the server.
     void runCliDevices(cliArgv).then((code) => process.exit(code));
   } else if (process.argv.includes("--version")) {
