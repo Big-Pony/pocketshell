@@ -75,6 +75,10 @@ export default {
     vibrate: {
       label: "Key vibration",
       desc: "Short haptic pulse on each key press",
+      off: "Off",
+      light: "Light",
+      medium: "Medium",
+      strong: "Strong",
     },
     devices: {
       label: "Devices",
@@ -105,6 +109,7 @@ export default {
       followOn: "Project root now follows the focused terminal",
       followOff: "Project root follow disabled",
     },
+    copied: { title: "Copied" },
     error: {
       download: "Download failed",
       downloadDir: "Archive download failed",
@@ -171,16 +176,7 @@ export default {
       hint: "Content stays in the local buffer until sent — it survives disconnects.",
     },
     ops: {
-      lineMode: "Line select · {count} lines · prev/next line extends",
-      selMode: "Selecting · {count} chars · arrow keys extend",
-      idle: "Arrow keys go to the program · tap “Select” or “Prev/Next line” to start",
-      select: "Select",
-      cancelSel: "Cancel",
-      prevLine: "Prev line",
-      nextLine: "Next line",
-      enter: "Enter",
       enterAria: "Enter (return)",
-      copySel: "Copy sel.",
       selectText: "Select text",
       copyAll: "Copy all",
       copyOutput: "Copy output",
@@ -205,12 +201,12 @@ export default {
     action: {
       open: "Open",
       enter: "Enter",
-      close: "Close",
+      close: "Delete",
     },
     menu: {
       rename: "Rename",
       copyOutput: "Copy output",
-      closeTab: "Close tab",
+      closeTab: "Delete",
       kill: "Kill",
     },
     prompt: {
@@ -312,11 +308,13 @@ export default {
   },
   tabs: {
     newTitle: "New terminal session",
+    kindShell: "Shell",
     namePh: "Session name",
     ariaNew: "New session",
     ariaClose: "Close tab",
     closeTitle: "Close “{title}”?",
     closeTermHint: "Only closes the tab; the session keeps running in the background and can be reopened from the task panel.",
+    closeShellHint: "This shell session will be closed and destroyed permanently.",
     closeFileHint: "Closes this file preview tab.",
     closeDirty: "This file has unsaved changes; closing will lose them.",
   },

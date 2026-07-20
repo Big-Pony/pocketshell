@@ -22,6 +22,7 @@
   }
 </script>
 
+<div class="stg-scroll">
 <div class="stg">
   <!-- Theme -->
   <div class="set">
@@ -77,9 +78,12 @@
       <div class="label">{$t('settings.vibrate.label')}</div>
       <div class="desc">{$t('settings.vibrate.desc')}</div>
     </div>
-    <div class="tog" class:on={settings.vibrate} role="switch" aria-checked={settings.vibrate} tabindex="0"
-      onclick={() => update("vibrate", !settings.vibrate)}
-      onkeydown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); update("vibrate", !settings.vibrate); } }}></div>
+    <div class="seg">
+      <button class:on={settings.vibrate === "off"} onclick={() => update("vibrate", "off")}>{$t('settings.vibrate.off')}</button>
+      <button class:on={settings.vibrate === "light"} onclick={() => update("vibrate", "light")}>{$t('settings.vibrate.light')}</button>
+      <button class:on={settings.vibrate === "medium"} onclick={() => update("vibrate", "medium")}>{$t('settings.vibrate.medium')}</button>
+      <button class:on={settings.vibrate === "strong"} onclick={() => update("vibrate", "strong")}>{$t('settings.vibrate.strong')}</button>
+    </div>
   </div>
 
   <!-- Device management -->
@@ -104,12 +108,13 @@
     </button>
   </div>
 </div>
-
 {#if showDevices}
   <DeviceManager {conn} onClose={() => (showDevices = false)} />
 {/if}
+</div>
 
 <style>
+  .stg-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .stg { padding: 8px; color: var(--text); }
   .set {
     display: flex;
@@ -146,30 +151,6 @@
     font-weight: 600;
     box-shadow: var(--seg-shadow);
   }
-  .tog {
-    width: 44px;
-    height: 26px;
-    border-radius: 999px;
-    background: var(--keyhi);
-    position: relative;
-    flex: 0 0 auto;
-    border: 1px solid var(--line);
-    transition: background 0.15s;
-  }
-  .tog::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #fff;
-    transition: 0.15s;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  }
-  .tog.on { background: var(--primary-bg); border-color: var(--primary-bg); }
-  .tog.on::after { left: 20px; background: var(--primary-text); }
   .btn {
     background: var(--primary-bg);
     color: var(--primary-text);

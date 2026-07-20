@@ -21,15 +21,15 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", fontSize: 14, vibrate: false, theme: "light", language: "en" }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: false, theme: "light", language: "en" });
+  saveSettings({ layout: "win", fontSize: 14, vibrate: "off", theme: "light", language: "en" }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: "off", theme: "light", language: "en" });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
   const store = memStore();
-  store.setItem("ps.settings", JSON.stringify({ vibrate: false }));
+  store.setItem("ps.settings", JSON.stringify({ vibrate: "off" }));
   const s = loadSettings(store);
-  expect(s.vibrate).toBe(false);
+  expect(s.vibrate).toBe("off");
   expect(s.layout).toBe("mac"); // default
   expect(s.fontSize).toBe(10);  // default
   expect(s.theme).toBe("dark"); // default
@@ -72,6 +72,27 @@ test("loadSettings rejects unknown language values and re-detects", () => {
   const store = memStore();
   store.setItem("ps.settings", JSON.stringify({ language: "fr" }));
   expect(loadSettings(store).language).toBe(detectLanguage());
+});
+
+test("loadSettings migrates legacy boolean vibrate true -> medium", () => {
+  const s = memStore();
+  s.setItem("ps.settings", JSON.stringify({ layout: "mac", fontSize: 10, vibrate: true, theme: "dark", language: "zh" }));
+  expect(loadSettings(s).vibrate).toBe("medium");
+});
+
+test("loadSettings migrates legacy boolean vibrate false -> off", () => {
+  const s = memStore();
+  s.setItem("ps.settings", JSON.stringify({ vibrate: false }));
+  expect(loadSettings(s).vibrate).toBe("off");
+});
+
+test("loadSettings accepts a valid vibrate level and rejects garbage", () => {
+  const s = memStore();
+  s.setItem("ps.settings", JSON.stringify({ vibrate: "strong" }));
+  expect(loadSettings(s).vibrate).toBe("strong");
+  const s2 = memStore();
+  s2.setItem("ps.settings", JSON.stringify({ vibrate: "loud" }));
+  expect(loadSettings(s2).vibrate).toBe(DEFAULT_SETTINGS.vibrate);
 });
 
 test("detectLanguage follows navigator.language (zh* -> zh, else en)", () => {

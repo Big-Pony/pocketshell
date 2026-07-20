@@ -20,7 +20,7 @@
   import UpdateDialog from "./components/UpdateDialog.svelte";
   import type { CheckResult } from "./lib/update";
   import type { AppCommand } from "./lib/input-router";
-  import { begin, beginLine, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
+  import { reset, type SelState } from "./lib/terminal-select";
   import { detectSwipe } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { applyTheme, watchSystem } from "./lib/theme";
@@ -242,11 +242,11 @@
       return { kind: "file" as const, id, title: f.title };
     }
     const s = sessions.find((x) => x.name === id);
-    return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false };
+    return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false, shell: s?.kind === "shell" };
   }));
 
-  function newSession(name: string) {
-    conn.newSession(name);
+  function newSession(name: string, kind: "tmux" | "shell" = "tmux") {
+    conn.newSession(name, { kind });
     activeId = name;
     backgrounded.delete(name); backgrounded = new Set(backgrounded);
     tabOrder = appendOrder(tabOrder, name);
@@ -356,6 +356,17 @@
   function closeTopTab(id: string) {
     if (id.startsWith("file:")) { closeFile(id); return; }
     cancelSelection();
+    const s = sessions.find((x) => x.name === id);
+    if (s?.kind === "shell") {
+      // Shell tabs are ephemeral: closing the tab kills the PTY outright.
+      conn.kill(id);
+      sessions = closeTabFn(sessions, id);
+      terms.delete(id);
+      tabOrder = removeOrder(tabOrder, id);
+      if (activeId === id) activeId = topSessions.filter((x) => x.name !== id)[0]?.name ?? "";
+      if (activeTop === id) activeTop = "";
+      return;
+    }
     conn.detach(id); // backgrounded term tabs stop their output stream, same as toBackground
     backgrounded.add(id);
     backgrounded = new Set(backgrounded);
@@ -422,22 +433,6 @@
 
   function activeTerm() { return terms.get(activeId); }
 
-  function applySel(t: import("@xterm/xterm").Terminal) {
-    const r = range(sel, t.cols);
-    t.select(r.col, r.row, r.length);
-    selCount = sel.mode === "line" ? r.length / t.cols : r.length;
-  }
-
-  // Scroll the viewport so `row` stays visible — lets line/char selection reach
-  // scrolled-off history so it can be copied.
-  function revealRow(t: import("@xterm/xterm").Terminal, row: number) {
-    const b = t.buffer.active;
-    const top = b.viewportY;
-    const bot = top + t.rows - 1;
-    if (row < top) t.scrollToLine(row);
-    else if (row > bot) t.scrollToLine(Math.max(0, row - t.rows + 1));
-  }
-
   function cancelSelection() {
     if (sel.mode === "idle") return;
     activeTerm()?.clearSelection();
@@ -471,47 +466,6 @@
       case "renameSession": {
         const next = prompt(tr("app.prompt.rename"), activeId);
         if (next && next.trim() && next !== activeId) renameSession(activeId, next.trim());
-        break;
-      }
-      case "selBegin": {
-        const t = activeTerm(); if (!t) break;
-        const b = t.buffer.active;
-        sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
-        applySel(t);
-        break;
-      }
-      case "selMove": {
-        const t = activeTerm(); if (!t || sel.mode === "idle") break;
-        sel = moveFocus(sel, c.dir, { cols: t.cols, maxRow: t.buffer.active.length - 1 });
-        applySel(t);
-        revealRow(t, sel.focus.row);
-        break;
-      }
-      case "lineUp":
-      case "lineDown": {
-        // Whole-line selection that hops through the buffer (incl. scrollback),
-        // scrolling the viewport to follow so historical lines can be copied.
-        const t = activeTerm(); if (!t) break;
-        const b = t.buffer.active;
-        const maxRow = b.length - 1;
-        if (sel.mode !== "line") {
-          // First hop grabs the last real output line (just above the prompt).
-          const startRow = Math.max(0, Math.min(maxRow, b.baseY + b.cursorY - 1));
-          sel = beginLine(startRow);
-        } else {
-          sel = moveFocus(sel, c.type === "lineUp" ? "up" : "down", { cols: t.cols, maxRow });
-        }
-        applySel(t);
-        revealRow(t, sel.focus.row);
-        break;
-      }
-      case "selCancel": cancelSelection(); break;
-      case "selCopy": {
-        const t = activeTerm(); if (!t) break;
-        const text = t.getSelection();
-        if (!text) { showToast(tr("app.toast.noSelection")); break; }
-        writeClip(text, tr("app.toast.copiedSelection"));
-        cancelSelection();
         break;
       }
       case "copyMode": {
@@ -576,13 +530,15 @@
 
   // ---- Toast ----
   let toastText = $state("");
+  let toastDetail = $state("");
   let toastVisible = $state(false);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
-  function showToast(text: string) {
+  function showToast(text: string, opt: { detail?: string; ms?: number } = {}) {
     toastText = text;
+    toastDetail = opt.detail ?? "";
     toastVisible = true;
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toastVisible = false), 1800);
+    toastTimer = setTimeout(() => (toastVisible = false), opt.ms ?? 1800);
   }
 
   // Persist the open tabs whenever they change (debounced) so a PWA suspend +
@@ -674,11 +630,11 @@
   </div>
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
-      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onNewFile={handleNewFile} />
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
       <TaskPanel
-        {sessions}
+        sessions={sessions.filter((s) => s.kind !== "shell")}
         onSelect={enterSession}
         onRename={renameSession}
         onKill={killSession}
@@ -696,7 +652,7 @@
         }} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "kbd"}>
-      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
+      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {hints} {onHint} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "snip"}>
       <SnippetPanel {conn} onInsert={sendActive} />
@@ -707,7 +663,10 @@
 </div>
 
 {#if toastVisible}
-  <div class="toast" class:visible={toastVisible}>{toastText}</div>
+  <div class="toast" class:visible={toastVisible} class:has-detail={toastDetail}>
+    <div class="toast-title">{toastText}</div>
+    {#if toastDetail}<div class="toast-detail mono">{toastDetail}</div>{/if}
+  </div>
 {/if}
 
 {#if updOpen && updInfo}
@@ -925,4 +884,6 @@
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
+  .toast.has-detail { white-space: normal; max-width: min(78vw, 320px); text-align: center; border-radius: var(--radius-lg); }
+  .toast-detail { font-size: 0.66rem; color: var(--dim); margin-top: 4px; word-break: break-all; line-height: 1.5; }
 </style>

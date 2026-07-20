@@ -351,6 +351,7 @@ export class TerminalService {
 
     const meta: SessionMeta = {
       name,
+      kind: "tmux",
       state: "run",
       cols,
       rows,
@@ -362,6 +363,13 @@ export class TerminalService {
     this.sessions.set(name, { pty, meta, lastOutputAt: Date.now() });
     this.states.set(name, new StateHysteresis("run"));
     this.emitSessionsChange();
+  }
+
+  // Public liveness check across owned + any live tmux session (foreign
+  // included). Used by the server to reject a shell session whose name would
+  // collide with an existing tmux session (cross-service name uniqueness).
+  has(name: string): boolean {
+    return this.sessions.has(name) || this.hasSession(name);
   }
 
   write(name: string, data: Uint8Array): void {
@@ -477,6 +485,7 @@ export class TerminalService {
         .filter((r) => !this.sessions.has(r.name))
         .map(async (r) => ({
           name: r.name,
+          kind: "tmux" as const,
           state: "idle" as const,
           cols: r.cols,
           rows: r.rows,

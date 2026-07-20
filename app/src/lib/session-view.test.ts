@@ -6,7 +6,7 @@ import {
 import type { SessionMeta } from "./protocol";
 
 const meta = (over: Partial<SessionMeta> = {}): SessionMeta => ({
-  name: "s1", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true, ...over,
+  name: "s1", kind: "tmux", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true, ...over,
 });
 
 test("stateDotClass maps idle to dot-idle", () => {

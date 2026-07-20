@@ -7,6 +7,7 @@ export type SessionState = "run" | "wait" | "done" | "idle";
 
 export interface SessionMeta {
   name: string;
+  kind: "tmux" | "shell";
   state: SessionState;
   cols: number;
   rows: number;
@@ -35,7 +36,7 @@ export type ClientMsg =
   | { type: "detach"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
-  | { type: "newSession"; name: string; cmd?: string; cwd?: string }
+  | { type: "newSession"; name: string; cmd?: string; cwd?: string; kind?: "tmux" | "shell" }
   | { type: "kill"; sessionId: string }
   | { type: "listSessions" }
   | { type: "renameSession"; sessionId: string; name: string }

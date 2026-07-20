@@ -126,6 +126,16 @@ test("queues nothing until open, then flushes newSession + input", () => {
   expect(types).toEqual(["newSession", "input", "listSessions"]);
 });
 
+test("newSession forwards the kind field", () => {
+  const { sched } = makeFakeScheduler();
+  let ws!: FakeWS;
+  const conn = new Connection({ url: "ws://x", scheduler: sched, wsFactory: () => (ws = new FakeWS()), channelFactory: passthroughInitiator });
+  completeHandshake(ws);
+  conn.newSession("sh1", { kind: "shell" });
+  const frame = businessSent(ws).map((b) => decodeMsg(b)).find((m) => m.type === "newSession");
+  expect(frame).toMatchObject({ type: "newSession", name: "sh1", kind: "shell" });
+});
+
 // ──────────────────────────────────────────────────────────────
 // TEST 3 (orig): decodes output frames and delivers decoded bytes
 // Preserved: output bytes correctly delivered after handshake
@@ -152,7 +162,7 @@ test("dispatches a sessions frame to onSessions", () => {
   completeHandshake(ws);
   const got: SessionMeta[][] = [];
   conn.onSessions((s) => got.push(s));
-  const meta: SessionMeta = { name: "s1", state: "run", cols: 80, rows: 24, lastLine: "hi", createdAt: 0 };
+  const meta: SessionMeta = { name: "s1", kind: "tmux", state: "run", cols: 80, rows: 24, lastLine: "hi", createdAt: 0, attached: true };
   ws.emit(encode({ type: "sessions", sessions: [meta] }));
   expect(got).toEqual([[meta]]);
 });

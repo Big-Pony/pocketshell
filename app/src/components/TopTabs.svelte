@@ -4,13 +4,13 @@
   import type { SessionState } from "../lib/protocol";
 
   type TabView =
-    | { kind: "term"; id: string; title: string; state: SessionState; closed: boolean }
+    | { kind: "term"; id: string; title: string; state: SessionState; closed: boolean; shell: boolean }
     | { kind: "file"; id: string; title: string };
 
   let { tabs, activeId, onSelect, onNew, onCloseTab, dirtyIds }: {
     tabs: TabView[]; activeId: string;
     onSelect: (id: string) => void;
-    onNew: (name: string) => void;
+    onNew: (name: string, kind: "tmux" | "shell") => void;
     onCloseTab: (id: string) => void;
     dirtyIds?: Set<string>;
   } = $props();
@@ -18,10 +18,11 @@
   // New-session modal
   let adding = $state(false);
   let draft = $state("");
-  function openAdd() { draft = ""; adding = true; }
+  let draftKind = $state<"tmux" | "shell">("tmux");
+  function openAdd() { draft = ""; draftKind = "tmux"; adding = true; }
   function submitAdd() {
     const name = draft.trim();
-    if (name) onNew(name);
+    if (name) onNew(name, draftKind);
     adding = false;
   }
 
@@ -95,7 +96,9 @@
         onpointerdown={(e) => onTabDown(e, t)}
         onpointerup={(e) => onTabUp(e, t)}
       >
-        {#if t.kind === "term"}<span class="dot {stateDotClass(t.state)}"></span>{/if}
+        {#if t.kind === "term"}
+          {#if t.shell}<span class="sh-glyph mono">❯</span>{:else}<span class="dot {stateDotClass(t.state)}"></span>{/if}
+        {/if}
         <span class="name">{t.title}</span>
       </button>
     {/each}
@@ -111,6 +114,10 @@
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (e.key === "Escape") adding = false; }}>
       <div class="dlg-title">{$t('tabs.newTitle')}</div>
+      <div class="kind-seg">
+        <button class:on={draftKind === "tmux"} onclick={() => (draftKind = "tmux")}>tmux</button>
+        <button class:on={draftKind === "shell"} onclick={() => (draftKind = "shell")}>{$t('tabs.kindShell')}</button>
+      </div>
       <input class="dlg-input" use:autoFocus bind:value={draft} placeholder={$t('tabs.namePh')}
         onkeydown={(e) => { if (e.key === "Enter") submitAdd(); if (e.key === "Escape") adding = false; }} />
       <div class="dlg-btns">
@@ -128,7 +135,7 @@
       onkeydown={(e) => { if (e.key === "Escape") closing = null; }}>
       <div class="dlg-title">{$t('tabs.closeTitle', { values: { title: closing.title } })}</div>
       <div class="dlg-hint">
-        {closing.kind === "term" ? $t('tabs.closeTermHint') : $t('tabs.closeFileHint')}
+        {closing.kind === "term" ? (closing.shell ? $t('tabs.closeShellHint') : $t('tabs.closeTermHint')) : $t('tabs.closeFileHint')}
         {#if closing.kind === "file" && dirtyIds?.has(closing.id)}
           <div class="dirty-warn">{$t('tabs.closeDirty')}</div>
         {/if}
@@ -171,7 +178,12 @@
   }
   .add:active { background: var(--keyhi); }
 
-  .overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: grid; place-items: center; }
+  .overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: flex; justify-content: center; align-items: flex-start; }
+  .overlay .dlg { margin-top: 14vh; }
+  .kind-seg { display: flex; gap: 2px; background: var(--seg-bg); border: 1px solid var(--seg-line); border-radius: 999px; padding: 2px; margin-bottom: 12px; }
+  .kind-seg button { flex: 1; background: transparent; border: 0; color: var(--dim); padding: 6px 0; font-size: 0.72rem; border-radius: 999px; }
+  .kind-seg button.on { background: var(--seg-active-bg); color: var(--seg-active-text); font-weight: 600; box-shadow: var(--seg-shadow); }
+  .sh-glyph { color: var(--accent); font-size: 0.7rem; }
   .dlg { background: var(--dlg-bg); border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 20px; width: min(280px, 82vw); text-align: center; box-shadow: var(--pop-shadow); }
   .dlg-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 10px; }
   .dlg-hint { font-size: 0.7rem; color: var(--dim); margin-bottom: 14px; line-height: 1.5; }

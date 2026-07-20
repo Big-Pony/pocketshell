@@ -75,6 +75,10 @@ export default {
     vibrate: {
       label: "按键震动",
       desc: "自定义键盘按下时短振一下",
+      off: "关",
+      light: "轻",
+      medium: "中",
+      strong: "强",
     },
     devices: {
       label: "设备管理",
@@ -105,6 +109,7 @@ export default {
       followOn: "项目根开始跟随聚焦终端",
       followOff: "已取消项目根跟随",
     },
+    copied: { title: "复制成功" },
     error: {
       download: "下载失败",
       downloadDir: "打包下载失败",
@@ -171,16 +176,7 @@ export default {
       hint: "发送前内容只存在于本地缓冲区，断线也不丢失。",
     },
     ops: {
-      lineMode: "选行中 · {count} 行 · 上一行/下一行扩选",
-      selMode: "选区中 · {count} 字 · 方向键扩选",
-      idle: "方向键发送到程序 · 点「选区」或「上/下一行」开始",
-      select: "选区",
-      cancelSel: "取消",
-      prevLine: "上一行",
-      nextLine: "下一行",
-      enter: "确认",
       enterAria: "确认（回车）",
-      copySel: "复制选区",
       selectText: "选择文本",
       copyAll: "全选复制",
       copyOutput: "复制输出",
@@ -205,12 +201,12 @@ export default {
     action: {
       open: "打开",
       enter: "进入",
-      close: "关闭",
+      close: "删除",
     },
     menu: {
       rename: "重命名",
       copyOutput: "复制输出",
-      closeTab: "关闭标签",
+      closeTab: "删除",
       kill: "终止",
     },
     prompt: {
@@ -312,11 +308,13 @@ export default {
   },
   tabs: {
     newTitle: "新建终端会话",
+    kindShell: "Shell",
     namePh: "会话名称",
     ariaNew: "新建会话",
     ariaClose: "关闭标签",
     closeTitle: "关闭「{title}」？",
     closeTermHint: "仅关闭标签，会话仍在后台运行，可从任务面板重新打开。",
+    closeShellHint: "该 Shell 会话将被关闭并销毁，无法恢复。",
     closeFileHint: "关闭该文件预览标签。",
     closeDirty: "该文件有未保存的修改，关闭将丢失。",
   },

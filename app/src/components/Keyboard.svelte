@@ -1,16 +1,17 @@
 <!-- app/src/components/Keyboard.svelte -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/key-repeat";
   import { imeSendText } from "../lib/ime-send";
+  import type { VibrateLevel } from "../lib/settings";
+  import { keyboardHeight, isKeyboardOpen, type ViewportMetrics } from "../lib/keyboard-inset";
 
-  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle", hints = [], onHint = (_c: string) => {} }: {
+  let { onText, onCommand, vibrate = "medium" as VibrateLevel, layout = "mac", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
-    vibrate?: boolean; layout?: "mac" | "win"; selecting?: boolean; selCount?: number;
-    selMode?: "idle" | "selecting" | "line";
+    vibrate?: VibrateLevel; layout?: "mac" | "win";
     hints?: string[]; onHint?: (cmd: string) => void;
   } = $props();
 
@@ -18,9 +19,61 @@
   let mods = $state<ModState>({ ...EMPTY_MODS });
   let imeBuf = $state("");
 
+  let imeFocused = $state(false);
+  let kbHeight = $state(0);   // visualViewport-fallback keyboard height (px)
+  let kbOpen = $state(false);
+  // Two mutually-exclusive strategies (they must NOT be mixed — that was the
+  // bug: overlaysContent stops the viewport from resizing, so visualViewport
+  // then reports height 0 and the composer sat behind the keyboard):
+  //  - Chrome/Android VirtualKeyboard API: keyboard OVERLAYS content (viewport
+  //    unchanged, terminal stays put), position via CSS env(keyboard-inset-*).
+  //  - Everything else (iOS Safari): browser shrinks the visual viewport, so
+  //    measure it and offset the composer's `bottom` by that delta.
+  const hasVK = typeof navigator !== "undefined" && "virtualKeyboard" in navigator;
+
+  function readViewport(): ViewportMetrics {
+    const vv = (typeof window !== "undefined" ? window.visualViewport : null);
+    return {
+      innerHeight: typeof window !== "undefined" ? window.innerHeight : 0,
+      vvHeight: vv?.height ?? (typeof window !== "undefined" ? window.innerHeight : 0),
+      vvOffsetTop: vv?.offsetTop ?? 0,
+    };
+  }
+  function syncViewport() {
+    const m = readViewport();
+    kbHeight = keyboardHeight(m);
+    kbOpen = isKeyboardOpen(m);
+  }
+  onMount(() => {
+    if (hasVK) {
+      const vk = (navigator as any).virtualKeyboard;
+      // Opt out of auto-resize: the keyboard overlays content and CSS
+      // env(keyboard-inset-height) drives the composer's position. Only need
+      // geometrychange here to know when the keyboard is actually up.
+      try { vk.overlaysContent = true; } catch { /* unsupported */ }
+      const onGeo = () => { kbOpen = (vk.boundingRect?.height ?? 0) > 0; };
+      vk.addEventListener?.("geometrychange", onGeo);
+      return () => vk.removeEventListener?.("geometrychange", onGeo);
+    }
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", syncViewport);
+    vv?.addEventListener("scroll", syncViewport);
+    syncViewport();
+    return () => {
+      vv?.removeEventListener("resize", syncViewport);
+      vv?.removeEventListener("scroll", syncViewport);
+    };
+  });
+
   const MODSET = new Set<string>(MOD_IDS);
 
-  function buzz() { if (vibrate) navigator.vibrate?.(8); }
+  const VIBE_PATTERN: Record<VibrateLevel, number[]> = {
+    off: [], light: [12], medium: [20], strong: [16, 8, 24],
+  };
+  function buzz() {
+    const p = VIBE_PATTERN[vibrate];
+    if (p.length) navigator.vibrate?.(p);
+  }
 
   // Long-press repeaters keyed by keycap id (one per held key).
   const repeaters = new Map<string, KeyRepeater>();
@@ -29,7 +82,7 @@
   // Repeat ticks re-resolve, so an armed one-shot modifier (e.g. Shift) only
   // affects the first shot — holding "a" with Shift armed types "Aaaa…".
   function fireKey(id: string) {
-    const r = resolveKey(id, activeMods(mods), selecting);
+    const r = resolveKey(id, activeMods(mods));
     if (r.kind === "bytes") onText(r.text);
     else if (r.kind === "command") onCommand(r.command);
     mods = consumeAfterKey(mods);
@@ -41,7 +94,7 @@
   function keyDown(id: string) {
     buzz(); // vibrate on keydown only — repeating it would be a constant hum
     if (MODSET.has(id)) { mods = tapMod(mods, id as ModName); return; }
-    const r = resolveKey(id, activeMods(mods), selecting);
+    const r = resolveKey(id, activeMods(mods));
     if (r.kind !== "bytes") {
       if (r.kind === "command") onCommand(r.command);
       mods = consumeAfterKey(mods);
@@ -147,9 +200,11 @@
       {/each}
     </div>
   {:else if sub === "ime"}
-    <div class="ime">
+    <div class="ime" class:floating={imeFocused && kbOpen} style={imeFocused && kbOpen && !hasVK ? `bottom:${kbHeight}px` : ""}>
       <div class="target">{$t('keyboard.ime.target')}</div>
-      <textarea bind:value={imeBuf} placeholder={$t('keyboard.ime.ph')} rows="3"></textarea>
+      <textarea bind:value={imeBuf} placeholder={$t('keyboard.ime.ph')} rows="3"
+        onfocus={() => { imeFocused = true; if (!hasVK) syncViewport(); }}
+        onblur={() => { imeFocused = false; }}></textarea>
       <div class="ime-actions">
         <button class="clear" onclick={() => (imeBuf = "")}>{$t('keyboard.ime.clear')}</button>
         <button class="send" onclick={sendIme}>{$t('keyboard.ime.send')}</button>
@@ -158,76 +213,51 @@
     </div>
   {:else}
     <div class="ops">
-      <div class="ops-mode">
-        {#if selMode === "line"}{$t('keyboard.ops.lineMode', { values: { count: selCount } })}{:else if selMode === "selecting"}{$t('keyboard.ops.selMode', { values: { count: selCount } })}{:else}{$t('keyboard.ops.idle')}{/if}
+      <div class="ops-row">
+        <button class="key" data-key-id="Esc"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
+          onpointerup={() => keyUp("Esc")} onpointercancel={() => keyUp("Esc")} onpointerleave={() => keyUp("Esc")}>Esc</button>
+        <button class="key" data-key-id="Tab"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("Tab"); }}
+          onpointerup={() => keyUp("Tab")} onpointercancel={() => keyUp("Tab")} onpointerleave={() => keyUp("Tab")}>Tab</button>
+        <button class="key" data-key-id="Del"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("Del"); }}
+          onpointerup={() => keyUp("Del")} onpointercancel={() => keyUp("Del")} onpointerleave={() => keyUp("Del")}>Del</button>
       </div>
       <div class="ops-main">
         <div class="dpad">
           <div></div>
-          <button class="key up"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowUp"); }}
-            onpointerup={() => keyUp("ArrowUp")}
-            onpointercancel={() => keyUp("ArrowUp")}
-            onpointerleave={() => keyUp("ArrowUp")}>↑</button>
+          <button class="key up" onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowUp"); }}
+            onpointerup={() => keyUp("ArrowUp")} onpointercancel={() => keyUp("ArrowUp")} onpointerleave={() => keyUp("ArrowUp")}>↑</button>
           <div></div>
-          <button class="key left"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowLeft"); }}
-            onpointerup={() => keyUp("ArrowLeft")}
-            onpointercancel={() => keyUp("ArrowLeft")}
-            onpointerleave={() => keyUp("ArrowLeft")}>←</button>
-          <button class="act toggle" class:on={selecting}
-            onclick={() => onCommand(selecting ? { type: "selCancel" } : { type: "selBegin" })}>{selecting ? $t('keyboard.ops.cancelSel') : $t('keyboard.ops.select')}</button>
-          <button class="key right"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowRight"); }}
-            onpointerup={() => keyUp("ArrowRight")}
-            onpointercancel={() => keyUp("ArrowRight")}
-            onpointerleave={() => keyUp("ArrowRight")}>→</button>
+          <button class="key left" onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowLeft"); }}
+            onpointerup={() => keyUp("ArrowLeft")} onpointercancel={() => keyUp("ArrowLeft")} onpointerleave={() => keyUp("ArrowLeft")}>←</button>
+          <button class="key enter-center" data-key-id="Enter" aria-label={$t('keyboard.ops.enterAria')}
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Enter"); }}
+            onpointerup={() => keyUp("Enter")} onpointercancel={() => keyUp("Enter")} onpointerleave={() => keyUp("Enter")}>⏎</button>
+          <button class="key right" onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowRight"); }}
+            onpointerup={() => keyUp("ArrowRight")} onpointercancel={() => keyUp("ArrowRight")} onpointerleave={() => keyUp("ArrowRight")}>→</button>
           <div></div>
-          <button class="key down"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowDown"); }}
-            onpointerup={() => keyUp("ArrowDown")}
-            onpointercancel={() => keyUp("ArrowDown")}
-            onpointerleave={() => keyUp("ArrowDown")}>↓</button>
+          <button class="key down" onpointerdown={(e) => { e.preventDefault(); keyDown("ArrowDown"); }}
+            onpointerup={() => keyUp("ArrowDown")} onpointercancel={() => keyUp("ArrowDown")} onpointerleave={() => keyUp("ArrowDown")}>↓</button>
           <div></div>
         </div>
-        <div class="ops-side">
-          <button class="act line" onclick={() => onCommand({ type: "lineUp" })}>{$t('keyboard.ops.prevLine')}</button>
-          <button class="act line" onclick={() => onCommand({ type: "lineDown" })}>{$t('keyboard.ops.nextLine')}</button>
-          <button class="key"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("Home"); }}
-            onpointerup={() => keyUp("Home")}
-            onpointercancel={() => keyUp("Home")}
-            onpointerleave={() => keyUp("Home")}>Home</button>
-          <button class="key"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("End"); }}
-            onpointerup={() => keyUp("End")}
-            onpointercancel={() => keyUp("End")}
-            onpointerleave={() => keyUp("End")}>End</button>
-          <button class="enter-fab" aria-label={$t('keyboard.ops.enterAria')}
-            onpointerdown={(e) => { e.preventDefault(); keyDown("Enter"); }}
-            onpointerup={() => keyUp("Enter")}
-            onpointercancel={() => keyUp("Enter")}
-            onpointerleave={() => keyUp("Enter")}>{$t('keyboard.ops.enter')}</button>
+        <div class="ops-nav2">
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("Home"); }}
+            onpointerup={() => keyUp("Home")} onpointercancel={() => keyUp("Home")} onpointerleave={() => keyUp("Home")}>Home</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("End"); }}
+            onpointerup={() => keyUp("End")} onpointercancel={() => keyUp("End")} onpointerleave={() => keyUp("End")}>End</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("PgUp"); }}
+            onpointerup={() => keyUp("PgUp")} onpointercancel={() => keyUp("PgUp")} onpointerleave={() => keyUp("PgUp")}>PgUp</button>
+          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("PgDn"); }}
+            onpointerup={() => keyUp("PgDn")} onpointercancel={() => keyUp("PgDn")} onpointerleave={() => keyUp("PgDn")}>PgDn</button>
         </div>
       </div>
       <div class="ops-bottom">
-        <button class="act" onclick={() => onCommand({ type: "selCopy" })}>{$t('keyboard.ops.copySel')}</button>
         <button class="act" onclick={() => onCommand({ type: "copyMode" })}>{$t('keyboard.ops.selectText')}</button>
         <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>{$t('keyboard.ops.copyAll')}</button>
         <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>{$t('keyboard.ops.copyOutput')}</button>
         <button class="act" onclick={() => onCommand({ type: "paste" })}>{$t('keyboard.ops.paste')}</button>
-      </div>
-      <div class="ops-nav">
-        <button class="key"
-          onpointerdown={(e) => { e.preventDefault(); keyDown("PgUp"); }}
-          onpointerup={() => keyUp("PgUp")}
-          onpointercancel={() => keyUp("PgUp")}
-          onpointerleave={() => keyUp("PgUp")}>PgUp</button>
-        <button class="key"
-          onpointerdown={(e) => { e.preventDefault(); keyDown("PgDn"); }}
-          onpointerup={() => keyUp("PgDn")}
-          onpointercancel={() => keyUp("PgDn")}
-          onpointerleave={() => keyUp("PgDn")}>PgDn</button>
       </div>
     </div>
   {/if}
@@ -403,6 +433,19 @@
     flex: 1;
     overflow-y: auto;
   }
+  .ime.floating {
+    position: fixed;
+    left: 0; right: 0;
+    /* VirtualKeyboard API path: sit exactly on top of the keyboard. The unit
+       on the fallback is REQUIRED (a unitless 0 breaks env() in Safari). The
+       visualViewport path overrides this with an inline `bottom:<px>`. */
+    bottom: env(keyboard-inset-height, 0px);
+    z-index: 30;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    box-shadow: var(--pop-shadow);
+    padding: 8px 10px;
+  }
   .target {
     font-size: 0.7rem;
     color: var(--dim);
@@ -457,11 +500,12 @@
     flex: 1;
     overflow-y: auto;
   }
-  .ops-mode {
-    font-size: 0.65rem;
-    color: var(--dim);
-    text-align: center;
+  .ops-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
   }
+  .ops-row .key { min-height: 2.6em; font-size: 0.74rem; }
   .ops-main {
     display: flex;
     gap: 6px;
@@ -482,62 +526,35 @@
   .dpad .left { grid-area: left; }
   .dpad .right { grid-area: right; }
   .dpad .down { grid-area: down; }
-  .dpad .toggle { grid-area: toggle; }
-  .dpad .key,
-  .dpad .toggle {
+  .dpad .key {
     min-height: 3em;
     font-size: 0.8rem;
     padding: 0 2px;
   }
-  .ops-side {
+  .dpad .enter-center {
+    grid-area: toggle;
+    background: var(--key-enter-bg);
+    color: var(--key-enter-text);
+    border-color: var(--key-enter-line);
+    font-weight: 700;
+  }
+  .ops-nav2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
     gap: 4px;
     flex: 1 1 0;
-    position: relative;
   }
-  .enter-fab {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 3.9em;
-    height: 3.9em;
-    border-radius: 50%;
-    background: var(--primary-bg);
-    color: var(--primary-text);
-    border: 2px solid var(--bg);
-    font-size: 0.94rem;
-    font-weight: 600;
-    z-index: 2;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    touch-action: none;
-    user-select: none;
-  }
-  .enter-fab:active { filter: brightness(0.92); }
-  .ops-side .act,
-  .ops-side .key {
-    min-height: 3em;
-    font-size: 0.75rem;
-    padding: 0 2px;
-  }
+  .ops-nav2 .key { min-height: 3em; font-size: 0.75rem; }
   .ops-bottom {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 4px;
   }
   .ops-bottom .act {
     padding: 10px 0;
     font-size: 0.72rem;
   }
-  .ops-nav {
-    display: flex;
-    gap: 4px;
-  }
-  .ops-nav .key { flex: 1; min-height: 2.6em; font-size: 0.72rem; }
   .act {
     background: var(--key);
     color: var(--key-text);
@@ -545,10 +562,5 @@
     border-radius: var(--radius-md);
     padding: 6px 0;
     font-size: 0.72rem;
-  }
-  .act.on {
-    background: var(--accent);
-    color: var(--on-accent);
-    border-color: var(--accent);
   }
 </style>

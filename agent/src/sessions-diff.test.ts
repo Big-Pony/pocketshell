@@ -4,6 +4,7 @@ import type { SessionMeta } from "./protocol";
 
 const base: SessionMeta = {
   name: "work",
+  kind: "tmux",
   state: "run",
   cols: 80,
   rows: 24,

@@ -406,8 +406,8 @@ export class Connection {
     }
   }
 
-  newSession(name: string, opt: { cmd?: string; cwd?: string } = {}): void {
-    this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd });
+  newSession(name: string, opt: { cmd?: string; cwd?: string; kind?: "tmux" | "shell" } = {}): void {
+    this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd, kind: opt.kind });
   }
   attach(sessionId: string, lastSeq?: number): void {
     const subscribed = this.attached.has(sessionId);
