@@ -242,11 +242,11 @@
       return { kind: "file" as const, id, title: f.title };
     }
     const s = sessions.find((x) => x.name === id);
-    return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false };
+    return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false, shell: s?.kind === "shell" };
   }));
 
-  function newSession(name: string) {
-    conn.newSession(name);
+  function newSession(name: string, kind: "tmux" | "shell" = "tmux") {
+    conn.newSession(name, { kind });
     activeId = name;
     backgrounded.delete(name); backgrounded = new Set(backgrounded);
     tabOrder = appendOrder(tabOrder, name);
@@ -356,6 +356,17 @@
   function closeTopTab(id: string) {
     if (id.startsWith("file:")) { closeFile(id); return; }
     cancelSelection();
+    const s = sessions.find((x) => x.name === id);
+    if (s?.kind === "shell") {
+      // Shell tabs are ephemeral: closing the tab kills the PTY outright.
+      conn.kill(id);
+      sessions = closeTabFn(sessions, id);
+      terms.delete(id);
+      tabOrder = removeOrder(tabOrder, id);
+      if (activeId === id) activeId = topSessions.filter((x) => x.name !== id)[0]?.name ?? "";
+      if (activeTop === id) activeTop = "";
+      return;
+    }
     conn.detach(id); // backgrounded term tabs stop their output stream, same as toBackground
     backgrounded.add(id);
     backgrounded = new Set(backgrounded);
@@ -623,7 +634,7 @@
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
       <TaskPanel
-        {sessions}
+        sessions={sessions.filter((s) => s.kind !== "shell")}
         onSelect={enterSession}
         onRename={renameSession}
         onKill={killSession}

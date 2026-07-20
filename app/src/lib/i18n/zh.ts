@@ -308,6 +308,7 @@ export default {
   },
   tabs: {
     newTitle: "新建终端会话",
+    kindShell: "Shell",
     namePh: "会话名称",
     ariaNew: "新建会话",
     ariaClose: "关闭标签",

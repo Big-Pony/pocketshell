@@ -308,6 +308,7 @@ export default {
   },
   tabs: {
     newTitle: "New terminal session",
+    kindShell: "Shell",
     namePh: "Session name",
     ariaNew: "New session",
     ariaClose: "Close tab",
