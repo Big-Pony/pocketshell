@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { wireClaude, unwireClaude, wireCodex, unwireCodex } from "./notify-wire";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode } from "./notify-wire";
 
 const bin = "/usr/local/bin/pocketshell-agent";
 const cmd = `${bin} notify`;
@@ -80,4 +80,25 @@ test("codex unwire removes our line only", () => {
   wireCodex(f, bin); unwireCodex(f);
   expect(readFileSync(f, "utf8")).not.toContain("notify =");
   expect(readFileSync(f, "utf8")).toContain("[tui]");
+});
+
+test("opencode wire writes plugin file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "oc-"));         // stands in for ~/.config/opencode
+  const pluginDir = join(dir, "plugin");
+  const r = wireOpencode(pluginDir);
+  expect(r.ok).toBe(true);
+  expect(existsSync(join(pluginDir, "pocketshell-notify.js"))).toBe(true);
+});
+
+test("opencode missing base -> opencode_not_found", () => {
+  const r = wireOpencode(join(tmpdir(), "no-such-oc-xyz", "plugin"));
+  expect(r.ok).toBe(false);
+  expect(r.reason).toBe("opencode_not_found");
+});
+
+test("opencode unwire deletes plugin file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "oc-"));
+  const pluginDir = join(dir, "plugin");
+  wireOpencode(pluginDir); unwireOpencode(pluginDir);
+  expect(existsSync(join(pluginDir, "pocketshell-notify.js"))).toBe(false);
 });
