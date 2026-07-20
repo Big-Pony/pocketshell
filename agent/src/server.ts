@@ -33,9 +33,11 @@ import { downloadAndVerify, type Phase } from "./update-apply";
 import { signBinary, ensureLocalIdentity } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
 import { NotificationService, type DevicePresence } from "./notify-service";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, type WireResult } from "./notify-wire";
 import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
+import { homedir } from "node:os";
 import { $ } from "bun";
 
 // Pure precondition gate for update.apply — kept outside startServer so it is
@@ -256,6 +258,23 @@ export function startServer(deps: Deps = {}) {
     broadcastInApp: (m) => broadcastAll({ type: "notification", ...m }),
     pushSender: realPushSender(ensureVapid(config.keyDir)),
   });
+  // Per-tool hook config paths + the wire/unwire dispatcher backing the
+  // notify.wire/notify.unwire RPCs below. Success persists the toggle into
+  // notify.json so the UI reflects wired state after a restart.
+  const agentBin = process.execPath;
+  const toolPaths = {
+    claude: pathJoin(homedir(), ".claude", "settings.json"),
+    codex: pathJoin(homedir(), ".codex", "config.toml"),
+    opencode: pathJoin(homedir(), ".config", "opencode", "plugin"),
+  };
+  const doWire = (tool: "claude" | "codex" | "opencode", on: boolean): WireResult => {
+    let r: WireResult;
+    if (tool === "claude") r = on ? wireClaude(toolPaths.claude, agentBin) : unwireClaude(toolPaths.claude);
+    else if (tool === "codex") r = on ? wireCodex(toolPaths.codex, agentBin) : unwireCodex(toolPaths.codex);
+    else r = on ? wireOpencode(toolPaths.opencode) : unwireOpencode(toolPaths.opencode);
+    if (r.ok) { const c = notify.config(); c.tools[tool] = on; notify.setConfig(c); }
+    return r;
+  };
   // Notification hook wiring (req N): seed each new session's env with enough
   // for an in-session hook to identify itself as PocketShell and POST to the
   // loopback notify endpoint without holding a Noise identity of its own.
@@ -550,6 +569,8 @@ export function startServer(deps: Deps = {}) {
             case "notify.unsubscribeWebPush":
               if (conn.remoteStatic) notify.removeSubsForDevice(conn.remoteStatic);
               result = { ok: true }; break;
+            case "notify.wire": result = doWire(p.tool, true); break;
+            case "notify.unwire": result = doWire(p.tool, false); break;
             case "notify.testWebhook": {
               // async self-answer, same pattern as update.check/update.apply
               // above: sends its own response and returns early rather than
