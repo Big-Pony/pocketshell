@@ -30,10 +30,21 @@ test("unwire removes only our hook, keeps user hooks", () => {
   const dir = mkdtempSync(join(tmpdir(), "cc-"));
   const f = join(dir, "settings.json");
   writeFileSync(f, JSON.stringify({ hooks: { Notification: [{ matcher: "", hooks: [{ type: "command", command: "user-notify" }] }] } }));
-  wireClaude(f, bin); unwireClaude(f);
+  wireClaude(f, bin); unwireClaude(f, bin);
   const j = JSON.parse(readFileSync(f, "utf8"));
   const cmds = j.hooks.Notification.flatMap((e: any) => e.hooks.map((h: any) => h.command));
   expect(cmds).toContain("user-notify");
+  expect(cmds).not.toContain(cmd);
+});
+
+test("unwire keeps user hook that also ends with ' notify' (exact-match only)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cc-"));
+  const f = join(dir, "settings.json");
+  writeFileSync(f, JSON.stringify({ hooks: { Notification: [{ matcher: "", hooks: [{ type: "command", command: "deploy notify" }] }] } }));
+  wireClaude(f, bin); unwireClaude(f, bin);
+  const j = JSON.parse(readFileSync(f, "utf8"));
+  const cmds = j.hooks.Notification.flatMap((e: any) => e.hooks.map((h: any) => h.command));
+  expect(cmds).toContain("deploy notify");
   expect(cmds).not.toContain(cmd);
 });
 

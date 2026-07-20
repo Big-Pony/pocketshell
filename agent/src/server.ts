@@ -269,7 +269,7 @@ export function startServer(deps: Deps = {}) {
   };
   const doWire = (tool: "claude" | "codex" | "opencode", on: boolean): WireResult => {
     let r: WireResult;
-    if (tool === "claude") r = on ? wireClaude(toolPaths.claude, agentBin) : unwireClaude(toolPaths.claude);
+    if (tool === "claude") r = on ? wireClaude(toolPaths.claude, agentBin) : unwireClaude(toolPaths.claude, agentBin);
     else if (tool === "codex") r = on ? wireCodex(toolPaths.codex, agentBin) : unwireCodex(toolPaths.codex);
     else r = on ? wireOpencode(toolPaths.opencode) : unwireOpencode(toolPaths.opencode);
     if (r.ok) { const c = notify.config(); c.tools[tool] = on; notify.setConfig(c); }

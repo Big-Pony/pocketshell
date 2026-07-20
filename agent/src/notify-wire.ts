@@ -26,15 +26,16 @@ export function wireClaude(settingsPath: string, agentBin: string): WireResult {
   return { ok: true };
 }
 
-export function unwireClaude(settingsPath: string): WireResult {
+export function unwireClaude(settingsPath: string, agentBin: string): WireResult {
   if (!existsSync(settingsPath)) return { ok: true };
   let root: any;
   try { root = JSON.parse(readFileSync(settingsPath, "utf8")); }
   catch (e) { return { ok: false, reason: "parse_error", detail: String(e) }; }
   const list: any[] = root?.hooks?.Notification;
+  const cmd = notifyCmd(agentBin);
   if (Array.isArray(list)) {
     root.hooks.Notification = list
-      .map((e) => (Array.isArray(e.hooks) ? { ...e, hooks: e.hooks.filter((h: any) => !String(h.command ?? "").endsWith(" notify")) } : e))
+      .map((e) => (Array.isArray(e.hooks) ? { ...e, hooks: e.hooks.filter((h: any) => h.command !== cmd) } : e))
       .filter((e) => !Array.isArray(e.hooks) || e.hooks.length > 0);
   }
   try { writeFileSync(settingsPath, JSON.stringify(root, null, 2)); }
