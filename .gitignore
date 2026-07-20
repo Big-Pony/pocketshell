@@ -13,6 +13,7 @@ deploy-info
 docs/superpowers/test-reports/*/*.png
 # Private (never publish)
 docs/
+.claude/
 .superpowers/
 .playwright-mcp/
 spike/

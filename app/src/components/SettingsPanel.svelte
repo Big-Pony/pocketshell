@@ -393,6 +393,7 @@
     text-align: left;
     cursor: pointer;
   }
+  .notify-head .label { color: var(--accent); font-weight: 600; }
   .chev { color: var(--dim); font-size: 0.8rem; }
   .err { color: var(--red); font-size: 11px; margin-top: 3px; }
   .nsub {
