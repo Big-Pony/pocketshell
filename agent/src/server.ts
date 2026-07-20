@@ -373,8 +373,25 @@ export function startServer(deps: Deps = {}) {
     switch (msg.type) {
       case "newSession":
         try {
-          if (msg.kind === "shell") shell.create(msg.name, {});
-          else terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+          if (msg.kind === "shell") {
+            // Cross-service name uniqueness: a shell must not shadow an existing
+            // tmux (owned or foreign) or shell session — otherwise input/kill
+            // would route to the shell and orphan the tmux, and the broadcast
+            // would carry two same-named entries.
+            if (shell.has(msg.name) || terminal.has(msg.name)) {
+              sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
+              break;
+            }
+            shell.create(msg.name, {});
+          } else {
+            // tmux with an existing tmux name is a legitimate adopt/attach (do
+            // NOT reject); only reject when the name is taken by a shell session.
+            if (shell.has(msg.name)) {
+              sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
+              break;
+            }
+            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+          }
         }
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
         break;

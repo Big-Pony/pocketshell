@@ -135,7 +135,7 @@
       onkeydown={(e) => { if (e.key === "Escape") closing = null; }}>
       <div class="dlg-title">{$t('tabs.closeTitle', { values: { title: closing.title } })}</div>
       <div class="dlg-hint">
-        {closing.kind === "term" ? $t('tabs.closeTermHint') : $t('tabs.closeFileHint')}
+        {closing.kind === "term" ? (closing.shell ? $t('tabs.closeShellHint') : $t('tabs.closeTermHint')) : $t('tabs.closeFileHint')}
         {#if closing.kind === "file" && dirtyIds?.has(closing.id)}
           <div class="dirty-warn">{$t('tabs.closeDirty')}</div>
         {/if}

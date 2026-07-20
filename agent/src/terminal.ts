@@ -365,6 +365,13 @@ export class TerminalService {
     this.emitSessionsChange();
   }
 
+  // Public liveness check across owned + any live tmux session (foreign
+  // included). Used by the server to reject a shell session whose name would
+  // collide with an existing tmux session (cross-service name uniqueness).
+  has(name: string): boolean {
+    return this.sessions.has(name) || this.hasSession(name);
+  }
+
   write(name: string, data: Uint8Array): void {
     this.sessions.get(name)?.pty.write(data);
   }

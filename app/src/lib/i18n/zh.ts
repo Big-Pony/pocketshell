@@ -314,6 +314,7 @@ export default {
     ariaClose: "关闭标签",
     closeTitle: "关闭「{title}」？",
     closeTermHint: "仅关闭标签，会话仍在后台运行，可从任务面板重新打开。",
+    closeShellHint: "该 Shell 会话将被关闭并销毁，无法恢复。",
     closeFileHint: "关闭该文件预览标签。",
     closeDirty: "该文件有未保存的修改，关闭将丢失。",
   },
