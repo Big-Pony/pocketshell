@@ -263,7 +263,7 @@
           {#each WEBHOOK_KINDS as k (k)}<option value={k}>{$t(`notify.webhook.kinds.${k}`)}</option>{/each}
         </select>
         <input bind:value={whForm.url} placeholder={$t('notify.webhook.url')} />
-        <input bind:value={whForm.secret} placeholder={$t('notify.webhook.secret')} />
+        <input type="password" bind:value={whForm.secret} placeholder={$t('notify.webhook.secret')} />
         <textarea bind:value={whForm.template} placeholder={$t('notify.webhook.template')} rows="2"></textarea>
         <button class="save" onclick={addWebhook}>{$t('notify.webhook.add')}</button>
       </div>
@@ -285,7 +285,7 @@
         </div>
         <input class="wh-url" value={w.url} placeholder={$t('notify.webhook.url')}
           onchange={(e) => patchWebhook(w.id, { url: (e.target as HTMLInputElement).value })} />
-        <input class="wh-url" value={w.secret ?? ""} placeholder={$t('notify.webhook.secret')}
+        <input type="password" class="wh-url" value={w.secret ?? ""} placeholder={$t('notify.webhook.secret')}
           onchange={(e) => patchWebhook(w.id, { secret: (e.target as HTMLInputElement).value || undefined })} />
         <textarea class="wh-tpl" rows="2" value={w.template ?? ""} placeholder={$t('notify.webhook.template')}
           onchange={(e) => patchWebhook(w.id, { template: (e.target as HTMLTextAreaElement).value || undefined })}></textarea>
