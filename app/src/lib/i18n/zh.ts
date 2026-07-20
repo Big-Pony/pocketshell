@@ -209,12 +209,12 @@ export default {
     action: {
       open: "打开",
       enter: "进入",
-      close: "关闭",
+      close: "删除",
     },
     menu: {
       rename: "重命名",
       copyOutput: "复制输出",
-      closeTab: "关闭标签",
+      closeTab: "删除",
       kill: "终止",
     },
     prompt: {

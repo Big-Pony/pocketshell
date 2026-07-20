@@ -209,12 +209,12 @@ export default {
     action: {
       open: "Open",
       enter: "Enter",
-      close: "Close",
+      close: "Delete",
     },
     menu: {
       rename: "Rename",
       copyOutput: "Copy output",
-      closeTab: "Close tab",
+      closeTab: "Delete",
       kill: "Kill",
     },
     prompt: {

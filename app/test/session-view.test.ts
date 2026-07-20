@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { stateDotClass, needsKillConfirm, mergeSessions, tombstone, closeTab, type LocalSession } from "../src/lib/session-view";
+import { stateDotClass, needsKillConfirm, mergeSessions, tombstone, closeTab, actionLabel, type LocalSession } from "../src/lib/session-view";
 import type { SessionMeta } from "../src/lib/protocol";
 
 test("stateDotClass maps each state", () => {
@@ -49,6 +49,10 @@ test("tombstone marks one session closed+done", () => {
 
 test("closeTab removes the session", () => {
   expect(closeTab([meta("a"), meta("b")], "a").map((s) => s.name)).toEqual(["b"]);
+});
+
+test("actionLabel returns close for a tombstone", () => {
+  expect(actionLabel({ name: "s1", state: "done", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: false, closed: true })).toBe("close");
 });
 
 // ──────────────────────────────────────────────────────────────

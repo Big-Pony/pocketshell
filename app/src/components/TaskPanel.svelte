@@ -58,8 +58,11 @@
             <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{$t('tasks.state.' + s.state)}</em></span>
             <span class="last mono">{s.lastLine}</span>
           </span>
-          <span class="act">{$t('tasks.action.' + actionLabel(s))}</span>
+          {#if !s.closed}<span class="act">{$t('tasks.action.' + actionLabel(s))}</span>{/if}
         </button>
+        {#if s.closed}
+          <button class="act act-del" onclick={(e) => { e.stopPropagation(); onClose(s.name); }}>{$t('tasks.action.close')}</button>
+        {/if}
         <button class="more" aria-label={$t('common.more')}
           onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget); }}>⋯</button>
       </div>
@@ -160,6 +163,8 @@
     padding: 6px 14px;
     flex: 0 0 auto;
   }
+
+  .act-del { flex: 0 0 auto; margin-right: 4px; color: var(--red); border-color: var(--red); background: transparent; }
 
   .confirm-overlay {
     position: fixed;
