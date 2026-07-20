@@ -22,6 +22,7 @@
   }
 </script>
 
+<div class="stg-scroll">
 <div class="stg">
   <!-- Theme -->
   <div class="set">
@@ -107,12 +108,13 @@
     </button>
   </div>
 </div>
-
 {#if showDevices}
   <DeviceManager {conn} onClose={() => (showDevices = false)} />
 {/if}
+</div>
 
 <style>
+  .stg-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .stg { padding: 8px; color: var(--text); }
   .set {
     display: flex;
