@@ -7,19 +7,18 @@ function openOps(onText = vi.fn(), onCommand = vi.fn(), extra = {}) {
   return { onText, onCommand, r };
 }
 
-test("ops sub-tab: 选区 button dispatches selBegin when idle", async () => {
-  const { onCommand } = openOps();
+test("ops sub-tab: Del key sends the forward-delete sequence via onText", async () => {
+  const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.click(screen.getByText("选区"));
-  expect(onCommand).toHaveBeenCalledWith({ type: "selBegin" });
+  await fireEvent.pointerDown(screen.getByText("Del"));
+  expect(onText).toHaveBeenCalledWith("\x1b[3~");
 });
 
-test("ops sub-tab: when selecting, toggle shows 取消 and dispatches selCancel", async () => {
-  const { onCommand } = openOps(vi.fn(), vi.fn(), { selecting: true, selCount: 4 });
+test("ops sub-tab: Tab key sends the tab byte via onText", async () => {
+  const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  expect(screen.getByText("取消")).toBeInTheDocument();
-  await fireEvent.click(screen.getByText("取消"));
-  expect(onCommand).toHaveBeenCalledWith({ type: "selCancel" });
+  await fireEvent.pointerDown(screen.getByText("Tab"));
+  expect(onText).toHaveBeenCalledWith("\x09");
 });
 
 test("ops sub-tab: paste / selectText / selectAllCopy buttons dispatch commands", async () => {
@@ -33,20 +32,20 @@ test("ops sub-tab: paste / selectText / selectAllCopy buttons dispatch commands"
   expect(onCommand).toHaveBeenCalledWith({ type: "selectAllCopy" });
 });
 
-test("ops sub-tab: line up/down buttons dispatch cursor movement commands", async () => {
-  const { onCommand } = openOps();
+test("ops sub-tab: PgUp/PgDn buttons send page escape sequences via onText", async () => {
+  const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.click(screen.getByText("上一行"));
-  await fireEvent.click(screen.getByText("下一行"));
-  expect(onCommand).toHaveBeenCalledWith({ type: "lineUp" });
-  expect(onCommand).toHaveBeenCalledWith({ type: "lineDown" });
+  await fireEvent.pointerDown(screen.getByText("PgUp"));
+  await fireEvent.pointerDown(screen.getByText("PgDn"));
+  expect(onText).toHaveBeenCalledWith("\x1b[5~");
+  expect(onText).toHaveBeenCalledWith("\x1b[6~");
 });
 
-test("ops sub-tab: D-pad up dispatches selMove when selecting", async () => {
-  const { onCommand } = openOps(vi.fn(), vi.fn(), { selecting: true });
+test("ops sub-tab: D-pad up sends the arrow-up escape via onText", async () => {
+  const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
   await fireEvent.pointerDown(screen.getByText("↑"));
-  expect(onCommand).toHaveBeenCalledWith({ type: "selMove", dir: "up" });
+  expect(onText).toHaveBeenCalledWith("\x1b[A");
 });
 
 test("ops sub-tab: Home button sends escape sequence via onText", async () => {
@@ -84,9 +83,9 @@ test("Esc always sends the escape sequence", async () => {
   expect(onText).toHaveBeenCalledWith("\x1b");
 });
 
-test("ops sub-tab: circular Enter button sends carriage return", async () => {
+test("ops sub-tab: center Enter button sends carriage return", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("确认"));
+  await fireEvent.pointerDown(screen.getByText("⏎"));
   expect(onText).toHaveBeenCalledWith("\r");
 });
