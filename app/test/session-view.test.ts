@@ -15,7 +15,7 @@ test("needsKillConfirm only for live sessions", () => {
 });
 
 const meta = (name: string, state: SessionMeta["state"] = "run"): SessionMeta =>
-  ({ name, state, cols: 80, rows: 24, lastLine: "", createdAt: 0 });
+  ({ name, kind: "tmux", state, cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: false });
 
 // A local the way mergeSessions actually emits it (closed materialized), so a
 // no-change merge can keep the element reference instead of rebuilding it.

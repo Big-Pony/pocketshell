@@ -152,7 +152,7 @@ test("dispatches a sessions frame to onSessions", () => {
   completeHandshake(ws);
   const got: SessionMeta[][] = [];
   conn.onSessions((s) => got.push(s));
-  const meta: SessionMeta = { name: "s1", state: "run", cols: 80, rows: 24, lastLine: "hi", createdAt: 0 };
+  const meta: SessionMeta = { name: "s1", kind: "tmux", state: "run", cols: 80, rows: 24, lastLine: "hi", createdAt: 0, attached: true };
   ws.emit(encode({ type: "sessions", sessions: [meta] }));
   expect(got).toEqual([[meta]]);
 });

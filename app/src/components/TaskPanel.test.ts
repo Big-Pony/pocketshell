@@ -5,7 +5,7 @@ import type { LocalSession } from "../lib/session-view";
 
 const noop = () => {};
 const sess = (over: Partial<LocalSession>): LocalSession => ({
-  name: "x", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true, ...over,
+  name: "x", kind: "tmux", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true, ...over,
 });
 
 function renderPanel(sessions: LocalSession[]) {

@@ -40,6 +40,11 @@ test("mirrors pong + resync server messages", () => {
   expect(r.from).toBe(3);
 });
 
+test("newSession carries an optional kind and encodes round-trip", () => {
+  const msg = { type: "newSession", name: "s1", kind: "shell" } as const;
+  expect(decodeClient(encode(msg))).toEqual(msg);
+});
+
 test("mirrors rpcChunk server message (WP-6)", () => {
   const msg = decodeServer(encode({ type: "rpcChunk", id: "7", index: 2, total: 5, data: "QQ==" }));
   if (msg.type !== "rpcChunk") throw new Error("wrong type");

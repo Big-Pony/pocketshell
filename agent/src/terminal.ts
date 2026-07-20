@@ -351,6 +351,7 @@ export class TerminalService {
 
     const meta: SessionMeta = {
       name,
+      kind: "tmux",
       state: "run",
       cols,
       rows,
@@ -477,6 +478,7 @@ export class TerminalService {
         .filter((r) => !this.sessions.has(r.name))
         .map(async (r) => ({
           name: r.name,
+          kind: "tmux" as const,
           state: "idle" as const,
           cols: r.cols,
           rows: r.rows,
