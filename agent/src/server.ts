@@ -474,6 +474,11 @@ export function startServer(deps: Deps = {}) {
         else void terminal.kill(msg.sessionId);
         break;
       case "ping": sendSecure(conn, { type: "pong" }); break;
+      case "presence":
+        if (conn.remoteStatic) {
+          notifyPresence.set(conn.remoteStatic, { pubKey: conn.remoteStatic, foreground: msg.foreground, activeSessionId: msg.activeSessionId });
+        }
+        break;
       case "listDevices": {
         const envKeysArr = Array.from(envKeys);
         const list: DeviceInfo[] = [
@@ -489,6 +494,7 @@ export function startServer(deps: Deps = {}) {
         if (removed) {
           config.audit.log({ event: "revoke", pub: msg.pubKey, ip: conn.ip });
           for (const c of conns.values()) if (c.remoteStatic === msg.pubKey) c.ws.close();
+          notify.removeSubsForDevice(msg.pubKey);
         }
         break;
       }
@@ -534,6 +540,25 @@ export function startServer(deps: Deps = {}) {
               const dev = conn.remoteStatic ?? "unknown";
               result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
               break;
+            }
+            case "notify.getConfig": result = notify.config(); break;
+            case "notify.setConfig": notify.setConfig(p.config); result = { ok: true }; break;
+            case "notify.getVapidPublicKey": result = { publicKey: notify.vapidPublicKey() }; break;
+            case "notify.subscribeWebPush":
+              if (conn.remoteStatic) notify.addSub(conn.remoteStatic, p.subscription);
+              result = { ok: true }; break;
+            case "notify.unsubscribeWebPush":
+              if (conn.remoteStatic) notify.removeSubsForDevice(conn.remoteStatic);
+              result = { ok: true }; break;
+            case "notify.testWebhook": {
+              // async self-answer, same pattern as update.check/update.apply
+              // above: sends its own response and returns early rather than
+              // falling through to the post-switch sendRpcResult(...) call.
+              void notify.testWebhook(String(p.id)).then(
+                (r) => sendRpcResult(conn, id, r),
+                (e) => sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } }),
+              );
+              return;
             }
             case "update.check": {
               // The switch(method) block above this line is synchronous end to
@@ -742,6 +767,7 @@ export function startServer(deps: Deps = {}) {
         // Reclaim this device's preview tokens once it has no live socket left.
         if (conn?.remoteStatic && ![...conns.values()].some((c) => c.remoteStatic === conn.remoteStatic)) {
           previewTokens.revokeDevice(conn.remoteStatic);
+          notifyPresence.delete(conn.remoteStatic);
         }
         console.log("[pocketshell] disconnect");
       },
