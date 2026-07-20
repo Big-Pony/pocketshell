@@ -408,6 +408,7 @@ export default {
       template: "Body 模板",
       test: "测试发送",
       testOk: "测试成功",
+      lastError: "上次发送失败",
       empty: "暂无 Webhook",
       delConfirm: "删除 Webhook「{name}」？",
       kinds: {

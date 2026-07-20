@@ -408,6 +408,7 @@ export default {
       template: "Body template",
       test: "Send test",
       testOk: "Test succeeded",
+      lastError: "Last send failed",
       empty: "No webhooks yet",
       delConfirm: "Delete webhook \"{name}\"?",
       kinds: {

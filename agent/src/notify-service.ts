@@ -3,7 +3,7 @@
 // network. A device that is foregrounded AND looking at the very session that
 // finished does NOT get a system push (it already sees the in-app hint).
 import { join } from "node:path";
-import { loadNotifyConfig, saveNotifyConfig, type NotifyConfig } from "./notify-config";
+import { loadNotifyConfig, saveNotifyConfig, sanitizeNotifyConfig, type NotifyConfig } from "./notify-config";
 import { ensureVapid, loadPushSubs, savePushSubs, upsertSub, removeSubsForDevice as rmSubs, sendPush, type PushSender, type PushSub } from "./web-push";
 import { sendWebhook as defaultSendWebhook } from "./webhook-service";
 import type { NotifyMsg } from "./webhook-templates";
@@ -60,7 +60,7 @@ export class NotificationService {
   }
 
   config(): NotifyConfig { return this.cfg; }
-  setConfig(c: NotifyConfig): void { this.cfg = c; saveNotifyConfig(this.cfgFile, c); }
+  setConfig(c: NotifyConfig): void { this.cfg = sanitizeNotifyConfig(c); saveNotifyConfig(this.cfgFile, this.cfg); }
   vapidPublicKey(): string { return this.vapid.publicKey; }
   addSub(pubKey: string, subscription: unknown): void {
     this.subs = upsertSub(this.subs, { pubKey, subscription });

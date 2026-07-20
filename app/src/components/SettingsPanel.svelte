@@ -293,6 +293,7 @@
           <button class="btn" onclick={() => testWebhook(w.id)}>{$t('notify.webhook.test')}</button>
           {#if testMsg[w.id]}<span class="wh-test-msg" class:ok={testMsg[w.id].ok}>{testMsg[w.id].text}</span>{/if}
         </div>
+        {#if w.lastError}<div class="err">{$t('notify.webhook.lastError')}: {w.lastError}</div>{/if}
       </div>
     {/each}
     {#if cfg.webhooks.length === 0 && !addingWebhook}<div class="wh-empty">{$t('notify.webhook.empty')}</div>{/if}

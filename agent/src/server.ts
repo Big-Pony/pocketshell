@@ -881,7 +881,9 @@ if (import.meta.main) {
       try {
         const { parseNotifyPayload } = await import("./notify-subcommand");
         let stdin = "";
-        try { stdin = await Bun.stdin.text(); } catch { /* no stdin (tty) */ }
+        if (!process.stdin.isTTY) {
+          try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
+        }
         const p = parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
         if (!p) { process.exit(0); return; }      // not a PocketShell session
         const url = process.env.POCKETSHELL_NOTIFY_URL;
