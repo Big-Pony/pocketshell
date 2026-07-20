@@ -813,15 +813,22 @@ if (import.meta.main) {
         let stdin = "";
         try { stdin = await Bun.stdin.text(); } catch { /* no stdin (tty) */ }
         const p = parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
-        if (!p) { process.exit(0); }              // not a PocketShell session
+        if (!p) { process.exit(0); return; }      // not a PocketShell session
         const url = process.env.POCKETSHELL_NOTIFY_URL;
         const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
         if (url && token) {
-          await fetch(url, {
-            method: "POST",
-            headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-            body: JSON.stringify(p),
-          }).catch(() => {});
+          const ctl = new AbortController();
+          const timeoutId = setTimeout(() => ctl.abort(), 3000);
+          try {
+            await fetch(url, {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+              body: JSON.stringify(p),
+              signal: ctl.signal,
+            }).catch(() => {});
+          } finally {
+            clearTimeout(timeoutId);
+          }
         }
       } catch { /* never disturb the agent's normal run */ }
       process.exit(0);
