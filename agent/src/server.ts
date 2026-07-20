@@ -243,6 +243,14 @@ export function startServer(deps: Deps = {}) {
   // batcher/replay/fanout and exit path as tmux (keyed by sessionId), and a
   // create/kill/exit triggers a sessions broadcast so shell tabs appear/vanish.
   const shell = deps.shell ?? new ShellService();
+  // Notification hook wiring (req N): seed each new session's env with enough
+  // for an in-session hook to identify itself as PocketShell and POST to the
+  // loopback notify endpoint without holding a Noise identity of its own.
+  const notifyEnv = (sessionId: string): Record<string, string> => ({
+    POCKETSHELL_NOTIFY_SESSION: sessionId,
+    POCKETSHELL_NOTIFY_URL: `http://127.0.0.1:${deps.port ?? config.listen.port}/internal/notify`,
+    POCKETSHELL_NOTIFY_TOKEN: config.notifyToken,
+  });
   shell.onOutput(onTermOutput);
   shell.onExit(onTermExit);
   shell.onChange(() => { void pushSessions(); });
@@ -382,7 +390,7 @@ export function startServer(deps: Deps = {}) {
               sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
               break;
             }
-            shell.create(msg.name, {});
+            shell.create(msg.name, { env: notifyEnv(msg.name) });
           } else {
             // tmux with an existing tmux name is a legitimate adopt/attach (do
             // NOT reject); only reject when the name is taken by a shell session.
@@ -390,7 +398,7 @@ export function startServer(deps: Deps = {}) {
               sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
               break;
             }
-            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd, env: notifyEnv(msg.name) });
           }
         }
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
