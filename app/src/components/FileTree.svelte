@@ -282,7 +282,7 @@
     <button class="root-anchor" class:on={following} aria-label={$t('filetree.aria.anchor')}
       onpointerdown={onAnchorPointer}><span class="ring"></span></button>
     <button class="path-text mono" title={root}
-      onclick={() => { navigator.clipboard?.writeText(root); onToastRich?.(tr("filetree.copied.title"), root, 2500); }}>{root}</button>
+      onclick={() => { navigator.clipboard?.writeText(root); onToastRich?.(tr("filetree.copied.title"), root, 2500); }}><bdi>{root}</bdi></button>
     <button class="root-switch" aria-label={$t('filetree.aria.switchRoot')} onclick={openHistory}>⇄</button>
     <button class="root-refresh" aria-label={$t('filetree.aria.refresh')} onclick={reloadKeepingExpanded}>⟳</button>
   </div>
@@ -410,9 +410,13 @@
   .path-text {
     flex: 1; min-width: 0; font-size: 0.68rem; color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    direction: rtl; text-align: left; unicode-bidi: plaintext;
+    /* Left-side ellipsis: the rtl container places the ellipsis at the visual
+       left, while the inner <bdi> isolates the path as one LTR run so its
+       segments keep natural order (no leading-slash reorder artifact). */
+    direction: rtl; text-align: left;
     background: transparent; border: 0; padding: 0; line-height: 1.4;
   }
+  .path-text bdi { unicode-bidi: isolate; }
   .path-text:active { color: var(--text); }
   .root-anchor { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; }
   .root-anchor .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }

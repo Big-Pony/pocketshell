@@ -20,8 +20,16 @@
   let imeBuf = $state("");
 
   let imeFocused = $state(false);
-  let kbHeight = $state(0);
+  let kbHeight = $state(0);   // visualViewport-fallback keyboard height (px)
   let kbOpen = $state(false);
+  // Two mutually-exclusive strategies (they must NOT be mixed — that was the
+  // bug: overlaysContent stops the viewport from resizing, so visualViewport
+  // then reports height 0 and the composer sat behind the keyboard):
+  //  - Chrome/Android VirtualKeyboard API: keyboard OVERLAYS content (viewport
+  //    unchanged, terminal stays put), position via CSS env(keyboard-inset-*).
+  //  - Everything else (iOS Safari): browser shrinks the visual viewport, so
+  //    measure it and offset the composer's `bottom` by that delta.
+  const hasVK = typeof navigator !== "undefined" && "virtualKeyboard" in navigator;
 
   function readViewport(): ViewportMetrics {
     const vv = (typeof window !== "undefined" ? window.visualViewport : null);
@@ -37,10 +45,16 @@
     kbOpen = isKeyboardOpen(m);
   }
   onMount(() => {
-    // Chrome Android: let the keyboard overlay content instead of resizing the
-    // layout viewport, so the terminal behind stays put.
-    const vk = (navigator as any).virtualKeyboard;
-    if (vk) { try { vk.overlaysContent = true; } catch { /* unsupported */ } }
+    if (hasVK) {
+      const vk = (navigator as any).virtualKeyboard;
+      // Opt out of auto-resize: the keyboard overlays content and CSS
+      // env(keyboard-inset-height) drives the composer's position. Only need
+      // geometrychange here to know when the keyboard is actually up.
+      try { vk.overlaysContent = true; } catch { /* unsupported */ }
+      const onGeo = () => { kbOpen = (vk.boundingRect?.height ?? 0) > 0; };
+      vk.addEventListener?.("geometrychange", onGeo);
+      return () => vk.removeEventListener?.("geometrychange", onGeo);
+    }
     const vv = window.visualViewport;
     vv?.addEventListener("resize", syncViewport);
     vv?.addEventListener("scroll", syncViewport);
@@ -186,10 +200,10 @@
       {/each}
     </div>
   {:else if sub === "ime"}
-    <div class="ime" class:floating={imeFocused && kbOpen} style={imeFocused && kbOpen ? `bottom:${kbHeight}px` : ""}>
+    <div class="ime" class:floating={imeFocused && kbOpen} style={imeFocused && kbOpen && !hasVK ? `bottom:${kbHeight}px` : ""}>
       <div class="target">{$t('keyboard.ime.target')}</div>
       <textarea bind:value={imeBuf} placeholder={$t('keyboard.ime.ph')} rows="3"
-        onfocus={() => { imeFocused = true; syncViewport(); }}
+        onfocus={() => { imeFocused = true; if (!hasVK) syncViewport(); }}
         onblur={() => { imeFocused = false; }}></textarea>
       <div class="ime-actions">
         <button class="clear" onclick={() => (imeBuf = "")}>{$t('keyboard.ime.clear')}</button>
@@ -422,6 +436,10 @@
   .ime.floating {
     position: fixed;
     left: 0; right: 0;
+    /* VirtualKeyboard API path: sit exactly on top of the keyboard. The unit
+       on the fallback is REQUIRED (a unitless 0 breaks env() in Safari). The
+       visualViewport path overrides this with an inline `bottom:<px>`. */
+    bottom: env(keyboard-inset-height, 0px);
     z-index: 30;
     background: var(--panel);
     border-top: 1px solid var(--line);
