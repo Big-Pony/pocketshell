@@ -55,3 +55,22 @@ test("enabled webhook fires", async () => {
   await s.dispatch({ sessionId: "w", title: "w", body: "done" });
   expect(hooks.length).toBe(1);
 });
+
+test("dispatch with webPush on pushes only to the backgrounded device", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ns-"));
+  const pushedSubs: unknown[] = [];
+  const s = new NotificationService({
+    keyDir: dir,
+    getPresences: () => [P("A", true, "w"), P("B", false, "other")],
+    broadcastInApp: () => {},
+    pushSender: async (subscription) => { pushedSubs.push(subscription); return { statusCode: 201 }; },
+    now: () => 100000,
+  });
+  s.addSub("A", { endpoint: "A" });
+  s.addSub("B", { endpoint: "B" });
+  const c = s.config(); c.webPush = true; s.setConfig(c);
+  await s.dispatch({ sessionId: "w", title: "w", body: "done" });
+  // A is foreground and watching session "w" -> skipped; only B (background) gets the push.
+  expect(pushedSubs.length).toBe(1);
+  expect(pushedSubs[0]).toEqual({ endpoint: "B" });
+});

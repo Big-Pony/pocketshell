@@ -708,6 +708,7 @@ export function startServer(deps: Deps = {}) {
       if (removed) {
         config.audit.log({ event: "revoke", pub, ip: "admin" });
         for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
+        notify.removeSubsForDevice(pub);
       }
       return Response.json({ ok: removed });
     }
