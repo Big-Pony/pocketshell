@@ -109,6 +109,7 @@ export default {
       followOn: "Project root now follows the focused terminal",
       followOff: "Project root follow disabled",
     },
+    copied: { title: "Copied" },
     error: {
       download: "Download failed",
       downloadDir: "Archive download failed",

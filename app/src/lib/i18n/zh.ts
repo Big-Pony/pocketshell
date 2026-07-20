@@ -109,6 +109,7 @@ export default {
       followOn: "项目根开始跟随聚焦终端",
       followOff: "已取消项目根跟随",
     },
+    copied: { title: "复制成功" },
     error: {
       download: "下载失败",
       downloadDir: "打包下载失败",

@@ -519,13 +519,15 @@
 
   // ---- Toast ----
   let toastText = $state("");
+  let toastDetail = $state("");
   let toastVisible = $state(false);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
-  function showToast(text: string) {
+  function showToast(text: string, opt: { detail?: string; ms?: number } = {}) {
     toastText = text;
+    toastDetail = opt.detail ?? "";
     toastVisible = true;
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toastVisible = false), 1800);
+    toastTimer = setTimeout(() => (toastVisible = false), opt.ms ?? 1800);
   }
 
   // Persist the open tabs whenever they change (debounced) so a PWA suspend +
@@ -617,7 +619,7 @@
   </div>
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
-      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onNewFile={handleNewFile} />
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
       <TaskPanel
@@ -650,7 +652,10 @@
 </div>
 
 {#if toastVisible}
-  <div class="toast" class:visible={toastVisible}>{toastText}</div>
+  <div class="toast" class:visible={toastVisible} class:has-detail={toastDetail}>
+    <div class="toast-title">{toastText}</div>
+    {#if toastDetail}<div class="toast-detail mono">{toastDetail}</div>{/if}
+  </div>
 {/if}
 
 {#if updOpen && updInfo}
@@ -868,4 +873,6 @@
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
+  .toast.has-detail { white-space: normal; max-width: min(78vw, 320px); text-align: center; border-radius: var(--radius-lg); }
+  .toast-detail { font-size: 0.66rem; color: var(--dim); margin-top: 4px; word-break: break-all; line-height: 1.5; }
 </style>
