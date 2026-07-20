@@ -28,6 +28,7 @@
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
   import { defaultAgentUrl } from "./lib/agent-url";
+  import { sessionFromUrl } from "./lib/notify";
   import { lastOutput } from "./lib/terminal-output";
   import { fullscreenAction } from "./lib/fullscreen";
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
@@ -120,10 +121,18 @@
       : [];
   }
 
+  // Notification feature: tell the agent whether this device is looking at a
+  // session right now, so it knows when to skip the system push (foreground +
+  // same session = the user already sees the output, a push would be noise).
+  const NOTIFY_VIBE: Record<Settings["vibrate"], number[]> = { off: [], light: [12], medium: [20], strong: [16, 8, 24] };
+  function reportPresence() {
+    conn.sendPresence(document.visibilityState === "visible", activeId || null);
+  }
   conn.onStatus((s) => {
     const wasOnline = status === "online";
     status = s;
     if (s === "online" && !wasOnline) {
+      reportPresence();
       // Fresh connect (incl. reconnect after a self-restart update): re-check.
       // If we were mid-update and the reconnect shows we're now current, the
       // restart finished successfully — clear the in-progress UI + badge and
@@ -183,6 +192,16 @@
     flash = `${f.code}: ${f.message}`;
     setTimeout(() => (flash = ""), 4000);
   });
+  // In-app hint for a background/other-session notification. The agent already
+  // decided a system push wasn't needed (foreground + same session), so this
+  // path only fires for the "you'd otherwise miss it" cases — mirror that same
+  // rule here for the in-app toast.
+  conn.onNotification((m) => {
+    if (document.visibilityState === "visible" && activeId === m.sessionId) return;
+    showToast(m.title, { detail: m.body });
+    const p = NOTIFY_VIBE[settings.vibrate];
+    if (p.length) navigator.vibrate?.(p);
+  });
   conn.listSessions();
 
   // Re-apply when the OS scheme flips while preference is "system".
@@ -200,6 +219,24 @@
     }
     const onFsChange = () => { pageFullscreen = !!document.fullscreenElement; };
     document.addEventListener("fullscreenchange", onFsChange);
+
+    // Notification deep link, cold-start path: the SW's notificationclick opens
+    // "/?session=<id>" when no window was already open — pick it up on first paint.
+    const deepLinkSession = sessionFromUrl(location.search);
+    if (deepLinkSession) enterSession(deepLinkSession);
+
+    const onVisibility = () => reportPresence();
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // Notification deep link, warm path: the SW forwards the tapped
+    // notification's URL via postMessage instead of a navigation when a window
+    // was already open (see public/sw.js notificationclick).
+    const onSwMessage = (e: MessageEvent) => {
+      if (e.data?.type !== "notification-nav") return;
+      const sid = new URLSearchParams(new URL(e.data.url, location.origin).search).get("session");
+      if (sid) enterSession(sid);
+    };
+    navigator.serviceWorker?.addEventListener("message", onSwMessage);
 
     registerDevHelpers({
       openFile,
@@ -220,6 +257,8 @@
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
       topEl?.removeEventListener("pointerup", onTopPointerUp, { capture: true });
       document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("visibilitychange", onVisibility);
+      navigator.serviceWorker?.removeEventListener("message", onSwMessage);
     };
   });
 
@@ -398,10 +437,12 @@
     }
   }
 
-  // Recompute hint bar when the active terminal changes.
+  // Recompute hint bar when the active terminal changes; also re-report
+  // presence so the agent knows which session (if any) is now on screen.
   $effect(() => {
     activeId;
     recomputeHints();
+    reportPresence();
   });
 
   // Project-root-follow: when enabled, switching to a terminal tab re-points the
