@@ -56,6 +56,10 @@ function fakeWs() {
 }
 
 function tmpRegFile() { return join(mkdtempSync(join(tmpdir(), "ps-srv-")), "devices.json"); }
+// NotificationService (assembled unconditionally in startServer) persists
+// VAPID keys/config/subs under config.keyDir — minimal test fixtures below
+// need a real writable dir so ensureVapid() doesn't throw on `undefined`.
+function tmpKeyDir() { return mkdtempSync(join(tmpdir(), "ps-srv-key-")); }
 
 test("server does not broadcast to a socket that has not completed handshake", () => {
   const srv = startServer({ port: 0, channelFactory: passthroughResponder });
@@ -91,7 +95,7 @@ test("pending connection: pair with correct code registers device + replies pair
     authorizedKeys: [], replayBufferBytes: 4096,
     registry, pairing, pairingMode: true,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: noopLimiter(), audit: noopAudit(),
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", true) });
   const ws = fakeWs();
@@ -115,7 +119,7 @@ test("pending connection: non-pair message closes the socket", () => {
     authorizedKeys: [], replayBufferBytes: 4096,
     registry, pairing, pairingMode: true,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: noopLimiter(), audit: noopAudit(),
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   let closed = false;
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", true) });
@@ -138,7 +142,7 @@ test("authorized: listDevices returns registry + env with self flag", () => {
     authorizedKeys: ["ENVPUB"], replayBufferBytes: 4096,
     registry, pairing: null, pairingMode: false,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: noopLimiter(), audit: noopAudit(),
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", false) });
   const ws = fakeWs();
@@ -170,7 +174,7 @@ test("authorized: a redundant pair (stale pendingPair after a dropped 'paired') 
     authorizedKeys: [], replayBufferBytes: 4096,
     registry, pairing: null, pairingMode: false,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: noopLimiter(), audit: noopAudit(),
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", false) });
   const ws = fakeWs();
@@ -192,7 +196,7 @@ test("transport-phase channel fail on an established conn is NOT counted toward 
     authorizedKeys: [], replayBufferBytes: 4096,
     registry: loadDeviceRegistry(tmpRegFile()), pairing: null, pairingMode: false,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: spyLimiter, audit: noopAudit(),
+    rateLimiter: spyLimiter, audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   // stub: 1st frame -> established authorized; 2nd frame -> transport fail
   const failAfterEstablish = (): SecureChannel => {
@@ -226,7 +230,7 @@ test("handshake-phase channel fail IS counted toward rate limit", () => {
     authorizedKeys: [], replayBufferBytes: 4096,
     registry: loadDeviceRegistry(tmpRegFile()), pairing: null, pairingMode: false,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: spyLimiter, audit: noopAudit(),
+    rateLimiter: spyLimiter, audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   const rejectAtHandshake = (): SecureChannel => ({
     get state() { return "handshaking" as const; },
@@ -251,7 +255,7 @@ test("revokeDevice removes from registry and closes that device's live socket", 
     authorizedKeys: [], replayBufferBytes: 4096,
     registry, pairing: null, pairingMode: false,
     listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
-    rateLimiter: noopLimiter(), audit: noopAudit(),
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
   };
   const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("A", false) });
   // admin conn "A"

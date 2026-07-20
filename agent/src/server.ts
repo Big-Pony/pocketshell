@@ -32,6 +32,8 @@ import { readCache, writeCache, isFresh, CHECK_TTL_MS, type CachedCheck } from "
 import { downloadAndVerify, type Phase } from "./update-apply";
 import { signBinary, ensureLocalIdentity } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
+import { NotificationService, type DevicePresence } from "./notify-service";
+import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
 import { $ } from "bun";
@@ -243,6 +245,17 @@ export function startServer(deps: Deps = {}) {
   // batcher/replay/fanout and exit path as tmux (keyed by sessionId), and a
   // create/kill/exit triggers a sessions broadcast so shell tabs appear/vanish.
   const shell = deps.shell ?? new ShellService();
+  // Presence keyed by device Noise pubkey (updated by the `presence` message,
+  // cleared when a device's last live connection closes — req N's "smart
+  // do-not-disturb": a device that is foregrounded AND looking at the very
+  // session that finished does not get a system push, see notify-service.ts.
+  const notifyPresence = new Map<string, DevicePresence>();
+  const notify = new NotificationService({
+    keyDir: config.keyDir,
+    getPresences: () => [...notifyPresence.values()],
+    broadcastInApp: (m) => broadcastAll({ type: "notification", ...m }),
+    pushSender: realPushSender(ensureVapid(config.keyDir)),
+  });
   // Notification hook wiring (req N): seed each new session's env with enough
   // for an in-session hook to identify itself as PocketShell and POST to the
   // loopback notify endpoint without holding a Noise identity of its own.
@@ -684,6 +697,15 @@ export function startServer(deps: Deps = {}) {
     async fetch(req, srv) {
       if (srv.upgrade(req)) return;
       const url = new URL(req.url);
+      if (url.pathname === "/internal/notify" && req.method === "POST") {
+        const ip = srv.requestIP(req)?.address ?? "";
+        if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
+        if (req.headers.get("authorization") !== `Bearer ${config.notifyToken}`) return new Response("Unauthorized", { status: 401 });
+        const b = (await req.json().catch(() => null)) as { sessionId?: string; title?: string; body?: string } | null;
+        if (!b?.sessionId) return new Response("bad", { status: 400 });
+        void notify.dispatch({ sessionId: b.sessionId, title: b.title ?? b.sessionId, body: b.body ?? "" });
+        return Response.json({ ok: true });
+      }
       if (url.pathname.startsWith("/preview/")) {
         return buildPreviewResponse(previewTokens, url, Date.now());
       }
