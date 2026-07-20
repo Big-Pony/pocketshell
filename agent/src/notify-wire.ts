@@ -41,3 +41,33 @@ export function unwireClaude(settingsPath: string): WireResult {
   catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
   return { ok: true };
 }
+
+const codexLine = (agentBin: string) => `notify = ["${agentBin}", "notify"]`;
+const isOurCodexNotify = (line: string, agentBin: string) => line.trim() === codexLine(agentBin);
+
+export function wireCodex(configPath: string, agentBin: string): WireResult {
+  let text = "";
+  if (existsSync(configPath)) {
+    try { text = readFileSync(configPath, "utf8"); }
+    catch (e) { return { ok: false, reason: "read_error", detail: String(e) }; }
+  }
+  const lines = text.split("\n");
+  const notifyLines = lines.filter((l) => l.trimStart().startsWith("notify ="));
+  if (notifyLines.some((l) => isOurCodexNotify(l, agentBin))) return { ok: true }; // idempotent
+  if (notifyLines.length > 0) return { ok: false, reason: "conflict", detail: "existing notify key" };
+  const next = `${codexLine(agentBin)}\n${text}`; // prepend before any [table]
+  try { mkdirSync(dirname(configPath), { recursive: true }); writeFileSync(configPath, next); }
+  catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
+  return { ok: true };
+}
+
+export function unwireCodex(configPath: string): WireResult {
+  if (!existsSync(configPath)) return { ok: true };
+  let text: string;
+  try { text = readFileSync(configPath, "utf8"); }
+  catch (e) { return { ok: false, reason: "read_error", detail: String(e) }; }
+  const kept = text.split("\n").filter((l) => !(l.trimStart().startsWith("notify =") && l.includes('"notify"')));
+  try { writeFileSync(configPath, kept.join("\n")); }
+  catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
+  return { ok: true };
+}

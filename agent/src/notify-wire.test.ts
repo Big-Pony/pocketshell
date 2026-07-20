@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { wireClaude, unwireClaude } from "./notify-wire";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex } from "./notify-wire";
 
 const bin = "/usr/local/bin/pocketshell-agent";
 const cmd = `${bin} notify`;
@@ -44,4 +44,40 @@ test("malformed settings.json surfaces error", () => {
   const r = wireClaude(f, bin);
   expect(r.ok).toBe(false);
   expect(r.reason).toBe("parse_error");
+});
+
+test("codex wire inserts notify as first line", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cx-"));
+  const f = join(dir, "config.toml");
+  writeFileSync(f, "[tui]\nnotifications = []\n");
+  const r = wireCodex(f, bin);
+  expect(r.ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt.split("\n")[0]).toBe(`notify = ["${bin}", "notify"]`); // before [tui]
+});
+
+test("codex wire is idempotent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cx-"));
+  const f = join(dir, "config.toml");
+  wireCodex(f, bin); wireCodex(f, bin);
+  const n = readFileSync(f, "utf8").split("\n").filter((l) => l.startsWith("notify =")).length;
+  expect(n).toBe(1);
+});
+
+test("codex existing foreign notify -> conflict", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cx-"));
+  const f = join(dir, "config.toml");
+  writeFileSync(f, `notify = ["other"]\n`);
+  const r = wireCodex(f, bin);
+  expect(r.ok).toBe(false);
+  expect(r.reason).toBe("conflict");
+});
+
+test("codex unwire removes our line only", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cx-"));
+  const f = join(dir, "config.toml");
+  writeFileSync(f, "[tui]\n");
+  wireCodex(f, bin); unwireCodex(f);
+  expect(readFileSync(f, "utf8")).not.toContain("notify =");
+  expect(readFileSync(f, "utf8")).toContain("[tui]");
 });
