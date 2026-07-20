@@ -36,6 +36,7 @@ export type ClientMsg =
   | { type: "listSessions" }
   | { type: "renameSession"; sessionId: string; name: string }
   | { type: "ping" }
+  | { type: "presence"; foreground: boolean; activeSessionId: string | null }
   | { type: "pair"; code: string; deviceName: string }
   | { type: "listDevices" }
   | { type: "listSnippets" }
@@ -51,6 +52,7 @@ export type ServerMsg =
   | { type: "exit"; sessionId: string; code: number }
   | { type: "error"; code: string; message: string }
   | { type: "pong" }
+  | { type: "notification"; sessionId: string; title: string; body: string; ts: number }
   | { type: "resync"; sessionId: string; from: number }
   | { type: "paired"; ok: true }
   | { type: "devices"; devices: DeviceInfo[] }

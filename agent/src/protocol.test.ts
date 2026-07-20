@@ -67,3 +67,13 @@ test("update broadcast round-trips", () => {
   const back = decodeServer(encode(msg));
   expect(back).toEqual(msg);
 });
+
+test("presence round-trips", () => {
+  const m = { type: "presence", foreground: true, activeSessionId: "work" } as const;
+  expect(decodeClient(encode(m))).toEqual(m);
+});
+
+test("notification round-trips", () => {
+  const m = { type: "notification", sessionId: "work", title: "done", body: "ok", ts: 5 } as const;
+  expect(decodeServer(encode(m))).toEqual(m);
+});
