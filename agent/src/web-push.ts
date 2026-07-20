@@ -12,10 +12,15 @@ export interface VapidKeys { publicKey: string; privateKey: string; }
 
 export function ensureVapid(keyDir: string): VapidKeys {
   const file = join(keyDir, "vapid.json");
-  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
+  if (existsSync(file)) {
+    try { return JSON.parse(readFileSync(file, "utf8")); }
+    catch { /* corrupt -> regenerate below */ }
+  }
   const k = webpush.generateVAPIDKeys();
   const out: VapidKeys = { publicKey: k.publicKey, privateKey: k.privateKey };
-  writeFileSync(file, JSON.stringify(out), { mode: 0o600 });
+  const tmp = join(dirname(file), `.vapid.${process.pid}.tmp`);
+  writeFileSync(tmp, JSON.stringify(out), { mode: 0o600 });
+  renameSync(tmp, file);
   return out;
 }
 
