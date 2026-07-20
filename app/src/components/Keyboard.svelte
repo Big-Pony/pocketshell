@@ -1,12 +1,13 @@
 <!-- app/src/components/Keyboard.svelte -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/key-repeat";
   import { imeSendText } from "../lib/ime-send";
   import type { VibrateLevel } from "../lib/settings";
+  import { keyboardHeight, isKeyboardOpen, type ViewportMetrics } from "../lib/keyboard-inset";
 
   let { onText, onCommand, vibrate = "medium" as VibrateLevel, layout = "mac", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
@@ -17,6 +18,38 @@
   let sub = $state<"keys" | "ime" | "ops">("keys");
   let mods = $state<ModState>({ ...EMPTY_MODS });
   let imeBuf = $state("");
+
+  let imeFocused = $state(false);
+  let kbHeight = $state(0);
+  let kbOpen = $state(false);
+
+  function readViewport(): ViewportMetrics {
+    const vv = (typeof window !== "undefined" ? window.visualViewport : null);
+    return {
+      innerHeight: typeof window !== "undefined" ? window.innerHeight : 0,
+      vvHeight: vv?.height ?? (typeof window !== "undefined" ? window.innerHeight : 0),
+      vvOffsetTop: vv?.offsetTop ?? 0,
+    };
+  }
+  function syncViewport() {
+    const m = readViewport();
+    kbHeight = keyboardHeight(m);
+    kbOpen = isKeyboardOpen(m);
+  }
+  onMount(() => {
+    // Chrome Android: let the keyboard overlay content instead of resizing the
+    // layout viewport, so the terminal behind stays put.
+    const vk = (navigator as any).virtualKeyboard;
+    if (vk) { try { vk.overlaysContent = true; } catch { /* unsupported */ } }
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", syncViewport);
+    vv?.addEventListener("scroll", syncViewport);
+    syncViewport();
+    return () => {
+      vv?.removeEventListener("resize", syncViewport);
+      vv?.removeEventListener("scroll", syncViewport);
+    };
+  });
 
   const MODSET = new Set<string>(MOD_IDS);
 
@@ -153,9 +186,11 @@
       {/each}
     </div>
   {:else if sub === "ime"}
-    <div class="ime">
+    <div class="ime" class:floating={imeFocused && kbOpen} style={imeFocused && kbOpen ? `bottom:${kbHeight}px` : ""}>
       <div class="target">{$t('keyboard.ime.target')}</div>
-      <textarea bind:value={imeBuf} placeholder={$t('keyboard.ime.ph')} rows="3"></textarea>
+      <textarea bind:value={imeBuf} placeholder={$t('keyboard.ime.ph')} rows="3"
+        onfocus={() => { imeFocused = true; syncViewport(); }}
+        onblur={() => { imeFocused = false; }}></textarea>
       <div class="ime-actions">
         <button class="clear" onclick={() => (imeBuf = "")}>{$t('keyboard.ime.clear')}</button>
         <button class="send" onclick={sendIme}>{$t('keyboard.ime.send')}</button>
@@ -383,6 +418,15 @@
     gap: 8px;
     flex: 1;
     overflow-y: auto;
+  }
+  .ime.floating {
+    position: fixed;
+    left: 0; right: 0;
+    z-index: 30;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    box-shadow: var(--pop-shadow);
+    padding: 8px 10px;
   }
   .target {
     font-size: 0.7rem;
