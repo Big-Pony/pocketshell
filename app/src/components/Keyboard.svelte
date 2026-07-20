@@ -6,10 +6,11 @@
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/key-repeat";
   import { imeSendText } from "../lib/ime-send";
+  import type { VibrateLevel } from "../lib/settings";
 
-  let { onText, onCommand, vibrate = false, layout = "mac", selecting = false, selCount = 0, selMode = "idle", hints = [], onHint = (_c: string) => {} }: {
+  let { onText, onCommand, vibrate = "medium" as VibrateLevel, layout = "mac", selecting = false, selCount = 0, selMode = "idle", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
-    vibrate?: boolean; layout?: "mac" | "win"; selecting?: boolean; selCount?: number;
+    vibrate?: VibrateLevel; layout?: "mac" | "win"; selecting?: boolean; selCount?: number;
     selMode?: "idle" | "selecting" | "line";
     hints?: string[]; onHint?: (cmd: string) => void;
   } = $props();
@@ -20,7 +21,13 @@
 
   const MODSET = new Set<string>(MOD_IDS);
 
-  function buzz() { if (vibrate) navigator.vibrate?.(8); }
+  const VIBE_PATTERN: Record<VibrateLevel, number[]> = {
+    off: [], light: [12], medium: [20], strong: [16, 8, 24],
+  };
+  function buzz() {
+    const p = VIBE_PATTERN[vibrate];
+    if (p.length) navigator.vibrate?.(p);
+  }
 
   // Long-press repeaters keyed by keycap id (one per held key).
   const repeaters = new Map<string, KeyRepeater>();

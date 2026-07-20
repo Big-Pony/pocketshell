@@ -75,6 +75,10 @@ export default {
     vibrate: {
       label: "按键震动",
       desc: "自定义键盘按下时短振一下",
+      off: "关",
+      light: "轻",
+      medium: "中",
+      strong: "强",
     },
     devices: {
       label: "设备管理",

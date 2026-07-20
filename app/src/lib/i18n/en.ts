@@ -75,6 +75,10 @@ export default {
     vibrate: {
       label: "Key vibration",
       desc: "Short haptic pulse on each key press",
+      off: "Off",
+      light: "Light",
+      medium: "Medium",
+      strong: "Strong",
     },
     devices: {
       label: "Devices",
