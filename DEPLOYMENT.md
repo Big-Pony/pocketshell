@@ -278,6 +278,29 @@ Agent 启动时、以及手机端每次连接时，会静默向 GitHub Releases 
 - **开关与来源**：`POCKETSHELL_UPDATE=0` 整体关闭 OTA（不检查、不可更新）；`POCKETSHELL_UPDATE_REPO` 指定检查更新所用的 GitHub 仓库（默认 `Big-Pony/pocketshell`，设为 `off` 效果等同 `POCKETSHELL_UPDATE=0`，也可指向自己 fork 后的仓库）；检查请求走 `https://api.github.com/repos/<repo>/releases/latest`，遵循进程环境里的 `HTTPS_PROXY`/`HTTP_PROXY`。
 - **macOS：首次 FDA 授权不会因 OTA 丢失。** 新二进制会用本机一份稳定的自签名身份（`PocketShell Self-Signed`）重新签名，签名的 Designated Requirement 不随每次构建变化，系统之前对旧二进制授予的 Full Disk Access 等 TCC 权限在更新后继续生效，不会被重新弹窗要求授权。这份签名身份需要**一次性、交互式**地建立（后台进程无法自动创建/信任证书）——运行 `pocketshell-agent --warmup` 完成；跳过这一步也不影响 OTA 正常更新，只是新二进制不会被签名，届时 TCC 权限可能需要重新授予。
 
+### 通知与本地回环端点
+
+Agent 内置一个仅本机可访问的通知回环端点 `/internal/notify`（`POST`，`127.0.0.1`-only + Bearer token 双重校验，任一不满足分别返回 403 / 401，请求体缺字段返回 400）。Claude Code / Codex / opencode 的 hook/notify 子进程在一轮任务完成或等待输入时会调用这个端点，触发应用内广播 + Web Push + Webhook 三路分发（功能介绍见 [README「通知」一节](./README.md#通知)）。
+
+每个终端会话启动时，Agent 会往子进程环境里注入三个变量供 hook 使用：
+
+| 变量 | 说明 |
+|---|---|
+| `POCKETSHELL_NOTIFY_SESSION` | 当前会话 ID |
+| `POCKETSHELL_NOTIFY_URL` | 回环端点地址，固定为 `http://127.0.0.1:<port>/internal/notify` |
+| `POCKETSHELL_NOTIFY_TOKEN` | 鉴权 token，与 `<keyDir>/notify_token` 一致 |
+
+**已知限制：开启内置 TLS 时通知触发不了。** `POCKETSHELL_NOTIFY_URL` 固定用明文 `http://` 回环；如果开启了内置 Agent TLS（`POCKETSHELL_TLS=1`，见方式 A 末尾），同一个监听端口只接受 TLS 握手，hook 子进程用明文 HTTP 连接会直接失败——这种组合下通知不会触发。生产环境默认 TLS 关闭、由边缘（Cloudflare/Caddy，方式 B/C/D）终结 TLS，不受此限制影响；只有在方式 A 上额外叠加内置自签 TLS 这一种配置会撞上。
+
+`KEY_DIR`（默认 `~/.pocketshell`）新增几个通知相关落盘文件，均为 tmp+rename 原子写、权限 `0600`：
+
+| 文件 | 内容 |
+|---|---|
+| `notify.json` | 通知总配置（工具开关 / Web Push 开关 / 摘要开关 / 去重窗口 / Webhook 列表，含各 Webhook 的 URL/secret） |
+| `vapid.json` | Web Push 用的 VAPID 密钥对 |
+| `push-subs.json` | 各设备的 Web Push 订阅信息 |
+| `notify_token` | `/internal/notify` 鉴权用的随机 token |
+
 ### 命令行设备管理（无桌面运维）
 
 `/admin` 管理页只监听 `127.0.0.1`，在纯 Linux / SSH 服务器上不方便打开。Agent 二进制内置了等效的命令行子命令，直接读写同一个 `POCKETSHELL_KEY_DIR`（务必用与常驻进程相同的 `POCKETSHELL_KEY_DIR` 环境变量运行）：
@@ -581,6 +604,29 @@ On startup, and again each time a phone connects, the Agent silently checks GitH
 - **The self-restart requires the process to be supervisor-managed.** Once the swap lands, the Agent tries to restart itself; if it's under systemd (`Restart=always`, above) or launchd (`KeepAlive`, above), the supervisor relaunches the new binary automatically. Otherwise it falls back to spawning a detached replacement process and exiting — a less reliable path than supervisor management. **Production deployments should set `Restart=always` / `KeepAlive` as shown above** so in-app updates can reliably come back up as the new version.
 - **Env vars:** `POCKETSHELL_UPDATE=0` disables OTA entirely (no checks, no updates). `POCKETSHELL_UPDATE_REPO` sets the GitHub repo checked for releases (default `Big-Pony/pocketshell`; `off` disables OTA the same as `POCKETSHELL_UPDATE=0`; can also point at your own fork). Checks hit `https://api.github.com/repos/<repo>/releases/latest` and honor `HTTPS_PROXY`/`HTTP_PROXY` from the process environment.
 - **macOS: the first Full Disk Access grant survives OTA updates.** Each new binary is re-signed with a stable local self-signed identity (`PocketShell Self-Signed`), so its codesign designated requirement doesn't change between builds — TCC permissions (like Full Disk Access) granted to the previous binary carry over without a re-prompt. Provisioning that signing identity is a **one-time, interactive** step (a background process can't create/trust a certificate on its own) — run `pocketshell-agent --warmup` to set it up. Skipping this doesn't block OTA updates; the new binary just won't be signed, and TCC permissions may need to be re-granted.
+
+### Notifications & the local loopback endpoint
+
+The Agent has a built-in, localhost-only notification loopback endpoint, `/internal/notify` (`POST`, gated by both a `127.0.0.1`-only check and a Bearer token — either failing returns 403 / 401, and a missing required field returns 400). When Claude Code / Codex / opencode's hook/notify subprocess fires at the end of a work round or while waiting on input, it calls this endpoint, which fans out to in-app broadcast, Web Push, and webhooks (see [README's "Notifications" section](./README.md#notifications) for the feature overview).
+
+Each terminal session gets three env vars injected into its subprocess environment for the hook to use:
+
+| Variable | Purpose |
+|---|---|
+| `POCKETSHELL_NOTIFY_SESSION` | the current session ID |
+| `POCKETSHELL_NOTIFY_URL` | the loopback endpoint, fixed at `http://127.0.0.1:<port>/internal/notify` |
+| `POCKETSHELL_NOTIFY_TOKEN` | the auth token, matching `<keyDir>/notify_token` |
+
+**Known limitation: notifications don't fire with built-in TLS enabled.** `POCKETSHELL_NOTIFY_URL` is fixed to plain `http://` loopback; if built-in Agent TLS is on (`POCKETSHELL_TLS=1`, see the end of option A), the same listening port only accepts TLS handshakes, so the hook subprocess's plain-HTTP connection fails outright — notifications simply won't trigger in that combination. Production deployments default to TLS off with the edge (Cloudflare/Caddy, options B/C/D) terminating TLS, so they're unaffected; this only bites the niche case of option A plus built-in self-signed TLS layered on top.
+
+`KEY_DIR` (default `~/.pocketshell`) gains a few notification-related files on disk, all written atomically (tmp+rename) with `0600` permissions:
+
+| File | Contents |
+|---|---|
+| `notify.json` | overall notification config (per-tool toggles / Web Push toggle / summary toggle / dedupe window / webhook list, including each webhook's URL/secret) |
+| `vapid.json` | the VAPID key pair used for Web Push |
+| `push-subs.json` | per-device Web Push subscriptions |
+| `notify_token` | the random token used to authenticate calls to `/internal/notify` |
 
 ### CLI device management (headless ops)
 

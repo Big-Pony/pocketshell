@@ -34,3 +34,25 @@ test("switching locale re-renders labels without a reload", async () => {
   expect(await findByText("Appearance")).toBeInTheDocument();
   expect(await findByText("Language")).toBeInTheDocument();
 });
+
+test("notifications section is collapsed by default and every channel starts off", async () => {
+  const { getByText, queryByText } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+  });
+  expect(getByText("通知")).toBeInTheDocument();
+  // Collapsed: none of the trigger/tool rows are in the DOM yet.
+  expect(queryByText("Claude Code")).not.toBeInTheDocument();
+  expect(queryByText("添加")).not.toBeInTheDocument();
+});
+
+test("expanding the notifications section shows tool toggles and the webhook add button", async () => {
+  const { getByText } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+  });
+  await fireEvent.click(getByText("通知"));
+  expect(getByText("Claude Code")).toBeInTheDocument();
+  expect(getByText("Codex")).toBeInTheDocument();
+  expect(getByText("opencode")).toBeInTheDocument();
+  expect(getByText("Web Push")).toBeInTheDocument();
+  expect(getByText("添加")).toBeInTheDocument();
+});

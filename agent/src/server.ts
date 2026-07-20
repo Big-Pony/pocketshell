@@ -32,8 +32,12 @@ import { readCache, writeCache, isFresh, CHECK_TTL_MS, type CachedCheck } from "
 import { downloadAndVerify, type Phase } from "./update-apply";
 import { signBinary, ensureLocalIdentity } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
+import { NotificationService, type DevicePresence } from "./notify-service";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, type WireResult } from "./notify-wire";
+import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
+import { homedir } from "node:os";
 import { $ } from "bun";
 
 // Pure precondition gate for update.apply — kept outside startServer so it is
@@ -243,6 +247,42 @@ export function startServer(deps: Deps = {}) {
   // batcher/replay/fanout and exit path as tmux (keyed by sessionId), and a
   // create/kill/exit triggers a sessions broadcast so shell tabs appear/vanish.
   const shell = deps.shell ?? new ShellService();
+  // Presence keyed by device Noise pubkey (updated by the `presence` message,
+  // cleared when a device's last live connection closes — req N's "smart
+  // do-not-disturb": a device that is foregrounded AND looking at the very
+  // session that finished does not get a system push, see notify-service.ts.
+  const notifyPresence = new Map<string, DevicePresence>();
+  const notify = new NotificationService({
+    keyDir: config.keyDir,
+    getPresences: () => [...notifyPresence.values()],
+    broadcastInApp: (m) => broadcastAll({ type: "notification", ...m }),
+    pushSender: realPushSender(ensureVapid(config.keyDir)),
+  });
+  // Per-tool hook config paths + the wire/unwire dispatcher backing the
+  // notify.wire/notify.unwire RPCs below. Success persists the toggle into
+  // notify.json so the UI reflects wired state after a restart.
+  const agentBin = process.execPath;
+  const toolPaths = {
+    claude: pathJoin(homedir(), ".claude", "settings.json"),
+    codex: pathJoin(homedir(), ".codex", "config.toml"),
+    opencode: pathJoin(homedir(), ".config", "opencode", "plugin"),
+  };
+  const doWire = (tool: "claude" | "codex" | "opencode", on: boolean): WireResult => {
+    let r: WireResult;
+    if (tool === "claude") r = on ? wireClaude(toolPaths.claude, agentBin) : unwireClaude(toolPaths.claude, agentBin);
+    else if (tool === "codex") r = on ? wireCodex(toolPaths.codex, agentBin) : unwireCodex(toolPaths.codex);
+    else r = on ? wireOpencode(toolPaths.opencode) : unwireOpencode(toolPaths.opencode);
+    if (r.ok) { const c = notify.config(); c.tools[tool] = on; notify.setConfig(c); }
+    return r;
+  };
+  // Notification hook wiring (req N): seed each new session's env with enough
+  // for an in-session hook to identify itself as PocketShell and POST to the
+  // loopback notify endpoint without holding a Noise identity of its own.
+  const notifyEnv = (sessionId: string): Record<string, string> => ({
+    POCKETSHELL_NOTIFY_SESSION: sessionId,
+    POCKETSHELL_NOTIFY_URL: `http://127.0.0.1:${deps.port ?? config.listen.port}/internal/notify`,
+    POCKETSHELL_NOTIFY_TOKEN: config.notifyToken,
+  });
   shell.onOutput(onTermOutput);
   shell.onExit(onTermExit);
   shell.onChange(() => { void pushSessions(); });
@@ -382,7 +422,7 @@ export function startServer(deps: Deps = {}) {
               sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
               break;
             }
-            shell.create(msg.name, {});
+            shell.create(msg.name, { env: notifyEnv(msg.name) });
           } else {
             // tmux with an existing tmux name is a legitimate adopt/attach (do
             // NOT reject); only reject when the name is taken by a shell session.
@@ -390,7 +430,7 @@ export function startServer(deps: Deps = {}) {
               sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
               break;
             }
-            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd, env: notifyEnv(msg.name) });
           }
         }
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
@@ -453,6 +493,11 @@ export function startServer(deps: Deps = {}) {
         else void terminal.kill(msg.sessionId);
         break;
       case "ping": sendSecure(conn, { type: "pong" }); break;
+      case "presence":
+        if (conn.remoteStatic) {
+          notifyPresence.set(conn.remoteStatic, { pubKey: conn.remoteStatic, foreground: msg.foreground, activeSessionId: msg.activeSessionId });
+        }
+        break;
       case "listDevices": {
         const envKeysArr = Array.from(envKeys);
         const list: DeviceInfo[] = [
@@ -468,6 +513,7 @@ export function startServer(deps: Deps = {}) {
         if (removed) {
           config.audit.log({ event: "revoke", pub: msg.pubKey, ip: conn.ip });
           for (const c of conns.values()) if (c.remoteStatic === msg.pubKey) c.ws.close();
+          notify.removeSubsForDevice(msg.pubKey);
         }
         break;
       }
@@ -513,6 +559,27 @@ export function startServer(deps: Deps = {}) {
               const dev = conn.remoteStatic ?? "unknown";
               result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
               break;
+            }
+            case "notify.getConfig": result = notify.config(); break;
+            case "notify.setConfig": notify.setConfig(p.config); result = { ok: true }; break;
+            case "notify.getVapidPublicKey": result = { publicKey: notify.vapidPublicKey() }; break;
+            case "notify.subscribeWebPush":
+              if (conn.remoteStatic) notify.addSub(conn.remoteStatic, p.subscription);
+              result = { ok: true }; break;
+            case "notify.unsubscribeWebPush":
+              if (conn.remoteStatic) notify.removeSubsForDevice(conn.remoteStatic);
+              result = { ok: true }; break;
+            case "notify.wire": result = doWire(p.tool, true); break;
+            case "notify.unwire": result = doWire(p.tool, false); break;
+            case "notify.testWebhook": {
+              // async self-answer, same pattern as update.check/update.apply
+              // above: sends its own response and returns early rather than
+              // falling through to the post-switch sendRpcResult(...) call.
+              void notify.testWebhook(String(p.id)).then(
+                (r) => sendRpcResult(conn, id, r),
+                (e) => sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } }),
+              );
+              return;
             }
             case "update.check": {
               // The switch(method) block above this line is synchronous end to
@@ -662,6 +729,7 @@ export function startServer(deps: Deps = {}) {
       if (removed) {
         config.audit.log({ event: "revoke", pub, ip: "admin" });
         for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
+        notify.removeSubsForDevice(pub);
       }
       return Response.json({ ok: removed });
     }
@@ -676,6 +744,15 @@ export function startServer(deps: Deps = {}) {
     async fetch(req, srv) {
       if (srv.upgrade(req)) return;
       const url = new URL(req.url);
+      if (url.pathname === "/internal/notify" && req.method === "POST") {
+        const ip = srv.requestIP(req)?.address ?? "";
+        if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
+        if (req.headers.get("authorization") !== `Bearer ${config.notifyToken}`) return new Response("Unauthorized", { status: 401 });
+        const b = (await req.json().catch(() => null)) as { sessionId?: string; title?: string; body?: string } | null;
+        if (!b?.sessionId) return new Response("bad", { status: 400 });
+        void notify.dispatch({ sessionId: b.sessionId, title: b.title ?? b.sessionId, body: b.body ?? "" });
+        return Response.json({ ok: true });
+      }
       if (url.pathname.startsWith("/preview/")) {
         return buildPreviewResponse(previewTokens, url, Date.now());
       }
@@ -712,6 +789,7 @@ export function startServer(deps: Deps = {}) {
         // Reclaim this device's preview tokens once it has no live socket left.
         if (conn?.remoteStatic && ![...conns.values()].some((c) => c.remoteStatic === conn.remoteStatic)) {
           previewTokens.revokeDevice(conn.remoteStatic);
+          notifyPresence.delete(conn.remoteStatic);
         }
         console.log("[pocketshell] disconnect");
       },
@@ -798,7 +876,36 @@ async function runCliDevices(argv: string[]): Promise<number> {
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
   const cliArgv = process.argv.slice(2);
-  if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
+  if (cliArgv[0] === "notify") {
+    void (async () => {
+      try {
+        const { parseNotifyPayload } = await import("./notify-subcommand");
+        let stdin = "";
+        if (!process.stdin.isTTY) {
+          try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
+        }
+        const p = parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
+        if (!p) { process.exit(0); return; }      // not a PocketShell session
+        const url = process.env.POCKETSHELL_NOTIFY_URL;
+        const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
+        if (url && token) {
+          const ctl = new AbortController();
+          const timeoutId = setTimeout(() => ctl.abort(), 3000);
+          try {
+            await fetch(url, {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+              body: JSON.stringify(p),
+              signal: ctl.signal,
+            }).catch(() => {});
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        }
+      } catch { /* never disturb the agent's normal run */ }
+      process.exit(0);
+    })();
+  } else if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
     // CLI subcommand path never boots the server.
     void runCliDevices(cliArgv).then((code) => process.exit(code));
   } else if (process.argv.includes("--version")) {

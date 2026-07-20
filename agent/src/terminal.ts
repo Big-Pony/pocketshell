@@ -300,7 +300,7 @@ export class TerminalService {
 
   ensure(
     name: string,
-    opt: { cmd?: string; cwd?: string; cols?: number; rows?: number } = {},
+    opt: { cmd?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string> } = {},
   ): void {
     if (this.sessions.has(name)) return;
 
@@ -320,6 +320,10 @@ export class TerminalService {
       // phone and the input line stays visible. Also dodges the fullscreen
       // renderer's CJK-copy-corruption bug. (tmux 3.0+; `-e` before the command.)
       args.push("-e", "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1");
+      // Notification hook wiring: seed POCKETSHELL_NOTIFY_* so a hook running
+      // inside this session can identify it as a PocketShell session and POST to
+      // the loopback notify endpoint. Absent outside PocketShell => hook exits 0.
+      for (const [k, v] of Object.entries(opt.env ?? {})) args.push("-e", `${k}=${v}`);
       // `-e LANG=...`: a pane program's locale (what `vim`/the shell see) is
       // decided by the tmux SERVER's `new-session` environment, not by any
       // flag on the attach CLIENT — `-u` above only makes the attach client

@@ -58,6 +58,7 @@ type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
 type InputCb = (sessionId: string) => void;
 type UpdateCb = (u: { phase: string; pct?: number; message?: string; version?: string }) => void;
+type NotificationCb = (m: { sessionId: string; title: string; body: string; ts: number }) => void;
 
 export class Connection {
   private ws!: WebSocketLike;
@@ -75,6 +76,7 @@ export class Connection {
   private devicesCbs: ((d: DeviceInfo[]) => void)[] = [];
   private snippetsCbs: ((s: Snippet[]) => void)[] = [];
   private updateCbs: UpdateCb[] = [];
+  private notificationCbs: NotificationCb[] = [];
   private establishedThisSocket = false;
   private pairFailStreak = 0;
   private rpcSeq = 0;
@@ -349,6 +351,9 @@ export class Connection {
     } else if (msg.type === "update") {
       const u = { phase: msg.phase, pct: msg.pct, message: msg.message, version: msg.version };
       for (const cb of this.updateCbs) cb(u);
+    } else if (msg.type === "notification") {
+      const n = { sessionId: msg.sessionId, title: msg.title, body: msg.body, ts: msg.ts };
+      for (const cb of this.notificationCbs) cb(n);
     } else if (msg.type === "error") {
       // A rejected pairing (expired/wrong/exhausted code) must not be retried:
       // the agent closes right after, and re-sending the same dead code on every
@@ -465,6 +470,21 @@ export class Connection {
   }
   checkUpdate(force = false): Promise<unknown> { return this.rpc("update.check", { force }); }
   applyUpdate(): Promise<unknown> { return this.rpc("update.apply"); }
+  sendPresence(foreground: boolean, activeSessionId: string | null): void {
+    this.send({ type: "presence", foreground, activeSessionId });
+  }
+  onNotification(cb: NotificationCb): () => void {
+    this.notificationCbs.push(cb);
+    return () => { this.notificationCbs = this.notificationCbs.filter((c) => c !== cb); };
+  }
+  notifyGetConfig(): Promise<unknown> { return this.rpc("notify.getConfig"); }
+  notifySetConfig(config: unknown): Promise<unknown> { return this.rpc("notify.setConfig", { config }); }
+  notifyGetVapidKey(): Promise<{ publicKey: string }> { return this.rpc("notify.getVapidPublicKey") as Promise<{ publicKey: string }>; }
+  notifySubscribe(subscription: unknown): Promise<unknown> { return this.rpc("notify.subscribeWebPush", { subscription }); }
+  notifyUnsubscribe(): Promise<unknown> { return this.rpc("notify.unsubscribeWebPush"); }
+  notifyTestWebhook(id: string): Promise<{ ok: boolean; error?: string }> { return this.rpc("notify.testWebhook", { id }) as Promise<{ ok: boolean; error?: string }>; }
+  notifyWire(tool: string): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("notify.wire", { tool }) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
+  notifyUnwire(tool: string): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("notify.unwire", { tool }) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
   onOutput(cb: OutputCb): () => void {
     this.outputCbs.push(cb);
     return () => {

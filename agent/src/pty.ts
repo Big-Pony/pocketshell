@@ -43,7 +43,7 @@ export interface PtyHandle {
   onExit(cb: (code: number) => void): void;
 }
 
-export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): PtyHandle {
+export function spawnPty(opts: { cmd: string[]; cols: number; rows: number; env?: Record<string, string> }): PtyHandle {
   let killed = false;
   const dataCbs: ((chunk: Uint8Array) => void)[] = [];
   const exitCbs: ((code: number) => void)[] = [];
@@ -65,8 +65,9 @@ export function spawnPty(opts: { cmd: string[]; cols: number; rows: number }): P
     terminal,
     // ptyEnv keeps TERM correct and guarantees a UTF-8 locale (LANG) when the
     // service manager (launchd) provides none, so vim/shell inside tmux handle
-    // CJK input correctly. See pty-env.ts.
-    env: ptyEnv(process.env),
+    // CJK input correctly. See pty-env.ts. opts.env (e.g. POCKETSHELL_NOTIFY_*)
+    // is merged on top so callers can seed extra session-scoped variables.
+    env: { ...ptyEnv(process.env), ...(opts.env ?? {}) },
   });
 
   // Wire subprocess exit to exitCbs.

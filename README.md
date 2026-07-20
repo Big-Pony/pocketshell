@@ -134,6 +134,27 @@ Agent 内置基于 GitHub Releases 的应用内自动更新：启动、以及手
 - 用 `POCKETSHELL_UPDATE=0` 关闭该功能；`POCKETSHELL_UPDATE_REPO` 可改指向自己 fork 的仓库，设为 `off` 效果等同关闭。
 - 应用内更新完成后的自重启依赖进程被 systemd / launchd 等 supervisor 托管；macOS 上首次授予的 Full Disk Access 权限在 OTA 后不会丢失。细节见 **[部署指南 § 自动更新（OTA）](./DEPLOYMENT.md#自动更新ota)**。
 
+### 通知
+
+Agent（Claude Code / Codex / opencode）完成一轮任务或等待你输入时，可以把通知推到手机上——即使 App 没开着、手机锁屏，或你正在看别的会话。
+
+**开启方式**：设置 → 通知，按工具分别勾选（Claude Code / Codex / opencode 三个独立开关）。勾选后 Agent 会自动、幂等地往该工具的配置里写一条 hook/notify 配置：
+
+- Claude Code → `~/.claude/settings.json`（`hooks.Notification`）
+- Codex → `~/.codex/config.toml`（`notify` 字段）
+- opencode → 插件目录（`~/.config/opencode/plugin/pocketshell-notify.js`）
+
+取消勾选会精确移除这一条注入，不影响你自己手写的其它 hook/配置；写入失败（JSON 解析失败、与已有 `notify` 配置冲突、opencode 未安装等）会在设置里展示具体原因，不会静默失败。
+
+**两种送达方式，可同时开：**
+
+- **Web Push**——需要在「已添加到主屏幕」的 PWA 里打开并授予通知权限；iOS 上必须先「添加到主屏幕」才能收到推送（Safari 标签页内无法接收）；国内 Android 若没有 Google 服务框架，可能因连不上 FCM 而收不到。
+- **出站 Webhook**——内置企业微信 / 飞书（可选签名密钥）/ Slack / Discord 模板，也支持自定义 URL + JSON 模板；可配置多条，支持逐条「发送测试」。
+
+**智能免打扰**：正在前台盯着某个会话时，该会话完成不会弹系统通知（只在 App 内轻量提示一下）；切到后台、锁屏，或在看别的会话时才会真正推送；同一会话短时间内（默认 10 秒，可调）多次完成只算一次，不会连环炸。
+
+**隐私提示**：通知默认带一段 agent 输出摘要，可在设置里关掉；Web Push 走浏览器标准加密通道，但 **Webhook 是把消息明文发给企业微信/飞书等第三方服务商的**——如果摘要可能含敏感信息、又配置了 Webhook，请留意这一点。
+
 ### 安全
 
 端到端加密：每次连接做 Noise IK 握手，双向身份认证 + 前向保密，未登记设备握手就过不了；穿透/反代链路只是传输密文，解不开明文。**认证边界即安全边界**——过握手+配对的设备可浏览 Agent 进程权限内的文件（不做额外沙箱，请以进程权限约束访问面）。生产环境建议把 TLS 交给边缘（Cloudflare/Caddy）终结；加密密钥仅存于 `KEY_DIR`，从不入库。
@@ -247,6 +268,27 @@ The Agent has built-in in-app auto-update backed by GitHub Releases: it silently
 
 - Set `POCKETSHELL_UPDATE=0` to disable it; point `POCKETSHELL_UPDATE_REPO` at your own fork, or set it to `off` for the same effect as disabling.
 - The self-restart after an in-app update relies on the process being supervisor-managed (systemd / launchd); on macOS, a Full Disk Access grant made before an update survives OTA. Details: **[DEPLOYMENT.md § Auto-update (OTA)](./DEPLOYMENT.md#auto-update-ota)**.
+
+### Notifications
+
+When an agent (Claude Code / Codex / opencode) finishes a work round or is waiting on your input, it can push a notification to your phone — even if the App isn't open, the phone is locked, or you're looking at a different session.
+
+**Enabling it**: Settings → Notifications, toggle per tool (Claude Code / Codex / opencode each have their own switch). Turning one on idempotently writes a hook/notify entry into that tool's config:
+
+- Claude Code → `~/.claude/settings.json` (`hooks.Notification`)
+- Codex → `~/.codex/config.toml` (the `notify` field)
+- opencode → its plugin directory (`~/.config/opencode/plugin/pocketshell-notify.js`)
+
+Turning it off removes exactly that entry and leaves any other hooks/config you wrote by hand untouched; a failed write (JSON parse error, a conflicting existing `notify` config, opencode not installed, etc.) shows the specific reason in settings instead of failing silently.
+
+**Two delivery channels, can both be on:**
+
+- **Web Push** — needs to be opened from a PWA that's been "added to home screen," with notification permission granted; on iOS you must add it to the home screen first (a plain Safari tab can't receive push); on Android without Google Play Services (common in mainland China), delivery may fail since it depends on reaching FCM.
+- **Outbound webhooks** — built-in templates for WeCom / Feishu (optional signing secret) / Slack / Discord, plus a custom URL + JSON template; configure any number of them, and test-send each one individually.
+
+**Smart do-not-disturb**: if you're currently viewing a session in the foreground, its completion won't trigger a system notification (just a lightweight in-app hint); it does push once you're in the background, the screen is locked, or you're viewing a different session. Repeated completions on the same session within a short window (10s by default, adjustable) collapse into a single notification.
+
+**Privacy note**: notifications include an agent-output summary by default — you can turn that off in settings. Web Push travels over the browser's standard encrypted channel, but **webhooks send the message in plaintext to third-party providers like WeCom/Feishu** — keep that in mind if the summary could contain sensitive output and you've configured a webhook.
 
 ### Security
 

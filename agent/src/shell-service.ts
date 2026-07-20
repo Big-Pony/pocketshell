@@ -5,7 +5,7 @@ import { spawnPty, type PtyHandle } from "./pty";
 import { ReplayService } from "./replay";
 import type { SessionMeta } from "./protocol";
 
-export type PtySpawner = (opts: { cmd: string[]; cols: number; rows: number }) => PtyHandle;
+export type PtySpawner = (opts: { cmd: string[]; cols: number; rows: number; env?: Record<string, string> }) => PtyHandle;
 
 interface Live {
   pty: PtyHandle;
@@ -33,11 +33,11 @@ export class ShellService {
 
   has(name: string): boolean { return this.sessions.has(name); }
 
-  create(name: string, opt: { cols?: number; rows?: number } = {}): void {
+  create(name: string, opt: { cols?: number; rows?: number; env?: Record<string, string> } = {}): void {
     if (this.sessions.has(name)) return;
     const cols = opt.cols ?? 80;
     const rows = opt.rows ?? 24;
-    const pty = this.spawn({ cmd: this.shellCmd, cols, rows });
+    const pty = this.spawn({ cmd: this.shellCmd, cols, rows, env: opt.env });
     pty.onData((chunk) => {
       this.replay.ingest(name, chunk);
       for (const cb of this.outputCbs) cb(name, chunk);

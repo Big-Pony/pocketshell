@@ -70,3 +70,13 @@ test("spawnPty delivers SIGWINCH only on real size changes", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 }, 10000);
+
+// --- spawnPty env merge: opts.env reaches the spawned process ---
+
+test("spawnPty merges opts.env", async () => {
+  const chunks: string[] = [];
+  const h = spawnPty({ cmd: ["sh", "-c", "echo $POCKETSHELL_NOTIFY_SESSION"], cols: 80, rows: 24, env: { POCKETSHELL_NOTIFY_SESSION: "work" } });
+  h.onData((c) => chunks.push(new TextDecoder().decode(c)));
+  await new Promise<void>((r) => h.onExit(() => r()));
+  expect(chunks.join("")).toContain("work");
+});

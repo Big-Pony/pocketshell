@@ -29,6 +29,7 @@ export interface AgentConfig {
   tmpDir: string;
   adminEnabled: boolean;
   update: { enabled: boolean; repo: string | null };
+  notifyToken: string;
 }
 
 function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKey: Uint8Array } {
@@ -44,6 +45,14 @@ function loadOrCreateIdentity(keyDir: string): { publicKey: Uint8Array; secretKe
   const sec = new Uint8Array(kp.secretKey);
   writeFileSync(file, JSON.stringify({ publicKey: toB64(pub), secretKey: toB64(sec) }), { mode: 0o600 });
   return { publicKey: pub, secretKey: sec };
+}
+
+function loadOrCreateNotifyToken(keyDir: string): string {
+  const file = join(keyDir, "notify_token");
+  if (existsSync(file)) return readFileSync(file, "utf8").trim();
+  const tok = toB64(new Uint8Array(crypto.getRandomValues(new Uint8Array(24))));
+  writeFileSync(file, tok, { mode: 0o600 });
+  return tok;
 }
 
 export function buildPairingString(pub: Uint8Array, addr: string, code: string): string {
@@ -140,6 +149,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const audit = createAudit({ write: fileAuditWriter(join(keyDir, "audit.log")) });
   const rateLimiter = createRateLimiter({ now: () => Date.now(), onLock: (ip) => audit.log({ event: "ratelimit_lock", ip }) });
   const identity = loadOrCreateIdentity(keyDir);
+  // Loopback token guarding POST /internal/notify (hook processes are local and
+  // hold no Noise identity, so they authenticate with this bearer token instead).
+  const notifyToken = loadOrCreateNotifyToken(keyDir);
   const snippets = openSnippetStore(join(keyDir, "pocketshell.db"));
   const tmpDir = join(keyDir, "tmp");
   mkdirSync(tmpDir, { recursive: true });
@@ -174,5 +186,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     tmpDir,
     adminEnabled,
     update,
+    notifyToken,
   };
 }
