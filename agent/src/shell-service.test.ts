@@ -63,10 +63,10 @@ test("write forwards to the pty, resize is accepted, kill destroys", () => {
 test("pty exit removes the session and fires onExit + onChange", () => {
   const p = fakePty();
   const svc = new ShellService({ spawn: () => p.handle });
-  let exited: [string, number] | null = null;
-  svc.onExit((name, code) => { exited = [name, code]; });
+  const exited: Array<[string, number]> = [];
+  svc.onExit((name, code) => { exited.push([name, code]); });
   svc.create("sh1", {});
   p.exit(0);
-  expect(exited).toEqual(["sh1", 0]);
+  expect(exited).toEqual([["sh1", 0]]);
   expect(svc.has("sh1")).toBe(false);
 });

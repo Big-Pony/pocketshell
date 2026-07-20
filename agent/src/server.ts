@@ -6,6 +6,7 @@
 import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise, advertiseToHttp } from "./config";
 import { TerminalService } from "./terminal";
+import { ShellService } from "./shell-service";
 import { ReplayService } from "./replay";
 import { OutputBatcher } from "./output-batcher";
 import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp, fsWrite } from "./fs-service";
@@ -54,6 +55,7 @@ interface Deps {
   port?: number;
   config?: AgentConfig;
   terminal?: TerminalService;
+  shell?: ShellService;
   replay?: ReplayService;
   channelFactory?: () => SecureChannel;
   pairTimeoutMs?: number;
@@ -221,7 +223,7 @@ export function startServer(deps: Deps = {}) {
       try {
         do {
           pushAgain = false;
-          const sessions = await terminal.list();
+          const sessions = [...(await terminal.list()), ...shell.list()];
           if (lastPushed && sessionListsEqual(lastPushed, sessions)) continue;
           lastPushed = sessions;
           for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions });
@@ -236,6 +238,14 @@ export function startServer(deps: Deps = {}) {
     return pushInFlight;
   };
   terminal.onSessionsChange(pushSessions);
+
+  // Isolated raw-PTY shell sessions (req 6). They reuse the exact same output
+  // batcher/replay/fanout and exit path as tmux (keyed by sessionId), and a
+  // create/kill/exit triggers a sessions broadcast so shell tabs appear/vanish.
+  const shell = deps.shell ?? new ShellService();
+  shell.onOutput(onTermOutput);
+  shell.onExit(onTermExit);
+  shell.onChange(() => { void pushSessions(); });
 
   // Refresh the whole-machine roster + previews for connected clients. Skipped
   // entirely when nobody is connected (pushSessions only targets live conns,
@@ -362,7 +372,10 @@ export function startServer(deps: Deps = {}) {
     catch { sendSecure(conn, { type: "error", code: "bad_json", message: "malformed message" }); return; }
     switch (msg.type) {
       case "newSession":
-        try { terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd }); }
+        try {
+          if (msg.kind === "shell") shell.create(msg.name, {});
+          else terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd });
+        }
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
         break;
       case "listSessions":
@@ -370,7 +383,7 @@ export function startServer(deps: Deps = {}) {
         // gated by the push diff cache.
         void terminal
           .list()
-          .then((sessions) => sendSecure(conn, { type: "sessions", sessions }))
+          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: [...sessions, ...shell.list()] }))
           .catch(() => { /* runners are fail-safe; never crash the handler */ });
         break;
       case "renameSession":
@@ -410,9 +423,18 @@ export function startServer(deps: Deps = {}) {
         // and goes online, instead of looping on an "unknown_type" error.
         sendSecure(conn, { type: "paired", ok: true });
         break;
-      case "input": terminal.write(msg.sessionId, fromB64(msg.data)); break;
-      case "resize": terminal.resize(msg.sessionId, msg.cols, msg.rows); break;
-      case "kill": void terminal.kill(msg.sessionId); break;
+      case "input":
+        if (shell.has(msg.sessionId)) shell.write(msg.sessionId, fromB64(msg.data));
+        else terminal.write(msg.sessionId, fromB64(msg.data));
+        break;
+      case "resize":
+        if (shell.has(msg.sessionId)) shell.resize(msg.sessionId, msg.cols, msg.rows);
+        else terminal.resize(msg.sessionId, msg.cols, msg.rows);
+        break;
+      case "kill":
+        if (shell.has(msg.sessionId)) shell.kill(msg.sessionId);
+        else void terminal.kill(msg.sessionId);
+        break;
       case "ping": sendSecure(conn, { type: "pong" }); break;
       case "listDevices": {
         const envKeysArr = Array.from(envKeys);
@@ -463,10 +485,10 @@ export function startServer(deps: Deps = {}) {
             case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
             case "git.branches": result = gitBranches(String(p.cwd)); break;
             case "git.status": result = gitStatus(String(p.cwd)); break;
-            case "term.history": result = terminal.history(String(p.session)); break;
-            case "term.paneInfo": result = terminal.paneInfo(String(p.session)); break;
-            case "term.redraw": result = terminal.redraw(String(p.session)); break;
-            case "terminal.pwd": result = terminal.pwd(String(p.session)); break;
+            case "term.history": result = shell.has(String(p.session)) ? { data: "" } : terminal.history(String(p.session)); break;
+            case "term.paneInfo": result = shell.has(String(p.session)) ? { currentCommand: "", alternateOn: false, isShell: true } : terminal.paneInfo(String(p.session)); break;
+            case "term.redraw": result = shell.has(String(p.session)) ? { ok: true } : terminal.redraw(String(p.session)); break;
+            case "terminal.pwd": result = shell.has(String(p.session)) ? { pwd: "" } : terminal.pwd(String(p.session)); break;
             case "preview.mint": {
               // base is chosen by the client (project-root bookmark or the
               // file's dir). An authed device can already fs.read anything, so
@@ -710,6 +732,7 @@ export function startServer(deps: Deps = {}) {
       clearInterval(previewSweepTimer);
       batcher.clearAll();
       terminal.dispose();
+      shell.dispose();
       server.stop(true);
     },
     __test: {
