@@ -20,7 +20,7 @@
   import UpdateDialog from "./components/UpdateDialog.svelte";
   import type { CheckResult } from "./lib/update";
   import type { AppCommand } from "./lib/input-router";
-  import { begin, beginLine, moveFocus, range, reset, type SelState } from "./lib/terminal-select";
+  import { reset, type SelState } from "./lib/terminal-select";
   import { detectSwipe } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { applyTheme, watchSystem } from "./lib/theme";
@@ -422,22 +422,6 @@
 
   function activeTerm() { return terms.get(activeId); }
 
-  function applySel(t: import("@xterm/xterm").Terminal) {
-    const r = range(sel, t.cols);
-    t.select(r.col, r.row, r.length);
-    selCount = sel.mode === "line" ? r.length / t.cols : r.length;
-  }
-
-  // Scroll the viewport so `row` stays visible — lets line/char selection reach
-  // scrolled-off history so it can be copied.
-  function revealRow(t: import("@xterm/xterm").Terminal, row: number) {
-    const b = t.buffer.active;
-    const top = b.viewportY;
-    const bot = top + t.rows - 1;
-    if (row < top) t.scrollToLine(row);
-    else if (row > bot) t.scrollToLine(Math.max(0, row - t.rows + 1));
-  }
-
   function cancelSelection() {
     if (sel.mode === "idle") return;
     activeTerm()?.clearSelection();
@@ -471,47 +455,6 @@
       case "renameSession": {
         const next = prompt(tr("app.prompt.rename"), activeId);
         if (next && next.trim() && next !== activeId) renameSession(activeId, next.trim());
-        break;
-      }
-      case "selBegin": {
-        const t = activeTerm(); if (!t) break;
-        const b = t.buffer.active;
-        sel = begin({ row: b.baseY + b.cursorY, col: b.cursorX });
-        applySel(t);
-        break;
-      }
-      case "selMove": {
-        const t = activeTerm(); if (!t || sel.mode === "idle") break;
-        sel = moveFocus(sel, c.dir, { cols: t.cols, maxRow: t.buffer.active.length - 1 });
-        applySel(t);
-        revealRow(t, sel.focus.row);
-        break;
-      }
-      case "lineUp":
-      case "lineDown": {
-        // Whole-line selection that hops through the buffer (incl. scrollback),
-        // scrolling the viewport to follow so historical lines can be copied.
-        const t = activeTerm(); if (!t) break;
-        const b = t.buffer.active;
-        const maxRow = b.length - 1;
-        if (sel.mode !== "line") {
-          // First hop grabs the last real output line (just above the prompt).
-          const startRow = Math.max(0, Math.min(maxRow, b.baseY + b.cursorY - 1));
-          sel = beginLine(startRow);
-        } else {
-          sel = moveFocus(sel, c.type === "lineUp" ? "up" : "down", { cols: t.cols, maxRow });
-        }
-        applySel(t);
-        revealRow(t, sel.focus.row);
-        break;
-      }
-      case "selCancel": cancelSelection(); break;
-      case "selCopy": {
-        const t = activeTerm(); if (!t) break;
-        const text = t.getSelection();
-        if (!text) { showToast(tr("app.toast.noSelection")); break; }
-        writeClip(text, tr("app.toast.copiedSelection"));
-        cancelSelection();
         break;
       }
       case "copyMode": {
@@ -696,7 +639,7 @@
         }} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "kbd"}>
-      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {selecting} {selCount} {selMode} {hints} {onHint} />
+      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {hints} {onHint} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "snip"}>
       <SnippetPanel {conn} onInsert={sendActive} />
