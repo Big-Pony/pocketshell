@@ -1,10 +1,21 @@
 # PocketShell
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/Big-Pony/pocketshell?color=success)](https://github.com/Big-Pony/pocketshell/releases)
+[![Stars](https://img.shields.io/github/stars/Big-Pony/pocketshell?logo=github)](https://github.com/Big-Pony/pocketshell/stargazers)
+![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macOS-blue)
 
-**A self-hosted mobile terminal for running CLI/TUI coding agents (Claude Code, Codex, opencode, …) from your phone. Core feature: resilient sessions — your task keeps running server-side when the phone drops offline, and output is replayed on reconnect.**
+**Run Claude Code on your phone — drop offline, the task keeps running, output replays on reconnect.**
+
+A self-hosted, end-to-end-encrypted mobile terminal for CLI/TUI coding agents (Claude Code, Codex, opencode, …). Launch and babysit long-running agent tasks from your phone; when the network drops the task keeps running server-side and the full output replays the moment you reconnect — and you get a push notification when the agent finishes or needs your input.
 
 **English** · [中文](./README-CN.md)
+
+<p align="center">
+  <img src="assets/hero-en.gif" width="38%" alt="Backgrounded the app → push notification → session survived on the server → task already finished">
+</p>
+
+<p align="center"><em>Backgrounded the app · a push notification calls you back · the session survived on the server · the task already finished.</em></p>
 
 <p align="center">
   <img src="assets/screenshots/1-键盘-全键盘.jpg" width="30%" alt="Keyboard — full keyboard layout">
@@ -39,6 +50,7 @@ One binary = the whole product: the frontend is embedded and served on the same 
 
 - **Multi-session terminal / server-side tmux panel** — lists every tmux session on the host (even ones this app didn't create); attach, rename, kill; three-state dots (run/wait/done) + last-line preview; a persistent terminal per session.
 - **Resilient sessions + replay** — dual-signal offline detection, exponential-backoff reconnect; per-session `lastSeq` accounting replays only the gap; output keeps flowing into replay while offline.
+- **Push notifications** — get pinged on your phone the moment an agent finishes a round or waits for input, even backgrounded / locked (Web Push + outbound webhooks: WeCom / Feishu / Slack / Discord); smart do-not-disturb skips the ping when you're already watching that session.
 - **End-to-end encryption & device security** — full Noise **IK** handshake per connection (mutual auth + forward secrecy); one-time in-channel pairing code; persistent device registry with naming / one-click revoke; rate limiting; structured audit log.
 - **Custom full keyboard** — read-only xterm, all input routed; full laptop layout (F1–F12, arrows, sticky modifiers); Fn app-command layer; IME whole-segment input; keyboard-driven selection/copy/paste; smart command-hint bar.
 - **Snippets** — built-in groups (common agent / Git / project commands) plus custom ones, tap to insert, broadcast-synced across devices.
@@ -108,6 +120,17 @@ A few mobile gestures and key combos aren't self-evident; they're collected here
 | Tree row, trailing | `⋯` | Open that item's action menu (copy path, cd, rename, new, upload, download, delete, …) |
 | Tree row, inline | `M` `A` `D` `?` | git status markers: modified / added / deleted / untracked |
 | Sub-tab bar | branch beside `Git` | The current git branch |
+
+**Top tab bar (terminals + files)**
+
+| Location | Gesture | What it does |
+|---|---|---|
+| Any top tab | Single tap | Select / switch to that tab (immediate, no latency) |
+| The same top tab | Double tap | Open that tab's close-confirmation dialog |
+| ↳ terminal tab | on confirm | Only closes the tab — the tmux session keeps running in the background and can be reopened from the task panel |
+| ↳ shell tab | on confirm | The shell session is closed and destroyed permanently |
+| ↳ file tab | on confirm | Closes the file preview tab (warns first if it has unsaved edits) |
+| Tab bar, right | `+` | New tmux session (prompts for a name) |
 
 ### Quick start
 
