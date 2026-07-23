@@ -78,6 +78,21 @@
   // Long-press repeaters keyed by keycap id (one per held key).
   const repeaters = new Map<string, KeyRepeater>();
 
+  // ---- Defer the first byte-key shot by one frame so a horizontal swipe that
+  // starts on a key switches the bottom panel instead of also sending a byte
+  // (需求8 Phase 3). Self-contained: no cross-component state.
+  let kbEl: HTMLElement;              // root, for the capture-phase start-X tracker
+  let downX = 0;                      // pointer X at the current keydown
+  let pendingKey: { id: string } | undefined; // byte key awaiting its deferred first shot
+  let pendingRaf: number | undefined;
+  const KEY_SWIPE_CANCEL_PX = 12;     // horizontal travel that reclassifies as a swipe
+
+  onMount(() => {
+    const onDownCap = (e: PointerEvent) => { downX = e.clientX; };
+    kbEl?.addEventListener("pointerdown", onDownCap, { capture: true });
+    return () => kbEl?.removeEventListener("pointerdown", onDownCap, { capture: true });
+  });
+
   // One shot of a key: resolve against the CURRENT modifier state and emit.
   // Repeat ticks re-resolve, so an armed one-shot modifier (e.g. Shift) only
   // affects the first shot — holding "a" with Shift armed types "Aaaa…".
@@ -100,18 +115,46 @@
       mods = consumeAfterKey(mods);
       return;
     }
-    keyUp(id); // safety: drop a stale repeater for the same key
+    keyUp(id); // safety: drop a stale repeater/pending for the same key
     const rep = createKeyRepeater(() => fireKey(id));
     repeaters.set(id, rep);
-    rep.start(); // fires the first shot immediately
+    pendingKey = { id };
+    if (pendingRaf) cancelAnimationFrame(pendingRaf);
+    pendingRaf = requestAnimationFrame(() => {
+      pendingRaf = undefined;
+      if (pendingKey?.id === id) { pendingKey = undefined; rep.start(); } // first shot + arm repeat
+    });
+  }
+
+  // A horizontal drag during the deferred first frame is a panel swipe, not a
+  // key — cancel the pending key + its repeater so nothing is sent.
+  function keyMove(e: PointerEvent) {
+    if (!pendingKey) return;
+    if (Math.abs(e.clientX - downX) > KEY_SWIPE_CANCEL_PX) {
+      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      repeaters.get(pendingKey.id)?.stop();
+      repeaters.delete(pendingKey.id);
+      pendingKey = undefined;
+    }
   }
 
   function keyUp(id: string) {
+    // Released before the deferred frame (a very fast tap, no swipe): fire the
+    // single shot now so the key isn't dropped.
+    if (pendingKey?.id === id) {
+      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      pendingKey = undefined;
+      const rep = repeaters.get(id);
+      if (rep) { rep.start(); rep.stop(); repeaters.delete(id); } // one shot, no repeat
+      return;
+    }
     const rep = repeaters.get(id);
     if (rep) { rep.stop(); repeaters.delete(id); }
   }
 
   onDestroy(() => {
+    if (pendingRaf) cancelAnimationFrame(pendingRaf);
+    pendingKey = undefined;
     for (const rep of repeaters.values()) rep.stop();
     repeaters.clear();
   });
@@ -139,7 +182,7 @@
   }
 </script>
 
-<div class="kb">
+<div class="kb" bind:this={kbEl} onpointermove={keyMove}>
   <div class="subtabs">
     <button class:on={sub === "keys"} onclick={() => (sub = "keys")}>{$t('keyboard.tab.keys')}</button>
     <button class:on={sub === "ime"} onclick={() => (sub = "ime")}>{$t('keyboard.tab.ime')}</button>

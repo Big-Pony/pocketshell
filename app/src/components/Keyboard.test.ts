@@ -7,17 +7,39 @@ function openOps(onText = vi.fn(), onCommand = vi.fn(), extra = {}) {
   return { onText, onCommand, r };
 }
 
+// This jsdom version has no native PointerEvent constructor, so
+// fireEvent.pointerDown/Move(el, { clientX }) silently drops clientX (it falls
+// back to a plain Event, whose constructor ignores unknown init keys). Build
+// the event by hand and force clientX on so the swipe-cancel test below can
+// actually exercise Keyboard.svelte's clientX-based threshold check.
+function pointerEventAt(type: string, clientX: number): Event {
+  const ev = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clientX", { value: clientX });
+  return ev;
+}
+
+// Phase 3 (需求8): byte-producing keys now defer their first shot by one
+// animation frame so a horizontal swipe starting on a key can cancel it
+// before anything is sent — see keyDown/keyMove/keyUp in Keyboard.svelte. A
+// real tap always generates a pointerup shortly after pointerdown, and that
+// pointerup fires the deferred shot immediately (the "released before the
+// frame" fast path in keyUp), so these tests now fire both events to model
+// an actual tap rather than an indefinite hold.
 test("ops sub-tab: Del key sends the forward-delete sequence via onText", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("Del"));
+  const key = screen.getByText("Del");
+  await fireEvent.pointerDown(key);
+  await fireEvent.pointerUp(key);
   expect(onText).toHaveBeenCalledWith("\x1b[3~");
 });
 
 test("ops sub-tab: Tab key sends the tab byte via onText", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("Tab"));
+  const key = screen.getByText("Tab");
+  await fireEvent.pointerDown(key);
+  await fireEvent.pointerUp(key);
   expect(onText).toHaveBeenCalledWith("\x09");
 });
 
@@ -35,8 +57,12 @@ test("ops sub-tab: paste / selectText / selectAllCopy buttons dispatch commands"
 test("ops sub-tab: PgUp/PgDn buttons send page escape sequences via onText", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("PgUp"));
-  await fireEvent.pointerDown(screen.getByText("PgDn"));
+  const pgUp = screen.getByText("PgUp");
+  await fireEvent.pointerDown(pgUp);
+  await fireEvent.pointerUp(pgUp);
+  const pgDn = screen.getByText("PgDn");
+  await fireEvent.pointerDown(pgDn);
+  await fireEvent.pointerUp(pgDn);
   expect(onText).toHaveBeenCalledWith("\x1b[5~");
   expect(onText).toHaveBeenCalledWith("\x1b[6~");
 });
@@ -44,14 +70,18 @@ test("ops sub-tab: PgUp/PgDn buttons send page escape sequences via onText", asy
 test("ops sub-tab: D-pad up sends the arrow-up escape via onText", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("↑"));
+  const key = screen.getByText("↑");
+  await fireEvent.pointerDown(key);
+  await fireEvent.pointerUp(key);
   expect(onText).toHaveBeenCalledWith("\x1b[A");
 });
 
 test("ops sub-tab: Home button sends escape sequence via onText", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("Home"));
+  const key = screen.getByText("Home");
+  await fireEvent.pointerDown(key);
+  await fireEvent.pointerUp(key);
   expect(onText).toHaveBeenCalledWith("\x1b[H");
 });
 
@@ -79,13 +109,32 @@ test("Esc always sends the escape sequence", async () => {
   render(Keyboard, {
     props: { onText, onCommand: () => {}, hints: [] },
   });
-  await fireEvent.pointerDown(screen.getByText("Esc"));
+  const key = screen.getByText("Esc");
+  await fireEvent.pointerDown(key);
+  await fireEvent.pointerUp(key);
   expect(onText).toHaveBeenCalledWith("\x1b");
 });
 
 test("ops sub-tab: center Enter button sends carriage return", async () => {
   const { onText } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  await fireEvent.pointerDown(screen.getByText("⏎"));
+  const key = screen.getByText("⏎");
+  await fireEvent.pointerDown(key);
+  await fireEvent.pointerUp(key);
   expect(onText).toHaveBeenCalledWith("\r");
+});
+
+// 需求8 Phase 3: a horizontal drag that starts on a byte key is a panel
+// swipe, not a keypress — the deferred first shot must be cancelled so
+// nothing is sent, even though the same key eventually gets a pointerup.
+test("ops sub-tab: dragging off a key horizontally cancels the deferred send (swipe, not a tap)", async () => {
+  const { onText } = openOps();
+  await fireEvent.click(screen.getByText("✂ 快捷操作"));
+  const key = screen.getByText("Home");
+  await fireEvent(key, pointerEventAt("pointerdown", 100));
+  // Travel well past KEY_SWIPE_CANCEL_PX (12px) before the deferred frame
+  // fires — this is what a real swipe looks like, and must NOT emit a byte.
+  await fireEvent(key, pointerEventAt("pointermove", 140));
+  await fireEvent(key, pointerEventAt("pointerup", 140));
+  expect(onText).not.toHaveBeenCalled();
 });
