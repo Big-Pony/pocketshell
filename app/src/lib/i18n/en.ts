@@ -340,6 +340,8 @@ export default {
     viewRender: "Preview",
     viewSource: "Source",
     refresh: "Refresh",
+    fullscreen: "Fullscreen",
+    exitFullscreen: "Exit fullscreen",
     imageLabel: "Image",
     imageFailed: "Failed to load image",
     htmlFailed: "Failed to load page, tap refresh",

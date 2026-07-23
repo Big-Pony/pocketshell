@@ -340,6 +340,8 @@ export default {
     viewRender: "预览",
     viewSource: "源码",
     refresh: "刷新",
+    fullscreen: "全屏",
+    exitFullscreen: "退出全屏",
     imageLabel: "图片",
     imageFailed: "图片加载失败",
     htmlFailed: "页面加载失败，请刷新",

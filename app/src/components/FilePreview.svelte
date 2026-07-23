@@ -39,6 +39,7 @@
   let htmlSrc = $state("");
   let MarkdownComp = $state<any>(null);
   let mdToken = $state(""); // one token per md render, reused for all local images
+  let previewFullscreen = $state(false);
 
   const kind = $derived(previewKind(path));
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
@@ -162,9 +163,28 @@
 
   $effect(() => { if (autoEdit && active && canEdit && !editing) { void startEdit(); onAutoEdit?.(); } });
   $effect(() => { if (active && loaded !== path + mode) { loaded = path + mode; void load(); } });
+
+  // Leaving/hiding this tab drops fullscreen so it can't get stuck off-screen.
+  $effect(() => { if (!active) previewFullscreen = false; });
+
+  // Esc and the browser/hardware Back both exit fullscreen. A pushed history
+  // entry lets Back pop it; exiting via the button removes that entry.
+  $effect(() => {
+    if (!previewFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") previewFullscreen = false; };
+    const onPop = () => { previewFullscreen = false; };
+    history.pushState({ psFs: true }, "");
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("popstate", onPop);
+      if ((history.state as { psFs?: boolean } | null)?.psFs) history.back();
+    };
+  });
 </script>
 
-<div class="preview" class:hidden={!active}>
+<div class="preview" class:hidden={!active} class:fs={previewFullscreen}>
   {#if editing && FileEditorComp}
     <FileEditorComp {conn} {path} lang={fileLang} initialContent={raw} mtime={fileMtime}
       onClose={exitEdit} onDirty={(d: boolean) => onDirtyChange?.(d)} {onToast} />
@@ -180,8 +200,13 @@
           <span class="pv-label">{$t('preview.imageLabel')}</span>
         {/if}
         <span class="sp"></span>
-        {#if kind !== "image" && canEdit}
-          <button class="pv-btn" onclick={startEdit}>{$t('editor.edit')}</button>
+        {#if previewFullscreen}
+          <button class="pv-btn" onclick={() => (previewFullscreen = false)}>{$t('preview.exitFullscreen')}</button>
+        {:else}
+          {#if kind !== "image" && canEdit}
+            <button class="pv-btn" onclick={startEdit}>{$t('editor.edit')}</button>
+          {/if}
+          <button class="pv-btn" aria-label={$t('preview.fullscreen')} onclick={() => (previewFullscreen = true)}>⛶</button>
         {/if}
         {#if kind !== "code"}
           <button class="pv-btn" aria-label={$t('preview.refresh')} onclick={refresh}>⟳</button>
@@ -222,6 +247,8 @@
   /* 代码区跟随主题（--code-*）；终端区仍固定深色 --term-* */
   .preview { width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--code-bg); color: var(--code-fg); }
   .hidden { display: none; }
+  /* 应用内全屏覆盖层：盖住上下区 + tab 栏 + 底栏（z-index 高于 .overlay=40） */
+  .preview.fs { position: fixed; inset: 0; z-index: 60; }
   /* 常驻头部栏：与 FileEditor 的 .ed-bar 同规格（同高、同底色/边框）防切换抖动 */
   .pv-bar { display: flex; align-items: center; gap: 4px; height: 40px; box-sizing: border-box; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
   .pv-bar .sp { flex: 1; }
