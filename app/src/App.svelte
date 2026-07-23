@@ -27,6 +27,7 @@
   import { loadTabs, saveTabs } from "./lib/tab-store";
   import { getAgentPubKey, getAgentAddr } from "./lib/keystore";
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/file-tree";
+  import { shouldSyncRoot } from "./lib/root-follow";
   import { defaultAgentUrl } from "./lib/agent-url";
   import { sessionFromUrl } from "./lib/notify";
   import { lastOutput } from "./lib/terminal-output";
@@ -86,6 +87,15 @@
   function openPanel(p: BottomPanel) {
     bottomPanel = p;
     fullscreen = false; // leaving fullscreen — otherwise the bottom region stays hidden
+    // 需求9: entering the file panel re-syncs the root to the terminal's pwd
+    // if root-follow is on and the focused tab is a terminal that has cd'd.
+    if (p !== "file" || !loadRootFollow()) return;
+    if (!activeTopId || activeTopId.startsWith("file:")) return;
+    void getFocusedPwd().then((r) => {
+      if (!("pwd" in r)) return;
+      const next = shouldSyncRoot({ panel: "file", follow: true, activeTopId, pwd: r.pwd, currentRoot: loadProjectRoot() });
+      if (next) { saveProjectRoot(next); pushRootHistory(next); rootTick++; }
+    });
   }
   // Persistent pubkey reminder stays reactive to the locale (uses $t inside
   // $derived); transient notices (resync/error) go through `flash`.
