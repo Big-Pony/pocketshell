@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { stateDotClass } from "../lib/session-view";
+  import { stepTap, TAP_RESET, TAP_WINDOW_MS, type TapState } from "../lib/top-tabs";
   import type { SessionState } from "../lib/protocol";
 
   type TabView =
@@ -41,46 +42,44 @@
     closing = null;
   }
 
-  // Single tap selects immediately (no latency); double tap on the SAME tab
-  // opens the close dialog. Track the pointer-down position so a horizontal
-  // scroll/drag of the strip is not mistaken for a tap. Keyed by tab id so
-  // tapping two different tabs quickly is two selects, not a false "close".
+  // Tap gestures (requirement 11): single tap = select (immediate), double =
+  // close, triple (file tabs only) = copy absolute path. The FSM lives in
+  // stepTap (pure, unit-tested in top-tabs.test.ts); this component only runs
+  // its side effects. Long-press was removed because on phones it fires the
+  // native text-selection / callout menu.
+  //
+  // Because a double tap must not preempt a possible third, closing a file tab
+  // is DEFERRED: the 2nd tap schedules closeTimer; a 3rd tap within the window
+  // clears it and copies instead. Term tabs (no third action) close at once.
   let downId = "";
   let downX = 0;
   let downY = 0;
-  let lastTapId = "";
-  let lastTapAt = 0;
-
-  // Long-press (file tabs only): 2s hold copies the absolute path. Movement
-  // past the tap slop, pointer-up, or cancel aborts it. When it fires, the
-  // ensuing pointer-up is swallowed so it does not also select/close the tab.
-  let lpTimer: ReturnType<typeof setTimeout> | undefined;
-  let lpFired = false;
-  function clearLongPress() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = undefined; } }
+  let tapState: TapState = TAP_RESET;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  function clearCloseTimer() { if (closeTimer) { clearTimeout(closeTimer); closeTimer = undefined; } }
+  function openClose(tab: TabView, at: number) { closing = tab; closingAt = at; }
 
   function onTabDown(e: PointerEvent, t: TabView) {
     downId = t.id; downX = e.clientX; downY = e.clientY;
-    lpFired = false;
-    clearLongPress();
-    if (t.kind === "file") {
-      lpTimer = setTimeout(() => { lpFired = true; lpTimer = undefined; onCopyPath?.(t.id); }, 2000);
-    }
-  }
-  function onTabMove(e: PointerEvent) {
-    if (lpTimer && (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8)) clearLongPress();
   }
   function onTabUp(e: PointerEvent, t: TabView) {
-    clearLongPress();
-    if (lpFired) { lpFired = false; downId = ""; lastTapId = ""; return; } // long-press already handled
-    if (downId !== t.id) return; // released off the tab it started on
+    if (downId !== t.id) { downId = ""; return; } // released off the tab it started on
     downId = "";
-    if (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8) { lastTapId = ""; return; } // a scroll/drag, not a tap
+    const dragged = Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8;
     const now = e.timeStamp;
-    if (lastTapId === t.id && now - lastTapAt < 300) { lastTapId = ""; lastTapAt = 0; closing = t; closingAt = now; return; }
-    lastTapId = t.id;
-    lastTapAt = now;
-    onSelect(t.id);
+    // Any new tap cancels a pending deferred close (stale tab, or the 3rd tap).
+    clearCloseTimer();
+    const { state, action } = stepTap(tapState, { id: t.id, kind: t.kind, t: now, dragged });
+    tapState = state;
+    switch (action.type) {
+      case "select": onSelect(t.id); break;
+      case "deferClose": closeTimer = setTimeout(() => { closeTimer = undefined; openClose(t, e.timeStamp + TAP_WINDOW_MS); }, TAP_WINDOW_MS); break;
+      case "closeNow": openClose(t, now); break;
+      case "copy": onCopyPath?.(t.id); break;
+      case "none": break;
+    }
   }
+  function onTabCancel() { downId = ""; tapState = TAP_RESET; clearCloseTimer(); }
 
   function autoFocus(node: HTMLElement) { node.focus(); }
 
@@ -115,10 +114,8 @@
         class:active={t.id === activeId}
         class:closed={t.kind === "term" && t.closed}
         onpointerdown={(e) => onTabDown(e, t)}
-        onpointermove={onTabMove}
         onpointerup={(e) => onTabUp(e, t)}
-        onpointercancel={clearLongPress}
-        onpointerleave={clearLongPress}
+        onpointercancel={onTabCancel}
       >
         {#if t.kind === "term"}
           {#if t.shell}<span class="sh-glyph mono">❯</span>{:else}<span class="dot {stateDotClass(t.state)}"></span>{/if}
@@ -186,6 +183,10 @@
     border-radius: 999px; background: var(--tab-bg); color: var(--dim);
     font-size: 0.74rem; white-space: nowrap; scroll-snap-align: start;
     transition: background 0.15s, color 0.15s;
+    /* Multi-tap must not raise the phone's native selection / callout menu. */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .tab.active { background: var(--tab-active-bg); color: var(--tab-active-text); border-color: var(--tab-active-line); font-weight: 600; }
   .tab.closed { opacity: 0.7; }

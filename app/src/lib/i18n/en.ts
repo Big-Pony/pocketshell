@@ -446,7 +446,7 @@ export default {
       },
       tabs: {
         h: "Top tabs",
-        p: "· Single tap: preview / switch to that window\n· Double tap: close the window\n· Long-press a file tab 2s: copy its absolute path\n· ＋ top-right: new tmux or shell window\n· tmux: fully persistent, survives disconnects AND agent restarts, shows in the task panel\n· shell: isolated foreground session, survives disconnects but not restarts, destroyed when the tab closes",
+        p: "· Single tap: preview / switch to that window\n· Double tap: close the window\n· Triple-tap a file tab: copy its absolute path\n· ＋ top-right: new tmux or shell window\n· tmux: fully persistent, survives disconnects AND agent restarts, shows in the task panel\n· shell: isolated foreground session, survives disconnects but not restarts, destroyed when the tab closes",
       },
       icons: {
         h: "Icon buttons",

@@ -51,6 +51,48 @@ export function filePathFromTabId(tabs: TopTab[], id: string): string | null {
   return t && t.kind === "file" ? t.path : null;
 }
 
+// Tap gesture FSM for a top tab (requirement 11 / phase-9 bug fix). Single tap =
+// select (immediate, no latency), double tap = close, triple tap (file tabs
+// only) = copy absolute path. Long-press was dropped because on phones it
+// triggers the native text-selection / callout menu.
+//
+// A double tap must NOT preempt a possible third, so the close action is
+// DEFERRED: on the 2nd tap of a file tab the component schedules a timer; a 3rd
+// tap within the window cancels it and copies instead. Term tabs have no third
+// action, so their 2nd tap opens the close dialog immediately.
+export type TapKind = "term" | "file";
+export interface TapState { id: string; count: number; at: number }
+export type TapAction =
+  | { type: "select" } // count 1
+  | { type: "deferClose" } // count 2, file: start timer -> open close dialog
+  | { type: "closeNow" } // count 2, term: open close dialog now
+  | { type: "copy" } // count 3, file: cancel pending close, copy path
+  | { type: "none" }; // a drag/scroll, or an unreachable term triple
+
+export const TAP_WINDOW_MS = 300;
+export const TAP_RESET: TapState = { id: "", count: 0, at: 0 };
+
+export function stepTap(
+  prev: TapState,
+  tap: { id: string; kind: TapKind; t: number; dragged: boolean },
+): { state: TapState; action: TapAction } {
+  // A drag/scroll is never a tap; it also breaks any in-progress sequence.
+  if (tap.dragged) return { state: TAP_RESET, action: { type: "none" } };
+
+  const continues = prev.id === tap.id && tap.t - prev.at < TAP_WINDOW_MS;
+  const count = continues ? prev.count + 1 : 1;
+  const state: TapState = { id: tap.id, count, at: tap.t };
+
+  if (count === 1) return { state, action: { type: "select" } };
+  if (count === 2) {
+    return tap.kind === "file"
+      ? { state, action: { type: "deferClose" } }
+      : { state: TAP_RESET, action: { type: "closeNow" } };
+  }
+  // count >= 3: only file tabs have a copy action; reset the sequence either way.
+  return { state: TAP_RESET, action: { type: tap.kind === "file" ? "copy" : "none" } };
+}
+
 // Filter `order` to ids that are still valid, then append any `extras` (e.g.
 // live session names that were never recorded in order — external/adopted
 // sessions) that are valid and not already placed. Dedups, preserves order.
