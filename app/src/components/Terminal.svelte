@@ -85,6 +85,10 @@
   // (A4 — only the active, live session polls tmux).
   let startPoll: () => void = () => {};
   let stopPoll: () => void = () => {};
+  // Same lifecycle as refit: forces a resize resend on activation even when this
+  // device's xterm dims are unchanged (需求2 — re-assert THIS device's size on a
+  // shared tmux session another device resized), then redraws to fill it.
+  let activateRefit: () => void = () => {};
 
   // Which tmux buffer the pane is in, driven by tmux's real alternate_on state.
   // Shells AND classic-renderer Claude Code live in the normal buffer (native
@@ -242,6 +246,16 @@
       if (data) term.write(data);
     };
 
+    activateRefit = () => {
+      // Bypass the R3 suppression guard so conn.resize always goes out on
+      // activation, pulling the shared tmux window to this device's size.
+      lastSentCols = -1;
+      lastSentRows = -1;
+      refit();
+      if (currentBuffer === "normal") void reloadHistory();
+      else void conn.rpc("term.redraw", { session: sessionId }).catch(() => {});
+    };
+
     // Poll tmux's real alternate_on state and switch xterm's buffer to match,
     // ONLY on an actual change (edge-triggered). tmux does not forward 1049h/1049l
     // to an attach client, so we drive the buffer ourselves. Re-seeding history on
@@ -361,7 +375,7 @@
   $effect(() => {
     if (mounted && active && !closed && term && fit) {
       flushPending();
-      queueMicrotask(() => { refit(); startPoll(); });
+      queueMicrotask(() => { activateRefit(); startPoll(); });
     } else if (term) {
       stopPoll();
     }

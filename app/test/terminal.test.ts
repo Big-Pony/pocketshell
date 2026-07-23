@@ -142,8 +142,11 @@ test("hidden terminal stashes output and flushes it as one write on activation",
   expect(term.written.length).toBe(beforeHidden); // nothing written while hidden
 
   await rerender(propsFor(conn, true));
-  await waitFor(() => expect(term.written.length).toBe(beforeHidden + 1));
-  expect(dec(term.written.at(-1))).toBe("ABCD"); // single concatenated flush
+  // The sync flush writes "ABCD" first (+1); the deferred activateRefit (需求2)
+  // then unconditionally reseeds from tmux history to guarantee correctness
+  // after the forced resize resend, adding a second write.
+  await waitFor(() => expect(term.written.length).toBe(beforeHidden + 2));
+  expect(term.written.at(-1)).toBe("HISTORY\r\n"); // activateRefit's reseed is last
 });
 
 // ──────────────────────────────────────────────────────────────
@@ -178,7 +181,9 @@ test("overflow while hidden reseeds via term.history instead of flushing", async
   conn.emit("s1", new Uint8Array(2 * 1024 * 1024 + 1), 1); // over the 2MB cap
 
   await rerender(propsFor(conn, true));
-  await waitFor(() => expect(historyCalls()).toBe(h0 + 1)); // full reseed happened
+  // flushPending's dirty branch reseeds once; activateRefit (需求2) unconditionally
+  // reseeds again right after — two term.history round-trips, same content.
+  await waitFor(() => expect(historyCalls()).toBe(h0 + 2)); // full reseed happened (twice)
   // The truncated stash was never written: no chunk anywhere near 2MB.
   expect(term.written.some((c) => c instanceof Uint8Array && c.byteLength > 2 * 1024 * 1024)).toBe(false);
   expect(term.written.at(-1)).toBe("HISTORY\r\n"); // reseed content is the last write
@@ -299,9 +304,10 @@ test("R3: window resize debounces to one refit; resize frames only on real chang
     const conn = stubConn();
     render(TerminalView, { props: propsFor(conn, true) });
     await flushMicro();
-    // The mount refit pushed the initial size exactly once — the activation
-    // microtask's second refit was an unchanged no-op (no duplicate frame).
-    expect(conn.resize).toHaveBeenCalledTimes(1);
+    // The mount refit pushes the initial size once; the activation microtask's
+    // activateRefit (需求2) bypasses the suppression guard on purpose so it
+    // resends even though dims are unchanged — a second, same-size frame.
+    expect(conn.resize).toHaveBeenCalledTimes(2);
     expect(conn.resize).toHaveBeenLastCalledWith("s1", 80, 24);
 
     // A drag burst collapses into a single trailing refit.
@@ -310,17 +316,17 @@ test("R3: window resize debounces to one refit; resize frames only on real chang
     window.dispatchEvent(new Event("resize"));
     window.dispatchEvent(new Event("resize"));
     await vi.advanceTimersByTimeAsync(149);
-    expect(conn.resize).toHaveBeenCalledTimes(1); // debounce still pending
+    expect(conn.resize).toHaveBeenCalledTimes(2); // debounce still pending
     await vi.advanceTimersByTimeAsync(1);
     await flushMicro();
-    expect(conn.resize).toHaveBeenCalledTimes(2);
+    expect(conn.resize).toHaveBeenCalledTimes(3);
     expect(conn.resize).toHaveBeenLastCalledWith("s1", 100, 30);
 
     // Another burst with no dimension change sends nothing at all.
     window.dispatchEvent(new Event("resize"));
     await vi.advanceTimersByTimeAsync(500);
     await flushMicro();
-    expect(conn.resize).toHaveBeenCalledTimes(2);
+    expect(conn.resize).toHaveBeenCalledTimes(3);
   } finally {
     fitMock.dims = { cols: 80, rows: 24 };
     vi.useRealTimers();
