@@ -446,3 +446,27 @@ test("fsOp touch creates empty file; existing → throws; missing parent → thr
   expect(() => fsOp("touch", join(d, "nodir", "x.txt"))).toThrow(); // ENOENT
   rmSync(d, { recursive: true, force: true });
 });
+
+// Uses bsdtar (libarchive), not /usr/bin/unzip: this machine's unzip is
+// Apple's modified Info-Zip 6.00 (2009) build, which ignores the
+// general-purpose bit-11 (UTF-8/EFS) flag on extraction and mojibakes CJK
+// names regardless (verified independently: `python3 -c zipfile` on the
+// produced archive reports flag_bits=0x800 and decodes the name correctly).
+// bsdtar correctly honors bit-11 and round-trips the CJK name.
+test("fsArchive produces a zip whose CJK filenames extract correctly via bsdtar", () => {
+  const { mkdtempSync, mkdirSync, writeFileSync: wf, existsSync: ex, readFileSync: rf } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const base = mkdtempSync(join(tmpdir(), "psarch-"));
+  const src = join(base, "项目");
+  mkdirSync(src, { recursive: true });
+  wf(join(src, "说明.md"), "内容", "utf8");
+  const { archivePath } = fsArchive(base, src);
+  const outDir = join(base, "out");
+  mkdirSync(outDir, { recursive: true });
+  const r = spawnSync("bsdtar", ["-xf", archivePath, "-C", outDir], { encoding: "utf8" });
+  expect(r.status).toBe(0);
+  expect(ex(join(outDir, "项目", "说明.md"))).toBe(true);
+  expect(rf(join(outDir, "项目", "说明.md"), "utf8")).toBe("内容");
+});

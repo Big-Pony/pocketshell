@@ -5,8 +5,8 @@
 import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync, utimesSync } from "node:fs";
 import { resolve, join, extname, dirname, basename } from "node:path";
 import { runGit, isRepo } from "./git-service";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { buildZip, type ZipEntry } from "./zip-writer";
 
 export interface TreeNode {
   name: string;
@@ -239,11 +239,23 @@ export function fsArchive(tmpDir: string, path: string): { archivePath: string; 
   const abs = resolve(path);
   if (!statSync(abs).isDirectory()) throw new Error(`not a directory: ${abs}`);
   const archivePath = join(resolve(tmpDir), `psarchive-${randomBytes(6).toString("hex")}.zip`);
-  // -r recurse, -q quiet; cwd = parent so the archive stores a single top folder.
-  // Prefix with "./" so names starting with "-" are not parsed as zip options.
-  const r = spawnSync("zip", ["-r", "-q", archivePath, "./" + basename(abs)], { cwd: dirname(abs) });
-  if (r.error) throw new Error(`zip unavailable: ${r.error.message}`);
-  if (r.status !== 0) throw new Error(`zip exited ${r.status}: ${r.stderr?.toString() ?? ""}`);
+  // Walk the tree; store files under a single top folder (basename) with
+  // forward-slash names. The built-in writer sets UTF-8 bit-11 so CJK names
+  // survive extraction on any platform. Empty dirs are omitted (YAGNI).
+  const top = basename(abs);
+  const entries: ZipEntry[] = [];
+  const walk = (dir: string, rel: string) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      let st;
+      try { st = statSync(full); } catch { continue; } // skip broken symlinks
+      const childRel = rel + "/" + name;
+      if (st.isDirectory()) walk(full, childRel);
+      else if (st.isFile()) entries.push({ name: childRel, data: new Uint8Array(readFileSync(full)) });
+    }
+  };
+  walk(abs, top);
+  writeFileSync(archivePath, buildZip(entries));
   const size = statSync(archivePath).size;
   if (size > MAX_TRANSFER_BYTES) {
     try { unlinkSync(archivePath); } catch {}
