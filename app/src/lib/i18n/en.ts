@@ -16,8 +16,8 @@ export default {
     },
     banner: "⚠ Disconnected · Sessions are hosted by the server and keep running · Reconnecting…",
     empty: {
-      title: "No sessions yet",
-      body: "Tap ＋ above to create one, or press Fn + n on the keyboard",
+      title: "Get started with PocketShell",
+      body: "Tap ＋ top-right to open a tmux / shell window · double-tap a top tab to close it · or press Fn + n on the keyboard",
     },
     topAria: "Terminal and file preview",
     fullscreen: {

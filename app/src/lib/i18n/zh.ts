@@ -16,8 +16,8 @@ export default {
     },
     banner: "⚠ 连接已断开 · 会话由服务器托管，任务继续运行 · 正在重连…",
     empty: {
-      title: "还没有会话",
-      body: "点击上方 ＋ 新建，或在键盘上按 Fn + n",
+      title: "开始使用 PocketShell",
+      body: "点右上角 ＋ 新建 tmux / shell 窗口 · 双击上方标签页关闭窗口 · 键盘 Fn + n 也能快捷新建",
     },
     topAria: "终端与文件预览",
     fullscreen: {
