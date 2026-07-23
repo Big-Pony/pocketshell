@@ -32,23 +32,14 @@
     if (!confirm(tr("snippets.delConfirm", { label: s.label }))) return;
     conn.removeSnippet(s.id);
   }
+  function autoFocus(node: HTMLElement) { node.focus(); }
 </script>
 
 <div class="sp">
   <div class="sp-head">
     <span class="title">{$t('snippets.title')}</span>
-    <button class="add-btn" onclick={() => (adding = !adding)}>{adding ? $t('snippets.cancel') : $t('snippets.add')}</button>
+    <button class="add-btn" onclick={() => (adding = true)}>{$t('snippets.add')}</button>
   </div>
-
-  {#if adding}
-    <div class="sp-form">
-      <input bind:value={form.group} placeholder={$t('snippets.groupPh')} />
-      <input bind:value={form.label} placeholder={$t('snippets.labelPh')} />
-      <input bind:value={form.command} placeholder={$t('snippets.cmdPh')} />
-      <label class="check"><input type="checkbox" bind:checked={form.autoEnter} /> {$t('snippets.autoEnter')}</label>
-      <button class="save" onclick={submit}>{$t('snippets.save')}</button>
-    </div>
-  {/if}
 
   <div class="groups">
     {#if groups.length === 0}
@@ -67,10 +58,28 @@
         {/each}
       </div>
     {/each}
+    <div class="hint">{$t('snippets.hint')}</div>
   </div>
-
-  <div class="hint">{$t('snippets.hint')}</div>
 </div>
+
+{#if adding}
+  <div class="overlay" role="presentation" onclick={() => (adding = false)}>
+    <div class="dlg" role="dialog" aria-modal="true" aria-label={$t('snippets.add')} tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => { if (e.key === 'Escape') adding = false; }}>
+      <div class="dlg-title">{$t('snippets.add')}</div>
+      <input class="dlg-input" use:autoFocus bind:value={form.group} placeholder={$t('snippets.groupPh')} />
+      <input class="dlg-input" bind:value={form.label} placeholder={$t('snippets.labelPh')} />
+      <input class="dlg-input" bind:value={form.command} placeholder={$t('snippets.cmdPh')}
+        onkeydown={(e) => { if (e.key === 'Enter') submit(); }} />
+      <label class="check"><input type="checkbox" bind:checked={form.autoEnter} /> {$t('snippets.autoEnter')}</label>
+      <div class="dlg-btns">
+        <button onclick={() => (adding = false)}>{$t('snippets.cancel')}</button>
+        <button class="primary" onclick={submit}>{$t('snippets.save')}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .sp {
@@ -98,41 +107,12 @@
     font-size: 0.72rem;
     font-weight: 600;
   }
-  .sp-form {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    background: var(--panel2);
-    padding: 10px;
-    border-radius: var(--radius-lg);
-    margin-bottom: 10px;
-    border: 1px solid var(--line);
-    flex: 0 0 auto;
-  }
-  .sp-form input {
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    padding: 7px;
-    font-size: 0.78rem;
-    outline: none;
-  }
-  .sp-form input:focus { border-color: var(--accent); }
   .check {
     font-size: 0.72rem;
     color: var(--dim);
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-  .save {
-    background: var(--primary-bg);
-    color: var(--primary-text);
-    border: 0;
-    border-radius: var(--radius-md);
-    padding: 7px;
-    font-weight: 600;
   }
 
   .groups { flex: 1; overflow-y: auto; }
@@ -187,7 +167,17 @@
     font-size: 0.68rem;
     color: var(--dim);
     line-height: 1.6;
-    margin-top: 12px;
-    flex: 0 0 auto;
+    margin-top: 16px;
+    padding-bottom: 8px;
   }
+
+  .overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: flex; justify-content: center; align-items: flex-start; }
+  .overlay .dlg { margin-top: 14vh; }
+  .dlg { background: var(--dlg-bg); border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 20px; width: min(300px, 84vw); box-shadow: var(--pop-shadow); }
+  .dlg-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 12px; text-align: center; }
+  .dlg-input { width: 100%; box-sizing: border-box; background: var(--panel2); border: 1px solid var(--line-strong); border-radius: var(--radius-md); color: var(--text); padding: 8px 10px; font-size: 0.8rem; margin-bottom: 10px; outline: none; }
+  .dlg-input:focus { border-color: var(--accent); }
+  .dlg-btns { display: flex; gap: 8px; margin-top: 6px; }
+  .dlg-btns button { flex: 1; padding: 9px 0; border-radius: var(--radius-md); border: 1px solid var(--line); font-size: 0.75rem; background: var(--key); color: var(--text); }
+  .dlg-btns button.primary { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; font-weight: 600; }
 </style>
