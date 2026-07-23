@@ -142,11 +142,8 @@ test("hidden terminal stashes output and flushes it as one write on activation",
   expect(term.written.length).toBe(beforeHidden); // nothing written while hidden
 
   await rerender(propsFor(conn, true));
-  // The sync flush writes "ABCD" first (+1); the deferred activateRefit (需求2)
-  // then unconditionally reseeds from tmux history to guarantee correctness
-  // after the forced resize resend, adding a second write.
-  await waitFor(() => expect(term.written.length).toBe(beforeHidden + 2));
-  expect(term.written.at(-1)).toBe("HISTORY\r\n"); // activateRefit's reseed is last
+  await waitFor(() => expect(term.written.length).toBe(beforeHidden + 1));
+  expect(dec(term.written.at(-1))).toBe("ABCD"); // single concatenated flush
 });
 
 // ──────────────────────────────────────────────────────────────
@@ -181,9 +178,7 @@ test("overflow while hidden reseeds via term.history instead of flushing", async
   conn.emit("s1", new Uint8Array(2 * 1024 * 1024 + 1), 1); // over the 2MB cap
 
   await rerender(propsFor(conn, true));
-  // flushPending's dirty branch reseeds once; activateRefit (需求2) unconditionally
-  // reseeds again right after — two term.history round-trips, same content.
-  await waitFor(() => expect(historyCalls()).toBe(h0 + 2)); // full reseed happened (twice)
+  await waitFor(() => expect(historyCalls()).toBe(h0 + 1)); // full reseed happened
   // The truncated stash was never written: no chunk anywhere near 2MB.
   expect(term.written.some((c) => c instanceof Uint8Array && c.byteLength > 2 * 1024 * 1024)).toBe(false);
   expect(term.written.at(-1)).toBe("HISTORY\r\n"); // reseed content is the last write

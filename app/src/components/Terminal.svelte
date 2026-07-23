@@ -247,13 +247,15 @@
     };
 
     activateRefit = () => {
-      // Bypass the R3 suppression guard so conn.resize always goes out on
-      // activation, pulling the shared tmux window to this device's size.
+      // 需求2: bypass the R3 suppression guard so conn.resize goes out on every
+      // activation. If the shared tmux window already matches this device the
+      // agent no-ops (SIGWINCH only fires on a real size change); if another
+      // device shrank it, this pulls it back and tmux repaints via the live
+      // stream. No explicit reseed here — that would clear+redraw on every tab
+      // switch (and double-reseed the dirty-stash case that flushPending handles).
       lastSentCols = -1;
       lastSentRows = -1;
       refit();
-      if (currentBuffer === "normal") void reloadHistory();
-      else void conn.rpc("term.redraw", { session: sessionId }).catch(() => {});
     };
 
     // Poll tmux's real alternate_on state and switch xterm's buffer to match,
