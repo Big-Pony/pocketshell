@@ -262,10 +262,20 @@
     });
     topEl?.addEventListener("pointerdown", onTopPointerDown, { capture: true });
     topEl?.addEventListener("pointerup", onTopPointerUp, { capture: true });
+    topEl?.addEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });
+    topEl?.addEventListener("pointerleave", onTopPointerCancelOrLeave, { capture: true });
+    topEl?.addEventListener("pointermove", onTopPointerMove, { capture: true });
+    bottomEl?.addEventListener("pointerdown", onBottomPointerDown, { capture: true });
+    bottomEl?.addEventListener("pointerup", onBottomPointerUp, { capture: true });
     return () => {
       unregisterDevHelpers();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
       topEl?.removeEventListener("pointerup", onTopPointerUp, { capture: true });
+      topEl?.removeEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });
+      topEl?.removeEventListener("pointerleave", onTopPointerCancelOrLeave, { capture: true });
+      topEl?.removeEventListener("pointermove", onTopPointerMove, { capture: true });
+      bottomEl?.removeEventListener("pointerdown", onBottomPointerDown, { capture: true });
+      bottomEl?.removeEventListener("pointerup", onBottomPointerUp, { capture: true });
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("visibilitychange", onVisibility);
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
@@ -574,18 +584,60 @@
 
   // ---- Top-area swipe to switch tabs ----
   let swipeStart: { x: number; y: number; t: number } | null = null;
-  function onTopPointerDown(e: PointerEvent) {
-    swipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp };
-  }
-  function onTopPointerUp(e: PointerEvent) {
+  // Phase 1 defensive fix (best-effort pending real-device RCA): xterm's viewport
+  // may claim the touch for its own scrolling, in which case the browser fires
+  // `pointercancel` instead of `pointerup` and the gesture would otherwise leak
+  // (swipeStart never cleared) or be silently dropped (no evaluation at all).
+  // Track the last pointer position on move so a cancelled gesture can still be
+  // evaluated from its last-known delta.
+  let swipeLastPos: { x: number; y: number; t: number } | null = null;
+  function evalTopSwipe(g: { x: number; y: number; t: number }) {
     if (!swipeStart) return;
-    const g = { dx: e.clientX - swipeStart.x, dy: e.clientY - swipeStart.y, dt: e.timeStamp - swipeStart.t };
+    const start = swipeStart;
     swipeStart = null;
-    const dir = detectSwipe(g);
+    swipeLastPos = null;
+    const gesture = { dx: g.x - start.x, dy: g.y - start.y, dt: g.t - start.t };
+    const dir = detectSwipe(gesture);
     if (!dir) return;
     const delta = dir === "left" ? 1 : -1; // left swipe -> next tab
     const next = stepClamp(topOrder, activeTopId, delta);
     if (next && next !== activeTopId) selectTop(next);
+  }
+  function onTopPointerDown(e: PointerEvent) {
+    swipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+    swipeLastPos = swipeStart;
+  }
+  function onTopPointerMove(e: PointerEvent) {
+    if (!swipeStart) return;
+    swipeLastPos = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+  }
+  function onTopPointerUp(e: PointerEvent) {
+    evalTopSwipe({ x: e.clientX, y: e.clientY, t: e.timeStamp });
+  }
+  function onTopPointerCancelOrLeave(_e: PointerEvent) {
+    // No pointerup for this gesture (xterm/browser claimed it) — fall back to
+    // the last tracked move so the swipe still registers instead of leaking
+    // `swipeStart` into the next gesture.
+    if (swipeLastPos) evalTopSwipe(swipeLastPos);
+    swipeStart = null;
+    swipeLastPos = null;
+  }
+
+  // ---- Bottom-area swipe to switch panels (mirrors the top-area swipe) ----
+  let bottomEl: HTMLDivElement | null = null;
+  let bottomSwipeStart: { x: number; y: number; t: number } | null = null;
+  const BOTTOM_PANELS: BottomPanel[] = ["task", "file", "kbd", "snip", "set"];
+  function onBottomPointerDown(e: PointerEvent) {
+    bottomSwipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+  }
+  function onBottomPointerUp(e: PointerEvent) {
+    if (!bottomSwipeStart) return;
+    const g = { dx: e.clientX - bottomSwipeStart.x, dy: e.clientY - bottomSwipeStart.y, dt: e.timeStamp - bottomSwipeStart.t };
+    bottomSwipeStart = null;
+    const dir = detectSwipe(g);
+    if (!dir) return;
+    const next = stepClamp(BOTTOM_PANELS, bottomPanel, dir === "left" ? 1 : -1);
+    if (next && next !== bottomPanel) openPanel(next);
   }
 
   // ---- Toast ----
@@ -688,7 +740,7 @@
   <div class="divider" class:hidden={fullscreen} role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
     <div class="grip"></div>
   </div>
-  <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
+  <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;" bind:this={bottomEl}>
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
       <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
     </div>
@@ -877,6 +929,10 @@
     border: 1px solid var(--line-soft);
     border-radius: var(--radius-lg);
     margin: 0 8px;
+    /* Phase 1 defensive fix (best-effort pending real-device RCA): keep vertical
+       scroll native but let horizontal drags stay as pointer events instead of
+       being resolved into a native gesture that cancels them. */
+    touch-action: pan-y;
   }
   .hint {
     display: flex;
@@ -913,6 +969,9 @@
     background: var(--bg);
     display: flex;
     flex-direction: column;
+    /* Phase 2 symmetry with .top: horizontal swipes across panels shouldn't be
+       swallowed as a native gesture while vertical scrolling still works. */
+    touch-action: pan-y;
   }
   .panel-slot {
     display: flex;
