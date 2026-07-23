@@ -265,14 +265,14 @@
     topEl?.addEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });
     topEl?.addEventListener("pointerleave", onTopPointerCancelOrLeave, { capture: true });
     topEl?.addEventListener("pointermove", onTopPointerMove, { capture: true });
-    // Bottom area gets the SAME set as the top (req8 device bug): scrollable
-    // panels fire pointercancel when they claim the touch, so down/up alone lost
-    // the gesture on every panel except the non-scrolling keyboard.
-    bottomEl?.addEventListener("pointerdown", onBottomPointerDown, { capture: true });
-    bottomEl?.addEventListener("pointerup", onBottomPointerUp, { capture: true });
-    bottomEl?.addEventListener("pointercancel", onBottomPointerCancelOrLeave, { capture: true });
-    bottomEl?.addEventListener("pointerleave", onBottomPointerCancelOrLeave, { capture: true });
-    bottomEl?.addEventListener("pointermove", onBottomPointerMove, { capture: true });
+    // Panel swipe lives on the bottom tab BAR (barEl), not the content area:
+    // content-area swipe was unreliable because scrollable panels stole it.
+    barEl?.addEventListener("pointerdown", onBarPointerDown, { capture: true });
+    barEl?.addEventListener("pointerup", onBarPointerUp, { capture: true });
+    barEl?.addEventListener("pointercancel", onBarPointerCancelOrLeave, { capture: true });
+    barEl?.addEventListener("pointerleave", onBarPointerCancelOrLeave, { capture: true });
+    barEl?.addEventListener("pointermove", onBarPointerMove, { capture: true });
+    barEl?.addEventListener("click", onBarClickCapture, { capture: true });
     return () => {
       unregisterDevHelpers();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
@@ -280,11 +280,12 @@
       topEl?.removeEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });
       topEl?.removeEventListener("pointerleave", onTopPointerCancelOrLeave, { capture: true });
       topEl?.removeEventListener("pointermove", onTopPointerMove, { capture: true });
-      bottomEl?.removeEventListener("pointerdown", onBottomPointerDown, { capture: true });
-      bottomEl?.removeEventListener("pointerup", onBottomPointerUp, { capture: true });
-      bottomEl?.removeEventListener("pointercancel", onBottomPointerCancelOrLeave, { capture: true });
-      bottomEl?.removeEventListener("pointerleave", onBottomPointerCancelOrLeave, { capture: true });
-      bottomEl?.removeEventListener("pointermove", onBottomPointerMove, { capture: true });
+      barEl?.removeEventListener("pointerdown", onBarPointerDown, { capture: true });
+      barEl?.removeEventListener("pointerup", onBarPointerUp, { capture: true });
+      barEl?.removeEventListener("pointercancel", onBarPointerCancelOrLeave, { capture: true });
+      barEl?.removeEventListener("pointerleave", onBarPointerCancelOrLeave, { capture: true });
+      barEl?.removeEventListener("pointermove", onBarPointerMove, { capture: true });
+      barEl?.removeEventListener("click", onBarClickCapture, { capture: true });
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("visibilitychange", onVisibility);
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
@@ -605,17 +606,25 @@
   const onTopPointerUp = (e: PointerEvent) => topSwipe.up(e);
   const onTopPointerCancelOrLeave = () => topSwipe.cancel();
 
-  // ---- Bottom-area swipe to switch panels (same tracker as the top area) ----
-  let bottomEl: HTMLDivElement | null = null;
+  // ---- Bottom tab-BAR swipe to switch panels ----
+  // Swiping the content AREA proved unreliable (scrollable panels stole the
+  // gesture), so the swipe lives on the bottom tab bar itself. A detected swipe
+  // also suppresses the button click under the release point, so a swipe that
+  // ends over a neighbouring tab does not ALSO select it (double jump).
+  let barEl: HTMLDivElement | null = null;
+  let barSwiped = false;
   const BOTTOM_PANELS: BottomPanel[] = ["task", "file", "kbd", "snip", "set"];
   const bottomSwipe = makeSwipeTracker((dir) => {
+    barSwiped = true; // a real swipe (not a tap) — swallow the ensuing click
     const next = stepClamp(BOTTOM_PANELS, bottomPanel, dir === "left" ? 1 : -1);
     if (next && next !== bottomPanel) openPanel(next);
   });
-  const onBottomPointerDown = (e: PointerEvent) => bottomSwipe.down(e);
-  const onBottomPointerMove = (e: PointerEvent) => bottomSwipe.move(e);
-  const onBottomPointerUp = (e: PointerEvent) => bottomSwipe.up(e);
-  const onBottomPointerCancelOrLeave = () => bottomSwipe.cancel();
+  const onBarPointerDown = (e: PointerEvent) => { barSwiped = false; bottomSwipe.down(e); };
+  const onBarPointerMove = (e: PointerEvent) => bottomSwipe.move(e);
+  const onBarPointerUp = (e: PointerEvent) => bottomSwipe.up(e);
+  const onBarPointerCancelOrLeave = () => bottomSwipe.cancel();
+  // Capture-phase: runs before the tab button's onclick, so a swipe cancels it.
+  const onBarClickCapture = (e: MouseEvent) => { if (barSwiped) { barSwiped = false; e.stopPropagation(); e.preventDefault(); } };
 
   // ---- Toast ----
   let toastText = $state("");
@@ -717,7 +726,7 @@
   <div class="divider" class:hidden={fullscreen} role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
     <div class="grip"></div>
   </div>
-  <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;" bind:this={bottomEl}>
+  <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
       <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
     </div>
@@ -748,7 +757,11 @@
     </div>
   </div>
 
-  <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={openPanel} />
+  <!-- barEl wraps the tab bar so App can attach the panel-swipe listeners
+       (swipe left/right on the bar to switch panels; see bottomSwipe). -->
+  <div class="bar-swipe" bind:this={barEl}>
+    <BottomBar active={bottomPanel} taskBadge={sessions.some((s) => s.state === "wait")} onSelect={openPanel} />
+  </div>
 </div>
 
 {#if toastVisible}
@@ -946,10 +959,11 @@
     background: var(--bg);
     display: flex;
     flex-direction: column;
-    /* Phase 2 symmetry with .top: horizontal swipes across panels shouldn't be
-       swallowed as a native gesture while vertical scrolling still works. */
-    touch-action: pan-y;
   }
+  /* Panel swipe now lives on the tab bar, not the content area. The wrapper is
+     layout-transparent (the bar keeps its own flex:0 0 auto); pan-y lets a
+     horizontal swipe reach our pointer handlers instead of a native gesture. */
+  .bar-swipe { flex: 0 0 auto; touch-action: pan-y; }
   .panel-slot {
     display: flex;
     flex-direction: column;
