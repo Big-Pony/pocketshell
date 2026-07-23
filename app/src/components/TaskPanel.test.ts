@@ -33,3 +33,19 @@ test("keeps the disconnect note but drops the long-press hint", () => {
   expect(getByText(/断线保护/)).toBeInTheDocument();
   expect(queryByText(/长按会话/)).toBeNull();
 });
+
+test("closed session's delete sits INSIDE .row and fires onClose not onSelect", () => {
+  let selectN = 0, closeN = 0;
+  const { container } = render(TaskPanel, {
+    props: {
+      sessions: [sess({ name: "old", state: "done", attached: false, closed: true })],
+      onSelect: () => selectN++, onRename: noop, onKill: noop, onCopy: noop, onClose: () => closeN++,
+    },
+  });
+  const del = container.querySelector(".row .act-del") as HTMLElement | null;
+  expect(del).not.toBeNull();                                   // now inside the row
+  expect(container.querySelector(".row-wrap > .act-del")).toBeNull(); // no longer a wrap-level sibling
+  del!.click();
+  expect(closeN).toBe(1);
+  expect(selectN).toBe(0);                                      // stopPropagation blocks row select
+});

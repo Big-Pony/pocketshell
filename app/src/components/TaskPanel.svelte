@@ -58,11 +58,16 @@
             <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{$t('tasks.state.' + s.state)}</em></span>
             <span class="last mono">{s.lastLine}</span>
           </span>
-          {#if !s.closed}<span class="act">{$t('tasks.action.' + actionLabel(s))}</span>{/if}
+          {#if s.closed}
+            <span class="act act-del" role="button" tabindex="0"
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={(e) => { e.stopPropagation(); onClose(s.name); }}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClose(s.name); } }}
+            >{$t('tasks.action.close')}</span>
+          {:else}
+            <span class="act">{$t('tasks.action.' + actionLabel(s))}</span>
+          {/if}
         </button>
-        {#if s.closed}
-          <button class="act act-del" onclick={(e) => { e.stopPropagation(); onClose(s.name); }}>{$t('tasks.action.close')}</button>
-        {/if}
         <button class="more" aria-label={$t('common.more')}
           onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget); }}>⋯</button>
       </div>
@@ -164,7 +169,7 @@
     flex: 0 0 auto;
   }
 
-  .act-del { flex: 0 0 auto; margin-right: 4px; color: var(--red); border-color: var(--red); background: transparent; }
+  .act-del { color: var(--red); border-color: var(--red); background: transparent; cursor: pointer; }
 
   .confirm-overlay {
     position: fixed;
