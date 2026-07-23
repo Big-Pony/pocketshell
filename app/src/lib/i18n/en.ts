@@ -43,6 +43,7 @@ export default {
       copiedAfter: "Content after cursor copied",
       copiedAll: "Selected all and copied",
       copiedText: "Selected text copied",
+      copiedPath: "Path copied",
     },
     prompt: {
       rename: "New session name",

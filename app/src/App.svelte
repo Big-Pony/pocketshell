@@ -12,7 +12,7 @@
   import FilePanel from "./components/FilePanel.svelte";
   import FilePreview from "./components/FilePreview.svelte";
   import BottomBar from "./components/BottomBar.svelte";
-  import { openFileTab, closeFileTab, fileTabId, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
+  import { openFileTab, closeFileTab, fileTabId, filePathFromTabId, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -278,7 +278,7 @@
   const topTabsView = $derived(topOrder.map((id) => {
     if (id.startsWith("file:")) {
       const f = fileTabs.find((t) => t.id === id)!;
-      return { kind: "file" as const, id, title: f.title };
+      return { kind: "file" as const, id, title: f.title, path: f.path };
     }
     const s = sessions.find((x) => x.name === id);
     return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false, shell: s?.kind === "shell" };
@@ -487,6 +487,15 @@
     else showToast(tr("app.toast.clipboardDenied"));
   }
 
+  function copyTabPath(id: string) {
+    const path = filePathFromTabId(fileTabs, id);
+    if (!path) return;
+    const p = navigator.clipboard?.writeText?.(path);
+    if (p) p.then(() => showToast(tr("app.toast.copiedPath"), { detail: path }))
+           .catch(() => showToast(tr("app.toast.clipboardDenied")));
+    else showToast(tr("app.toast.clipboardDenied"));
+  }
+
   function runCommand(c: AppCommand) {
     switch (c.type) {
       case "prevTab": shiftTab(-1); break;
@@ -619,7 +628,7 @@
   </div>
 
   <div class="tabs-wrap">
-    <TopTabs tabs={topTabsView} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onCloseTab={closeTopTab} dirtyIds={fileDirty} />
+    <TopTabs tabs={topTabsView} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onCloseTab={closeTopTab} onCopyPath={copyTabPath} dirtyIds={fileDirty} />
   </div>
 
   {#if notice}<div class="notice">{notice}</div>{/if}

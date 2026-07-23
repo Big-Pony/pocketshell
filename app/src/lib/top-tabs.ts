@@ -46,6 +46,11 @@ export function removeOrder(order: string[], id: string): string[] {
   return order.filter((x) => x !== id);
 }
 
+export function filePathFromTabId(tabs: TopTab[], id: string): string | null {
+  const t = tabs.find((x) => x.id === id);
+  return t && t.kind === "file" ? t.path : null;
+}
+
 // Filter `order` to ids that are still valid, then append any `extras` (e.g.
 // live session names that were never recorded in order — external/adopted
 // sessions) that are valid and not already placed. Dedups, preserves order.

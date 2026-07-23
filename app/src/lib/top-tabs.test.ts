@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./top-tabs";
+import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, filePathFromTabId, type TopTab } from "./top-tabs";
 
 test("fileTabId is stable per path+mode", () => {
   expect(fileTabId("/a.ts", "code")).toBe("file:code:/a.ts");
@@ -55,4 +55,12 @@ describe("interleaved tab order", () => {
     const valid = new Set(["s1", "s2"]);
     expect(visibleOrder(order, valid, ["s1", "s2"])).toEqual(["s1", "s2"]);
   });
+});
+
+test("filePathFromTabId returns the path for a file tab, null otherwise", () => {
+  let tabs = openFileTab([], "/Users/me/proj/a.ts", "code");
+  const id = fileTabId("/Users/me/proj/a.ts", "code");
+  expect(filePathFromTabId(tabs, id)).toBe("/Users/me/proj/a.ts");
+  expect(filePathFromTabId(tabs, "nope")).toBeNull();
+  expect(filePathFromTabId([{ kind: "term", id: "s1", title: "s1" }], "s1")).toBeNull();
 });

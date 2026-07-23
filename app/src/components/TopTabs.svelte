@@ -5,13 +5,14 @@
 
   type TabView =
     | { kind: "term"; id: string; title: string; state: SessionState; closed: boolean; shell: boolean }
-    | { kind: "file"; id: string; title: string };
+    | { kind: "file"; id: string; title: string; path: string };
 
-  let { tabs, activeId, onSelect, onNew, onCloseTab, dirtyIds }: {
+  let { tabs, activeId, onSelect, onNew, onCloseTab, onCopyPath, dirtyIds }: {
     tabs: TabView[]; activeId: string;
     onSelect: (id: string) => void;
     onNew: (name: string, kind: "tmux" | "shell") => void;
     onCloseTab: (id: string) => void;
+    onCopyPath?: (id: string) => void;
     dirtyIds?: Set<string>;
   } = $props();
 
@@ -49,8 +50,28 @@
   let downY = 0;
   let lastTapId = "";
   let lastTapAt = 0;
-  function onTabDown(e: PointerEvent, t: TabView) { downId = t.id; downX = e.clientX; downY = e.clientY; }
+
+  // Long-press (file tabs only): 2s hold copies the absolute path. Movement
+  // past the tap slop, pointer-up, or cancel aborts it. When it fires, the
+  // ensuing pointer-up is swallowed so it does not also select/close the tab.
+  let lpTimer: ReturnType<typeof setTimeout> | undefined;
+  let lpFired = false;
+  function clearLongPress() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = undefined; } }
+
+  function onTabDown(e: PointerEvent, t: TabView) {
+    downId = t.id; downX = e.clientX; downY = e.clientY;
+    lpFired = false;
+    clearLongPress();
+    if (t.kind === "file") {
+      lpTimer = setTimeout(() => { lpFired = true; lpTimer = undefined; onCopyPath?.(t.id); }, 2000);
+    }
+  }
+  function onTabMove(e: PointerEvent) {
+    if (lpTimer && (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8)) clearLongPress();
+  }
   function onTabUp(e: PointerEvent, t: TabView) {
+    clearLongPress();
+    if (lpFired) { lpFired = false; downId = ""; lastTapId = ""; return; } // long-press already handled
     if (downId !== t.id) return; // released off the tab it started on
     downId = "";
     if (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8) { lastTapId = ""; return; } // a scroll/drag, not a tap
@@ -94,7 +115,10 @@
         class:active={t.id === activeId}
         class:closed={t.kind === "term" && t.closed}
         onpointerdown={(e) => onTabDown(e, t)}
+        onpointermove={onTabMove}
         onpointerup={(e) => onTabUp(e, t)}
+        onpointercancel={clearLongPress}
+        onpointerleave={clearLongPress}
       >
         {#if t.kind === "term"}
           {#if t.shell}<span class="sh-glyph mono">❯</span>{:else}<span class="dot {stateDotClass(t.state)}"></span>{/if}

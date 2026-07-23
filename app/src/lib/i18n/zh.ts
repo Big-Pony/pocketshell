@@ -43,6 +43,7 @@ export default {
       copiedAfter: "已复制光标之后内容",
       copiedAll: "已全选并复制",
       copiedText: "已复制选中文本",
+      copiedPath: "已复制路径",
     },
     prompt: {
       rename: "新的会话名称",
