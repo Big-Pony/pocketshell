@@ -6,6 +6,7 @@
   import type { Settings } from "../lib/settings";
   import { urlBase64ToUint8Array, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import DeviceManager from "./DeviceManager.svelte";
+  import OperationGuide from "./OperationGuide.svelte";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
@@ -17,6 +18,7 @@
   }
 
   let showDevices = $state(false);
+  let showGuide = $state(false);
   let checkingUpdate = $state(false);
   async function checkNow() {
     checkingUpdate = true;
@@ -214,6 +216,15 @@
     </button>
   </div>
 
+  <!-- Operation guide -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('guide.title')}</div>
+      <div class="desc">{$t('guide.desc')}</div>
+    </div>
+    <button class="btn" onclick={() => (showGuide = true)}>{$t('guide.open')}</button>
+  </div>
+
   <!-- Notifications (collapsible, collapsed + all-off by default) -->
   <button class="set notify-head" onclick={toggleNotifyOpen} aria-expanded={notifyOpen}>
     <div class="grow">
@@ -331,6 +342,9 @@
 </div>
 {#if showDevices}
   <DeviceManager {conn} onClose={() => (showDevices = false)} />
+{/if}
+{#if showGuide}
+  <OperationGuide onClose={() => (showGuide = false)} />
 {/if}
 </div>
 

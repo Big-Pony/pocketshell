@@ -435,4 +435,35 @@ export default {
       opencode_not_found: "opencode config directory not found",
     },
   },
+  guide: {
+    title: "Operation Guide",
+    desc: "Getting-started tutorial & interactions",
+    open: "Open",
+    sections: {
+      intro: {
+        h: "What is PocketShell",
+        p: "Remote coding from your phone: run Claude Code and other terminal tools smoothly. When you lose signal the server-side task keeps running, and the screen/state catch up on reconnect.",
+      },
+      tabs: {
+        h: "Top tabs",
+        p: "· Single tap: preview / switch to that window\n· Double tap: close the window\n· Long-press a file tab 2s: copy its absolute path\n· ＋ top-right: new tmux or shell window\n· tmux: fully persistent, survives disconnects AND agent restarts, shows in the task panel\n· shell: isolated foreground session, survives disconnects but not restarts, destroyed when the tab closes",
+      },
+      icons: {
+        h: "Icon buttons",
+        p: "· Project-root circle: tap to set the current dir, double-tap to toggle Follow\n· ⟳: refresh preview / file\n· ⇄: switch root history\n· ⛶: fullscreen file preview\n· Top connection dot: green = connected, blinking = reconnecting\n· Top fullscreen button: whole-page fullscreen",
+      },
+      gestures: {
+        h: "Gestures",
+        p: "· Swipe left/right in the top area: switch tabs\n· Swipe left/right in the bottom area: switch panels (Tasks / Files / Keyboard / Snippets / Settings)",
+      },
+      notify: {
+        h: "Notifications",
+        p: "When the agent finishes a turn or waits for input, you get a system notification even in the background / on the lock screen. Toggle per tool under Settings → Notifications; supports Web Push and outbound Webhooks (WeCom / Feishu / Slack / Discord / custom).",
+      },
+      keyboard: {
+        h: "Keyboard & quick ops",
+        p: "· Fn: app shortcut layer (switch tabs / new / background / paging / fullscreen…)\n· IME buffer: compose with the system IME, then send as a block\n· Quick ops: arrow-key selection, copy, paste\n· Command hint bar: suggests common commands, tap to complete",
+      },
+    },
+  },
 };
