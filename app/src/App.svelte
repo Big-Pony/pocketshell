@@ -21,7 +21,7 @@
   import type { CheckResult } from "./lib/update";
   import type { AppCommand } from "./lib/input-router";
   import { reset, type SelState } from "./lib/terminal-select";
-  import { detectSwipe } from "./lib/swipe";
+  import { makeSwipeTracker } from "./lib/swipe";
   import { loadSettings, saveSettings, type Settings } from "./lib/settings";
   import { applyTheme, watchSystem } from "./lib/theme";
   import { loadTabs, saveTabs } from "./lib/tab-store";
@@ -265,8 +265,14 @@
     topEl?.addEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });
     topEl?.addEventListener("pointerleave", onTopPointerCancelOrLeave, { capture: true });
     topEl?.addEventListener("pointermove", onTopPointerMove, { capture: true });
+    // Bottom area gets the SAME set as the top (req8 device bug): scrollable
+    // panels fire pointercancel when they claim the touch, so down/up alone lost
+    // the gesture on every panel except the non-scrolling keyboard.
     bottomEl?.addEventListener("pointerdown", onBottomPointerDown, { capture: true });
     bottomEl?.addEventListener("pointerup", onBottomPointerUp, { capture: true });
+    bottomEl?.addEventListener("pointercancel", onBottomPointerCancelOrLeave, { capture: true });
+    bottomEl?.addEventListener("pointerleave", onBottomPointerCancelOrLeave, { capture: true });
+    bottomEl?.addEventListener("pointermove", onBottomPointerMove, { capture: true });
     return () => {
       unregisterDevHelpers();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
@@ -276,6 +282,9 @@
       topEl?.removeEventListener("pointermove", onTopPointerMove, { capture: true });
       bottomEl?.removeEventListener("pointerdown", onBottomPointerDown, { capture: true });
       bottomEl?.removeEventListener("pointerup", onBottomPointerUp, { capture: true });
+      bottomEl?.removeEventListener("pointercancel", onBottomPointerCancelOrLeave, { capture: true });
+      bottomEl?.removeEventListener("pointerleave", onBottomPointerCancelOrLeave, { capture: true });
+      bottomEl?.removeEventListener("pointermove", onBottomPointerMove, { capture: true });
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("visibilitychange", onVisibility);
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
@@ -583,62 +592,30 @@
   }
 
   // ---- Top-area swipe to switch tabs ----
-  let swipeStart: { x: number; y: number; t: number } | null = null;
-  // Phase 1 defensive fix (best-effort pending real-device RCA): xterm's viewport
-  // may claim the touch for its own scrolling, in which case the browser fires
-  // `pointercancel` instead of `pointerup` and the gesture would otherwise leak
-  // (swipeStart never cleared) or be silently dropped (no evaluation at all).
-  // Track the last pointer position on move so a cancelled gesture can still be
-  // evaluated from its last-known delta.
-  let swipeLastPos: { x: number; y: number; t: number } | null = null;
-  function evalTopSwipe(g: { x: number; y: number; t: number }) {
-    if (!swipeStart) return;
-    const start = swipeStart;
-    swipeStart = null;
-    swipeLastPos = null;
-    const gesture = { dx: g.x - start.x, dy: g.y - start.y, dt: g.t - start.t };
-    const dir = detectSwipe(gesture);
-    if (!dir) return;
-    const delta = dir === "left" ? 1 : -1; // left swipe -> next tab
-    const next = stepClamp(topOrder, activeTopId, delta);
+  // Shared stateful tracker (makeSwipeTracker). Beyond down/up it evaluates a
+  // pointercancel from its last-known move: xterm's viewport / a scrollable
+  // preview may claim the touch and the browser fires `pointercancel` instead of
+  // `pointerup`, which would otherwise drop the gesture.
+  const topSwipe = makeSwipeTracker((dir) => {
+    const next = stepClamp(topOrder, activeTopId, dir === "left" ? 1 : -1); // left -> next tab
     if (next && next !== activeTopId) selectTop(next);
-  }
-  function onTopPointerDown(e: PointerEvent) {
-    swipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp };
-    swipeLastPos = swipeStart;
-  }
-  function onTopPointerMove(e: PointerEvent) {
-    if (!swipeStart) return;
-    swipeLastPos = { x: e.clientX, y: e.clientY, t: e.timeStamp };
-  }
-  function onTopPointerUp(e: PointerEvent) {
-    evalTopSwipe({ x: e.clientX, y: e.clientY, t: e.timeStamp });
-  }
-  function onTopPointerCancelOrLeave(_e: PointerEvent) {
-    // No pointerup for this gesture (xterm/browser claimed it) — fall back to
-    // the last tracked move so the swipe still registers instead of leaking
-    // `swipeStart` into the next gesture.
-    if (swipeLastPos) evalTopSwipe(swipeLastPos);
-    swipeStart = null;
-    swipeLastPos = null;
-  }
+  });
+  const onTopPointerDown = (e: PointerEvent) => topSwipe.down(e);
+  const onTopPointerMove = (e: PointerEvent) => topSwipe.move(e);
+  const onTopPointerUp = (e: PointerEvent) => topSwipe.up(e);
+  const onTopPointerCancelOrLeave = () => topSwipe.cancel();
 
-  // ---- Bottom-area swipe to switch panels (mirrors the top-area swipe) ----
+  // ---- Bottom-area swipe to switch panels (same tracker as the top area) ----
   let bottomEl: HTMLDivElement | null = null;
-  let bottomSwipeStart: { x: number; y: number; t: number } | null = null;
   const BOTTOM_PANELS: BottomPanel[] = ["task", "file", "kbd", "snip", "set"];
-  function onBottomPointerDown(e: PointerEvent) {
-    bottomSwipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp };
-  }
-  function onBottomPointerUp(e: PointerEvent) {
-    if (!bottomSwipeStart) return;
-    const g = { dx: e.clientX - bottomSwipeStart.x, dy: e.clientY - bottomSwipeStart.y, dt: e.timeStamp - bottomSwipeStart.t };
-    bottomSwipeStart = null;
-    const dir = detectSwipe(g);
-    if (!dir) return;
+  const bottomSwipe = makeSwipeTracker((dir) => {
     const next = stepClamp(BOTTOM_PANELS, bottomPanel, dir === "left" ? 1 : -1);
     if (next && next !== bottomPanel) openPanel(next);
-  }
+  });
+  const onBottomPointerDown = (e: PointerEvent) => bottomSwipe.down(e);
+  const onBottomPointerMove = (e: PointerEvent) => bottomSwipe.move(e);
+  const onBottomPointerUp = (e: PointerEvent) => bottomSwipe.up(e);
+  const onBottomPointerCancelOrLeave = () => bottomSwipe.cancel();
 
   // ---- Toast ----
   let toastText = $state("");

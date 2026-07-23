@@ -252,7 +252,9 @@
   /* 常驻头部栏：与 FileEditor 的 .ed-bar 同规格（同高、同底色/边框）防切换抖动 */
   .pv-bar { display: flex; align-items: center; gap: 4px; height: 40px; box-sizing: border-box; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
   .pv-bar .sp { flex: 1; }
-  .pv-content { flex: 1; min-height: 0; overflow: auto; }
+  /* pan-y: let horizontal drags fall through to the top-area swipe (tab switch,
+     req8) instead of being swallowed as horizontal scroll; vertical still pans. */
+  .pv-content { flex: 1; min-height: 0; overflow: auto; touch-action: pan-y; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-md, 8px); overflow: hidden; }
   .seg button { height: 30px; padding: 0 12px; background: transparent; color: var(--dim); border: none; font-size: 0.72rem; }
   .seg button.on { background: var(--primary-bg); color: var(--primary-text); }
