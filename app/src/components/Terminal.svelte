@@ -356,8 +356,18 @@
     };
     window.addEventListener("resize", onResize);
 
+    // 需求7: the divider drag changes only the container height (no window
+    // resize), so observe the host directly. Reuses onResize's 150ms debounce
+    // + cols-change reloadHistory. Guarded for environments without RO (jsdom).
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => onResize());
+      ro.observe(host);
+    }
+
     teardown = () => {
       window.removeEventListener("resize", onResize);
+      ro?.disconnect();
       unsubscribeOutput?.();
       unsubscribeInput?.();
       if (resizeDebounce) clearTimeout(resizeDebounce);
