@@ -138,3 +138,22 @@ test("ops sub-tab: dragging off a key horizontally cancels the deferred send (sw
   await fireEvent(key, pointerEventAt("pointerup", 140));
   expect(onText).not.toHaveBeenCalled();
 });
+
+// Rollover regression: a second byte key going down before the first key's
+// deferred first-shot rAF has fired used to cancel — and never fire — the
+// first key's pending shot when pendingKey/pendingRaf got reassigned to the
+// second key. keyDown must now flush the still-pending key immediately so a
+// fast two-finger rollover (real taps on both) doesn't drop the first byte.
+test("keys tab: rollover — a second key going down before the first key's deferred shot fires must not drop the first key's byte", async () => {
+  const { onText } = openOps();
+  const keyQ = screen.getByText("Q");
+  const keyW = screen.getByText("W");
+  // Q down, then W down BEFORE Q's pointerup/deferred rAF — this is the
+  // overlapping-key-press (rollover) scenario from the bug report.
+  await fireEvent(keyQ, pointerEventAt("pointerdown", 10));
+  await fireEvent(keyW, pointerEventAt("pointerdown", 50));
+  await fireEvent(keyQ, pointerEventAt("pointerup", 10));
+  await fireEvent(keyW, pointerEventAt("pointerup", 50));
+  expect(onText).toHaveBeenCalledWith("q");
+  expect(onText).toHaveBeenCalledWith("w");
+});

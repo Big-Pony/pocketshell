@@ -115,6 +115,15 @@
       mods = consumeAfterKey(mods);
       return;
     }
+    // Rollover: a different byte key is still awaiting its deferred first shot.
+    // A fresh keydown means it was a real tap, so emit its byte now (and keep
+    // its repeat armed if still held) instead of dropping it when we reassign
+    // pendingKey/pendingRaf below.
+    if (pendingKey && pendingKey.id !== id) {
+      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      repeaters.get(pendingKey.id)?.start(); // fires its first shot + arms repeat
+      pendingKey = undefined;
+    }
     keyUp(id); // safety: drop a stale repeater/pending for the same key
     const rep = createKeyRepeater(() => fireKey(id));
     repeaters.set(id, rep);

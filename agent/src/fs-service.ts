@@ -2,7 +2,7 @@
 // reads the real filesystem. NO sandbox: the trust boundary is the Noise
 // handshake + pairing (an authorized device is the operator), so access is
 // bounded only by the agent process's own permissions.
-import { readdirSync, statSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync, utimesSync } from "node:fs";
+import { readdirSync, statSync, lstatSync, readFileSync, renameSync, unlinkSync, rmSync, mkdirSync, existsSync, appendFileSync, copyFileSync, writeFileSync, openSync, readSync, closeSync, utimesSync } from "node:fs";
 import { resolve, join, extname, dirname, basename } from "node:path";
 import { runGit, isRepo } from "./git-service";
 import { randomBytes } from "node:crypto";
@@ -244,14 +244,23 @@ export function fsArchive(tmpDir: string, path: string): { archivePath: string; 
   // survive extraction on any platform. Empty dirs are omitted (YAGNI).
   const top = basename(abs);
   const entries: ZipEntry[] = [];
+  let rawTotal = 0;
   const walk = (dir: string, rel: string) => {
     for (const name of readdirSync(dir)) {
       const full = join(dir, name);
       let st;
-      try { st = statSync(full); } catch { continue; } // skip broken symlinks
+      try { st = lstatSync(full); } catch { continue; } // skip broken symlinks
+      if (st.isSymbolicLink()) continue; // never follow symlinks — avoids cycles (e.g. link to an ancestor)
       const childRel = rel + "/" + name;
       if (st.isDirectory()) walk(full, childRel);
-      else if (st.isFile()) entries.push({ name: childRel, data: new Uint8Array(readFileSync(full)) });
+      else if (st.isFile()) {
+        const data = readFileSync(full);
+        rawTotal += data.length;
+        if (rawTotal > MAX_TRANSFER_BYTES) {
+          throw new Error(`archive source exceeds ${MAX_TRANSFER_BYTES} bytes`);
+        }
+        entries.push({ name: childRel, data: new Uint8Array(data) });
+      }
     }
   };
   walk(abs, top);

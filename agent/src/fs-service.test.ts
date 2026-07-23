@@ -287,6 +287,24 @@ test("fsUploadChunk sanitizes uploadId to keep temp part under tmpDir", () => {
   rmSync(d, { recursive: true, force: true });
 });
 
+test("fsArchive skips symlinks (incl. self-referential cycles) instead of infinite-recursing", () => {
+  const { symlinkSync } = require("node:fs");
+  const { spawnSync } = require("node:child_process");
+  const d = tmp();
+  const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
+  const src = join(d, "proj"); mkdirSync(src);
+  writeFileSync(join(src, "real.txt"), "hello");
+  // Self-referential symlink pointing back at an ancestor dir: following it
+  // would recurse forever (proj/loop -> proj -> proj/loop -> ...).
+  symlinkSync(src, join(src, "loop"), "dir");
+  const r = fsArchive(tmpDir, src);
+  expect(existsSync(r.archivePath)).toBe(true);
+  const list = spawnSync("bsdtar", ["-tf", r.archivePath], { encoding: "utf8" }).stdout as string;
+  expect(list).toContain("real.txt");
+  expect(list).not.toContain("loop");
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("fsArchive throws on a non-directory path", () => {
   const d = tmp();
   const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
