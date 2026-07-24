@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, filePathFromTabId, stepTap, TAP_RESET, TAP_WINDOW_MS, type TopTab, type TapState } from "./top-tabs";
+import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, filePathFromTabId, stepTap, TAP_RESET, TAP_WINDOW_MS, findTabByPath, replaceTabPath, openOrReuseFileTab, type TopTab, type TapState } from "./top-tabs";
 
 test("fileTabId is stable per path+mode", () => {
   expect(fileTabId("/a.ts", "code")).toBe("file:code:/a.ts");
@@ -119,5 +119,44 @@ describe("stepTap gesture FSM", () => {
 
   test("copy resets so a following tap starts a new select", () => {
     expect(run("file", [0, 100, 200, 250])).toEqual(["select", "deferClose", "copy", "select"]);
+  });
+});
+
+describe("in-place file tab navigation helpers", () => {
+  test("findTabByPath matches on path+mode, not id", () => {
+    let tabs: TopTab[] = [];
+    tabs = openFileTab(tabs, "/proj/a.ts", "code");
+    expect(findTabByPath(tabs, "/proj/a.ts", "code")?.path).toBe("/proj/a.ts");
+    expect(findTabByPath(tabs, "/proj/a.ts", "diff")).toBeUndefined();
+    expect(findTabByPath(tabs, "/proj/missing.ts", "code")).toBeUndefined();
+  });
+
+  test("replaceTabPath rewrites path+title but keeps the id stable", () => {
+    let tabs: TopTab[] = openFileTab([], "/proj/a.ts", "code");
+    const id = tabs[0].id;
+    tabs = replaceTabPath(tabs, id, "/proj/sub/b.ts");
+    expect(tabs.length).toBe(1);
+    expect(tabs[0].id).toBe(id); // id unchanged (stable slot)
+    expect(tabs[0]).toMatchObject({ path: "/proj/sub/b.ts", title: "b.ts", mode: "code" });
+  });
+
+  test("openOrReuseFileTab reuses an existing slot by path (no new tab)", () => {
+    let tabs: TopTab[] = openFileTab([], "/proj/a.ts", "code");
+    const first = openOrReuseFileTab(tabs, "/proj/a.ts", "code");
+    expect(first.tabs.length).toBe(1);
+    expect(first.id).toBe(tabs[0].id);
+  });
+
+  test("openOrReuseFileTab uniquifies a colliding id left by an in-place swap", () => {
+    // Slot opened as /A, then navigated in place to /B: its id still encodes /A.
+    let tabs: TopTab[] = openFileTab([], "/A", "code");
+    const staleId = tabs[0].id; // "file:code:/A"
+    tabs = replaceTabPath(tabs, staleId, "/B");
+    // Now open /A from the panel: base id "file:code:/A" collides with the stale slot.
+    const r = openOrReuseFileTab(tabs, "/A", "code");
+    expect(r.tabs.length).toBe(2);
+    expect(r.id).not.toBe(staleId);      // fresh, collision-free id
+    const ids = new Set(r.tabs.map((t) => t.id));
+    expect(ids.size).toBe(2);            // no duplicate keys
   });
 });

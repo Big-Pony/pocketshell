@@ -21,6 +21,39 @@ export function openFileTab(tabs: TopTab[], path: string, mode: "code" | "diff")
   return [...tabs, { kind: "file", id, title, path, mode }];
 }
 
+export function findTabByPath(
+  tabs: TopTab[], path: string, mode: "code" | "diff",
+): TopTab | undefined {
+  return tabs.find((t) => t.kind === "file" && t.path === path && t.mode === mode);
+}
+
+// In-place navigation: change a file tab's path (and title) while keeping its id
+// as a stable "slot" key, so the FilePreview instance keyed by id is NOT remounted
+// (fullscreen + drawer state survive the file switch).
+export function replaceTabPath(tabs: TopTab[], id: string, newPath: string): TopTab[] {
+  return tabs.map((t) => {
+    if (t.id !== id || t.kind !== "file") return t;
+    const title = t.mode === "diff" ? `${baseName(newPath)} ✎` : baseName(newPath);
+    return { ...t, path: newPath, title };
+  });
+}
+
+// Path-based open: reuse an existing slot for (path,mode); otherwise append a new
+// tab. If the natural id is already taken by a stale slot (one that was navigated
+// in place and still encodes its old path in the id), append "~" until unique so
+// the {#each (t.id)} keys never collide.
+export function openOrReuseFileTab(
+  tabs: TopTab[], path: string, mode: "code" | "diff",
+): { tabs: TopTab[]; id: string } {
+  const existing = findTabByPath(tabs, path, mode);
+  if (existing) return { tabs, id: existing.id };
+  let id = fileTabId(path, mode);
+  const used = new Set(tabs.map((t) => t.id));
+  while (used.has(id)) id = id + "~";
+  const title = mode === "diff" ? `${baseName(path)} ✎` : baseName(path);
+  return { tabs: [...tabs, { kind: "file", id, title, path, mode }], id };
+}
+
 export function closeFileTab(tabs: TopTab[], id: string): TopTab[] {
   return tabs.filter((t) => t.id !== id);
 }
