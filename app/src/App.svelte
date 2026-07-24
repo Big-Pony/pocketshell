@@ -12,7 +12,7 @@
   import FilePanel from "./components/FilePanel.svelte";
   import FilePreview from "./components/FilePreview.svelte";
   import BottomBar from "./components/BottomBar.svelte";
-  import { openFileTab, closeFileTab, fileTabId, filePathFromTabId, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
+  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -406,11 +406,16 @@
   }
 
   function openFile(path: string, mode: "code" | "diff" = "code") {
-    fileTabs = openFileTab(fileTabs, path, mode);
-    const id = fileTabId(path, mode);
-    tabOrder = appendOrder(tabOrder, id);
-    activeTop = id;
+    const r = openOrReuseFileTab(fileTabs, path, mode);
+    fileTabs = r.tabs;
+    tabOrder = appendOrder(tabOrder, r.id);
+    activeTop = r.id;
     if (fullscreen) fullscreen = false;
+  }
+  // Drawer navigation: swap the file shown by a preview tab in place, keeping the
+  // tab id stable so its FilePreview instance (fullscreen + drawer) is preserved.
+  function navigateFile(tabId: string, newPath: string) {
+    fileTabs = replaceTabPath(fileTabs, tabId, newPath);
   }
   function closeFile(id: string) {
     setFileDirty(id, false);
@@ -705,7 +710,8 @@
         }}
         onDirtyChange={(d) => setFileDirty(t.id, d)}
         autoEdit={pendingEdit === t.path && t.mode === "code"}
-        onAutoEdit={() => (pendingEdit = null)} />
+        onAutoEdit={() => (pendingEdit = null)}
+        onNavigate={(p) => navigateFile(t.id, p)} />
     {/each}
     {#if topSessions.length === 0 && fileTabs.length === 0}
       <div class="hint">
