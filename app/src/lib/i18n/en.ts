@@ -347,6 +347,9 @@ export default {
     htmlFailed: "Failed to load page, tap refresh",
     mdFailed: "Markdown render failed, showing source",
     tokenExpired: "Preview expired, tap refresh",
+    dir: "Files",
+    dirEmpty: "Empty directory",
+    dirLoadFailed: "Failed to load directory",
   },
   update: {
     badge: "Update available",

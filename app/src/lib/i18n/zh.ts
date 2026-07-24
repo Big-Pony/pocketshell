@@ -347,6 +347,9 @@ export default {
     htmlFailed: "页面加载失败，请刷新",
     mdFailed: "Markdown 渲染失败，已回退源码",
     tokenExpired: "预览已过期，请刷新",
+    dir: "目录",
+    dirEmpty: "空目录",
+    dirLoadFailed: "目录加载失败",
   },
   update: {
     badge: "有新版本",
