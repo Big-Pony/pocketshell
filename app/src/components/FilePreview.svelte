@@ -5,8 +5,9 @@
   import { splitLines, highlightTo } from "../lib/highlight";
   import { previewKind, previewOrigin, previewUrl, relFromBase } from "../lib/preview";
   import HtmlView from "./HtmlView.svelte";
+  import PreviewDirDrawer from "./PreviewDirDrawer.svelte";
 
-  let { conn, path, mode, active, base, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit }: {
+  let { conn, path, mode, active, base, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit, onNavigate }: {
     conn: Connection; path: string; mode: "code" | "diff"; active: boolean;
     base?: string;
     onToast: (m: string) => void;
@@ -14,6 +15,7 @@
     onDirtyChange?: (dirty: boolean) => void;
     autoEdit?: boolean;
     onAutoEdit?: () => void;
+    onNavigate?: (path: string) => void;
   } = $props();
 
   let lines = $state<string[]>([]);
@@ -40,6 +42,8 @@
   let MarkdownComp = $state<any>(null);
   let mdToken = $state(""); // one token per md render, reused for all local images
   let previewFullscreen = $state(false);
+  let drawerOpen = $state(false);
+  let drawerRoot = $state(""); // anchored to dirOf(path) at fullscreen entry, held for the session
 
   const kind = $derived(previewKind(path));
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
@@ -161,11 +165,13 @@
     loaded = ""; // force re-read/re-render on next $effect tick
   }
 
+  function enterFullscreen() { drawerRoot = dirOf(path); previewFullscreen = true; }
+
   $effect(() => { if (autoEdit && active && canEdit && !editing) { void startEdit(); onAutoEdit?.(); } });
   $effect(() => { if (active && loaded !== path + mode) { loaded = path + mode; void load(); } });
 
-  // Leaving/hiding this tab drops fullscreen so it can't get stuck off-screen.
-  $effect(() => { if (!active) previewFullscreen = false; });
+  // Leaving/hiding this tab drops fullscreen + drawer so they can't get stuck off-screen.
+  $effect(() => { if (!active) { previewFullscreen = false; drawerOpen = false; } });
 
   // Esc and the browser/hardware Back both exit fullscreen. A pushed history
   // entry lets Back pop it; exiting via the button removes that entry.
@@ -201,12 +207,13 @@
         {/if}
         <span class="sp"></span>
         {#if previewFullscreen}
-          <button class="pv-btn" onclick={() => (previewFullscreen = false)}>{$t('preview.exitFullscreen')}</button>
+          <button class="pv-btn" onclick={() => (drawerOpen = !drawerOpen)}>{$t('preview.dir')}</button>
+          <button class="pv-btn" onclick={() => { previewFullscreen = false; drawerOpen = false; }}>{$t('preview.exitFullscreen')}</button>
         {:else}
           {#if kind !== "image" && canEdit}
             <button class="pv-btn" onclick={startEdit}>{$t('editor.edit')}</button>
           {/if}
-          <button class="pv-btn" aria-label={$t('preview.fullscreen')} onclick={() => (previewFullscreen = true)}>⛶</button>
+          <button class="pv-btn" aria-label={$t('preview.fullscreen')} onclick={enterFullscreen}>⛶</button>
         {/if}
         {#if kind !== "code"}
           <button class="pv-btn" aria-label={$t('preview.refresh')} onclick={refresh}>⟳</button>
@@ -240,6 +247,12 @@
         {/if}
       {/if}
     </div>
+  {/if}
+
+  {#if previewFullscreen}
+    <PreviewDirDrawer {conn} rootDir={drawerRoot} currentPath={path} open={drawerOpen}
+      onSelect={(p) => { drawerOpen = false; onNavigate?.(p); }}
+      onClose={() => (drawerOpen = false)} />
   {/if}
 </div>
 
