@@ -87,6 +87,12 @@ export default {
       close: "Close",
       manage: "Manage ›",
     },
+    cache: {
+      label: "Clear cache and reload",
+      desc: "Use if the app looks wrong; UI assets will be downloaded again",
+      button: "Clear",
+      confirm: "Clear the cache and reload? Unsaved edits will be lost.",
+    },
   },
   bottombar: {
     task: "Tasks",
@@ -377,6 +383,7 @@ export default {
     checkFailedDetail: "Network unreachable, or GitHub API rate-limited (60/hr anonymous)",
     checkNow: "Check for updates",
     done: "Updated to {version}",
+    reloading: "Updated to {version} — reloading…",
     phase: {
       downloading: "Downloading…",
       verifying: "Verifying…",

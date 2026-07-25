@@ -87,6 +87,12 @@ export default {
       close: "关闭",
       manage: "管理 ›",
     },
+    cache: {
+      label: "清除缓存并重载",
+      desc: "应用显示异常时使用；会重新下载界面资源",
+      button: "清除",
+      confirm: "确定清除缓存并重载应用？未保存的编辑内容会丢失。",
+    },
   },
   bottombar: {
     task: "任务",
@@ -377,6 +383,7 @@ export default {
     checkFailedDetail: "网络不通或 GitHub 接口限流（匿名 60 次/小时）",
     checkNow: "检查更新",
     done: "已更新到 {version}",
+    reloading: "已更新到 {version}，正在重载…",
     phase: {
       downloading: "下载中…",
       verifying: "校验中…",
