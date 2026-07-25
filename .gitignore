@@ -19,3 +19,5 @@ docs/
 spike/
 CLAUDE.md
 deploy-info/
+.agents/
+skills-lock.json
