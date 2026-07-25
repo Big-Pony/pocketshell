@@ -87,6 +87,12 @@ export default {
       close: "Close",
       manage: "Manage ›",
     },
+    cache: {
+      label: "Clear cache and reload",
+      desc: "Use if the app looks wrong; UI assets will be downloaded again",
+      button: "Clear",
+      confirm: "Clear the cache and reload? Unsaved edits will be lost.",
+    },
   },
   bottombar: {
     task: "Tasks",

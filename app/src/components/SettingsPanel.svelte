@@ -7,6 +7,7 @@
   import { urlBase64ToUint8Array, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import DeviceManager from "./DeviceManager.svelte";
   import OperationGuide from "./OperationGuide.svelte";
+  import { hardReset } from "../lib/cache-admin";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
@@ -23,6 +24,11 @@
   async function checkNow() {
     checkingUpdate = true;
     try { await onCheckUpdate(); } finally { checkingUpdate = false; }
+  }
+
+  function clearCacheAndReload() {
+    if (!confirm(tr("settings.cache.confirm"))) return;
+    void hardReset();
   }
 
   // ---- Notifications ----
@@ -223,6 +229,15 @@
       <div class="desc">{$t('guide.desc')}</div>
     </div>
     <button class="btn" onclick={() => (showGuide = true)}>{$t('guide.open')}</button>
+  </div>
+
+  <!-- Cache reset: escape hatch when the PWA cache misbehaves -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('settings.cache.label')}</div>
+      <div class="desc">{$t('settings.cache.desc')}</div>
+    </div>
+    <button class="btn" onclick={clearCacheAndReload}>{$t('settings.cache.button')}</button>
   </div>
 
   <!-- Notifications (collapsible, collapsed + all-off by default) -->

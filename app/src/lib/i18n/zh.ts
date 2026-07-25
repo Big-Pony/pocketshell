@@ -87,6 +87,12 @@ export default {
       close: "关闭",
       manage: "管理 ›",
     },
+    cache: {
+      label: "清除缓存并重载",
+      desc: "应用显示异常时使用；会重新下载界面资源",
+      button: "清除",
+      confirm: "确定清除缓存并重载应用？未保存的编辑内容会丢失。",
+    },
   },
   bottombar: {
     task: "任务",
