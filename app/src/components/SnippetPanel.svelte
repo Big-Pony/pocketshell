@@ -114,6 +114,8 @@
     align-items: center;
     gap: 6px;
   }
+  /* 勾选框默认走浏览器蓝，与石墨橙不搭；对齐指令卡上的 ⏎ 标记（同为 --accent） */
+  .check input[type="checkbox"] { accent-color: var(--accent); }
 
   .groups { flex: 1; overflow-y: auto; }
   .sp-empty {
