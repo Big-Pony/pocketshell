@@ -319,6 +319,17 @@ export default {
     closeFileHint: "关闭该文件预览标签。",
     closeDirty: "该文件有未保存的修改，关闭将丢失。",
   },
+  statusbar: {
+    aria: {
+      divider: "分区高度调节条：拖动调整上下区域，双击切换全屏",
+      branch: "当前 Git 分支",
+      latency: "连接延迟",
+      throughput: "下行速率",
+    },
+    tip: {
+      fullscreen: "双击这里可全屏",
+    },
+  },
   git: {
     notRepo: "当前项目根不是 Git 仓库",
     loadFailed: "加载失败",

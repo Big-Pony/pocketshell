@@ -217,3 +217,165 @@ test("interleaved chunks of concurrent rpcs reassemble independently", async () 
   for (const f of f1.slice(1)) h.deliver(f);
   await expect(p1).resolves.toEqual({ content: "A".repeat(300) });
 });
+
+// ---- 链路指标（分割条：延迟 + 吞吐）----
+// 上面的 fakeScheduler 把 setInterval 打桩成空实现（心跳不参与那些用例）。
+// 指标是按心跳周期结算的，所以这里换一个能真正跑 interval 的调度器。
+function metricsHarness(heartbeatMs = 1000) {
+  let seq = 1;
+  const timers = new Map<number, { fn: () => void; at: number }>();
+  const intervals = new Map<number, { fn: () => void; every: number; next: number }>();
+  let clock = 0;
+  const sched: Scheduler & { advance: (ms: number) => void } = {
+    setTimeout: (fn, ms) => { const id = seq++; timers.set(id, { fn, at: clock + ms }); return id; },
+    clearTimeout: (id) => { timers.delete(id); },
+    setInterval: (fn, every) => { const id = seq++; intervals.set(id, { fn, every, next: clock + every }); return id; },
+    clearInterval: (id) => { intervals.delete(id); },
+    now: () => clock,
+    advance: (ms) => {
+      const target = clock + ms;
+      // 逐个 tick 推进，让 interval 在正确的时刻触发（而不是一次跳到终点）
+      for (;;) {
+        let nextAt = target;
+        for (const t of timers.values()) if (t.at <= target && t.at < nextAt) nextAt = t.at;
+        for (const iv of intervals.values()) if (iv.next <= target && iv.next < nextAt) nextAt = iv.next;
+        if (nextAt >= target) break;
+        clock = nextAt;
+        for (const [id, t] of [...timers]) if (t.at <= clock) { timers.delete(id); t.fn(); }
+        for (const iv of intervals.values()) if (iv.next <= clock) { iv.next = clock + iv.every; iv.fn(); }
+      }
+      clock = target;
+      for (const [id, t] of [...timers]) if (t.at <= clock) { timers.delete(id); t.fn(); }
+      for (const iv of intervals.values()) if (iv.next <= clock) { iv.next = clock + iv.every; iv.fn(); }
+    },
+  };
+  let sock: any;
+  const sent: Uint8Array[] = [];
+  const wsFactory = (): WebSocketLike => {
+    sock = { binaryType: "", onopen: null, onmessage: null, onclose: null,
+      send: (d: Uint8Array) => sent.push(d), close: () => sock.onclose?.() };
+    return sock;
+  };
+  const conn = new Connection({
+    url: "ws://x", wsFactory, scheduler: sched, heartbeatMs, livenessMs: 60_000,
+    channelFactory: passthroughChannel, getPairing: () => null,
+  });
+  sock.onopen();
+  sock.onmessage({ data: new Uint8Array([2]).buffer });
+  const samples: any[] = [];
+  conn.onMetrics((m) => samples.push(m));
+  const deliver = (msg: ServerMsg) => sock.onmessage({ data: new TextEncoder().encode(encode(msg)).buffer });
+  // 送一个恰好 n 字节的**合法**帧：吞吐记的是链路字节数，与内容无关，但用垃圾
+  // 字节会让 dispatch 打一堆 "dropped malformed frame"，把真实告警淹掉。
+  // 用 output 帧撑长度，剩余空间用 data 的 base64 载荷补齐。
+  const deliverBytes = (n: number) => {
+    const base = encode({ type: "output", sessionId: "s", seq: 1, data: "" } as ServerMsg).length;
+    // data 会被 atob 解码，长度必须是 4 的倍数，否则抛 InvalidCharacterError
+    const padB64 = Math.max(0, Math.round((n - base) / 4) * 4);
+    const frame = encode({ type: "output", sessionId: "s", seq: 1, data: "A".repeat(padB64) } as ServerMsg);
+    sock.onmessage({ data: new TextEncoder().encode(frame).buffer });
+    return frame.length;
+  };
+  return { conn, sched, sent, samples, deliver, deliverBytes, sock };
+}
+
+test("ping→pong records the round-trip time", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);           // heartbeat fires → ping sent, ts recorded
+  h.sched.advance(42);             // 42ms on the wire
+  h.deliver({ type: "pong" });
+  h.sched.advance(958);            // next heartbeat settles the window
+  expect(h.samples[h.samples.length - 1].latency).toBe(42);
+});
+
+test("a pong arriving after the next ping is discarded, not shown as a tiny RTT", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);           // ping #1 — no pong comes back
+  h.sched.advance(1000);           // ping #2 — now 2 outstanding
+  h.sched.advance(5);
+  h.deliver({ type: "pong" });     // ambiguous: cannot tell if this is #1's or #2's
+  h.sched.advance(995);
+  // 5ms is the wrong answer — it is "time since ping #2", not a round trip.
+  // With 2 pings in flight the sample is unattributable, so nothing is recorded.
+  expect(h.samples[h.samples.length - 1].latency).toBe(null);
+});
+
+test("after an ambiguous pong the next clean exchange records a real RTT again", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);           // ping #1, no reply
+  h.sched.advance(1000);           // ping #2
+  h.deliver({ type: "pong" });     // ambiguous → discarded, one ping still outstanding
+  h.deliver({ type: "pong" });     // clears the backlog
+  h.sched.advance(1000);           // ping #3, now the only one in flight
+  h.sched.advance(17);
+  h.deliver({ type: "pong" });
+  h.sched.advance(983);
+  expect(h.samples[h.samples.length - 1].latency).toBe(17);
+});
+
+test("two heartbeats with no pong clears the latency instead of showing a stale one", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);
+  h.sched.advance(30);
+  h.deliver({ type: "pong" });     // one good sample
+  h.sched.advance(970);
+  expect(h.samples[h.samples.length - 1].latency).toBe(30);
+  h.sched.advance(1000);           // miss #1 — still showing 30ms
+  h.sched.advance(1000);           // miss #2 — cleared
+  expect(h.samples[h.samples.length - 1].latency).toBe(null);
+});
+
+test("received bytes accumulate and settle per heartbeat window", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);           // drain the connect-time frames into window #1
+  const before = h.samples.length;
+  const a = h.deliverBytes(4096);
+  const b = h.deliverBytes(2048);
+  h.sched.advance(1000);
+  const m = h.samples[h.samples.length - 1];
+  expect(h.samples.length).toBe(before + 1);
+  expect(m.rxBytes).toBe(a + b);
+  expect(m.elapsedMs).toBe(1000);
+});
+
+test("sent bytes are accounted too (upstream kept for later use)", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);           // window #1 settles; this heartbeat's ping lands in window #2
+  const before = h.samples.length;
+  h.conn.newSession("x", {});
+  h.sched.advance(1000);
+  expect(h.samples[h.samples.length - 1].txBytes).toBeGreaterThan(0);
+  expect(h.samples.length).toBe(before + 1);
+});
+
+test("byte counters reset each window rather than accumulating forever", () => {
+  const h = metricsHarness(1000);
+  h.deliverBytes(1024);
+  h.sched.advance(1000);
+  h.sched.advance(1000);           // a second window with no traffic
+  expect(h.samples[h.samples.length - 1].rxBytes).toBe(0);
+});
+
+test("disconnect blanks latency and throughput right away", () => {
+  const h = metricsHarness(1000);
+  h.sched.advance(1000);
+  h.sched.advance(20);
+  h.deliver({ type: "pong" });
+  h.deliverBytes(2048);
+  h.sock.onclose();
+  const m = h.samples[h.samples.length - 1];
+  expect(m.latency).toBe(null);
+  expect(m.rxBytes).toBe(0);
+});
+
+test("onMetrics unsubscribes cleanly", () => {
+  const h = metricsHarness(1000);
+  const seen: any[] = [];
+  const off = h.conn.onMetrics((m) => seen.push(m));
+  h.sched.advance(1000);
+  const n = seen.length;
+  expect(n).toBeGreaterThan(0);
+  off();
+  h.sched.advance(1000);
+  expect(seen.length).toBe(n);
+});

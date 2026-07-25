@@ -325,21 +325,21 @@
   }
   .subtabs {
     display: flex;
-    gap: 4px;
-    margin: 4px 8px;
+    gap: 3px;
+    margin: 4px 8px 7px;
     padding: 3px;
     flex: 0 0 auto;
     background: var(--seg-bg);
     border: 1px solid var(--seg-line);
-    border-radius: 999px;
+    border-radius: 7px;
   }
   .subtabs button {
     flex: 1;
     background: transparent;
     color: var(--dim);
     border: 0;
-    border-radius: 999px;
-    padding: 6px 0;
+    border-radius: var(--radius-sm);
+    padding: 7px 0;
     font-size: 0.68rem;
     transition: background 0.15s, color 0.15s;
   }
@@ -347,7 +347,7 @@
     background: var(--seg-active-bg);
     color: var(--seg-active-text);
     font-weight: 600;
-    box-shadow: var(--seg-shadow);
+    box-shadow: var(--seg-active-ring), var(--seg-shadow);
   }
 
   .funcrow {
@@ -403,17 +403,19 @@
   }
   .hint-chip:active { background: var(--accent-soft); }
 
+  /* 键距收紧（行间 5→3.5px，键间 5→3px）。间距参数集中在 .rows/.row 两处，
+     真机误触率若上升可就地回调。 */
   .rows {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 3.5px;
     padding: 4px;
     flex: 1;
     overflow-y: auto;
   }
   .row {
     display: flex;
-    gap: 5px;
+    gap: 3px;
   }
   .key {
     flex: 1 1 0;
@@ -424,7 +426,7 @@
     color: var(--key-text);
     border: 1px solid var(--key-line);
     border-radius: var(--radius-sm);
-    box-shadow: var(--key-shadow);
+    box-shadow: var(--key-shadow), var(--key-inset);
     padding: 4px 0;
     font-size: 0.72rem;
     touch-action: none;
@@ -463,8 +465,10 @@
     background: var(--key-enter-bg);
     color: var(--key-enter-text);
     border-color: var(--key-enter-line);
+    box-shadow: var(--key-enter-shadow);
     font-weight: 700;
   }
+  .key[data-key-id="Enter"]:active { box-shadow: none; }
   .key .main {
     font-size: inherit;
   }

@@ -42,6 +42,25 @@
       this.dirty = false;
     }
   }
+
+  // xterm's theme takes literal colour strings, not CSS variables. Read the
+  // --term-* tokens off :root so app.css stays the single source of truth for
+  // the palette (a reskin that only edits app.css can't miss the terminal).
+  // Falls back to the dark values when the tokens are missing (SSR / bare test
+  // DOM), which is also what the terminal always is in both themes.
+  export function termTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
+    const read = (name: string, fallback: string): string => {
+      if (typeof getComputedStyle !== "function") return fallback;
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    };
+    return {
+      background: read("--term-bg", "#1b1d20"),
+      foreground: read("--term-text", "#cfd2cd"),
+      cursor: read("--accent", "#ff4d00"),
+      selectionBackground: read("--code-selection", "rgba(255, 77, 0, 0.26)"),
+    };
+  }
 </script>
 
 <script lang="ts">
@@ -135,13 +154,9 @@
       convertEol: false,
       cursorBlink: true,
       disableStdin: true,
-      theme: {
-        // 终端区两套主题均为深色（--term-bg/--term-text），此处与之保持一致
-        background: "#0c1017",
-        foreground: "#c6d0dc",
-        cursor: "#3ecf94",
-        selectionBackground: "rgba(110, 168, 254, 0.28)",
-      },
+      // 终端区两套主题均为深色。xterm 只吃字面色值、不认 CSS 变量，所以在这里
+      // 把 --term-* 读出来喂给它——换肤时改 app.css 一处即可，不会再漏这里。
+      theme: termTheme(),
     });
     fit = new FitAddon();
     term.loadAddon(fit);
@@ -367,9 +382,20 @@
       ro.observe(host);
     }
 
+    // Theme switch repaints the terminal: the --term-* tokens differ slightly
+    // between the two themes (both dark), and xterm holds a copy of the colours
+    // taken at construction. Without this the terminal keeps the old background
+    // until it is remounted. Guarded for jsdom (no MutationObserver in some setups).
+    let themeObs: MutationObserver | undefined;
+    if (typeof MutationObserver !== "undefined") {
+      themeObs = new MutationObserver(() => { term.options.theme = termTheme(); });
+      themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    }
+
     teardown = () => {
       window.removeEventListener("resize", onResize);
       ro?.disconnect();
+      themeObs?.disconnect();
       unsubscribeOutput?.();
       unsubscribeInput?.();
       if (resizeDebounce) clearTimeout(resizeDebounce);

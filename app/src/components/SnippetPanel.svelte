@@ -97,13 +97,13 @@
     margin-bottom: 10px;
     flex: 0 0 auto;
   }
-  .title { font-size: 0.9rem; font-weight: 700; }
+  .title { font-size: 0.82rem; font-weight: 700; }
   .add-btn {
-    background: var(--accent-soft);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    padding: 6px 13px;
+    background: var(--primary-bg);
+    color: var(--primary-text);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
     font-size: 0.72rem;
     font-weight: 600;
   }
@@ -114,6 +114,8 @@
     align-items: center;
     gap: 6px;
   }
+  /* 勾选框默认走浏览器蓝，与石墨橙不搭；对齐指令卡上的 ⏎ 标记（同为 --accent） */
+  .check input[type="checkbox"] { accent-color: var(--accent); }
 
   .groups { flex: 1; overflow-y: auto; }
   .sp-empty {
@@ -122,46 +124,49 @@
     text-align: center;
     padding: 20px 8px;
   }
+  /* 分组标题走共同设计语言：mono 大写小标题 */
   .sp-group {
     color: var(--dimmer);
-    font-size: 0.62rem;
-    font-weight: 700;
-    margin: 10px 2px 6px;
-    letter-spacing: 1px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.6rem;
+    font-weight: 600;
+    margin: 12px 2px 6px;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
   .sp-items {
     display: flex;
     flex-wrap: wrap;
-    gap: 7px;
+    gap: 6px;
   }
+  /* 胶囊 → 方角小卡（4px），与整体仪表感一致 */
   .sp-row {
     display: flex;
     align-items: center;
     background: var(--panel);
-    border: 1px solid var(--line-soft);
-    border-radius: 999px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
     overflow: hidden;
   }
   .ins {
     background: transparent;
     color: var(--text);
     border: 0;
-    padding: 7px 11px;
-    font-size: 0.75rem;
-    font-family: "SF Mono", ui-monospace, monospace;
+    padding: 6px 10px;
+    font-size: 0.72rem;
+    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
   }
   .ins:active { background: var(--keyhi); }
-  .cr { color: var(--accent); margin-left: 5px; font-size: 0.65rem; }
+  .cr { color: var(--accent); margin-left: 5px; font-size: 0.6rem; }
   .del {
     background: transparent;
     color: var(--red);
     border: 0;
     border-left: 1px solid var(--line);
-    padding: 7px 9px;
-    font-size: 0.9rem;
+    padding: 6px 8px;
+    font-size: 0.85rem;
   }
-  .del:active { background: rgba(224, 108, 95, 0.15); }
+  .del:active { background: var(--red-soft); }
 
   .hint {
     font-size: 0.68rem;
