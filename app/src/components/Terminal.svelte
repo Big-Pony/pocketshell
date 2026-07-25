@@ -47,7 +47,12 @@
   // --term-* tokens off :root so app.css stays the single source of truth for
   // the palette (a reskin that only edits app.css can't miss the terminal).
   // Falls back to the dark values when the tokens are missing (SSR / bare test
-  // DOM), which is also what the terminal always is in both themes.
+  // DOM), which is also what the terminal always is in every theme.
+  //
+  // Cursor and selection read --term-* rather than --accent/--code-selection:
+  // the terminal is dark under every theme, but a light theme's accent and
+  // selection are tuned for a light background (dimmed for contrast there), so
+  // borrowing them here gives a dark cursor and a barely-visible selection.
   export function termTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
     const read = (name: string, fallback: string): string => {
       if (typeof getComputedStyle !== "function") return fallback;
@@ -57,8 +62,8 @@
     return {
       background: read("--term-bg", "#1b1d20"),
       foreground: read("--term-text", "#cfd2cd"),
-      cursor: read("--accent", "#ff4d00"),
-      selectionBackground: read("--code-selection", "rgba(255, 77, 0, 0.26)"),
+      cursor: read("--term-accent", "#ff4d00"),
+      selectionBackground: read("--term-selection", "rgba(255, 77, 0, 0.26)"),
     };
   }
 </script>

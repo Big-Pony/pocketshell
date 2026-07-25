@@ -56,10 +56,18 @@ export default {
   settings: {
     theme: {
       label: "Appearance",
-      desc: "Dark IDE, light minimal, or follow the system",
-      dark: "Dark",
-      light: "Light",
-      system: "Auto",
+      desc: "Six palettes, or follow the system between Graphite and Warm White",
+      dark: "Graphite Orange",
+      light: "Warm White",
+      osc: "Oscilloscope",
+      blackout: "Blackout",
+      prussian: "Prussian",
+      vermilion: "Vermilion Ink",
+      system: "Follow system",
+      systemDesc: "Warm White by day, Graphite Orange at night",
+      schemeDark: "Dark",
+      schemeLight: "Light",
+      default: "Default",
     },
     language: {
       label: "Language",

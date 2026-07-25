@@ -56,10 +56,18 @@ export default {
   settings: {
     theme: {
       label: "界面风格",
-      desc: "深色 IDE / 浅色极简，或跟随系统外观",
-      dark: "深色",
-      light: "浅色",
-      system: "跟随",
+      desc: "六套配色，或跟随系统在石墨橙与暖白仪表之间切换",
+      dark: "石墨橙",
+      light: "暖白仪表",
+      osc: "示波青",
+      blackout: "纯黑银",
+      prussian: "普鲁士蓝",
+      vermilion: "朱砂宣纸",
+      system: "跟随系统",
+      systemDesc: "白天用暖白仪表，夜间用石墨橙",
+      schemeDark: "深",
+      schemeLight: "浅",
+      default: "默认",
     },
     language: {
       label: "语言",

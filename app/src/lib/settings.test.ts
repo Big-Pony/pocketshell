@@ -1,6 +1,6 @@
 // app/src/lib/settings.test.ts
 import { test, expect } from "vitest";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings, detectLanguage, type Settings } from "./settings";
+import { DEFAULT_SETTINGS, THEMES, loadSettings, saveSettings, detectLanguage, type Settings } from "./settings";
 
 function memStore(): Storage {
   const data = new Map<string, string>();
@@ -42,14 +42,21 @@ test("default theme is dark", () => {
 
 test("loadSettings rejects unknown theme values", () => {
   const store = memStore();
-  store.setItem("ps.settings", JSON.stringify({ theme: "neon" }));
+  // 哨兵值刻意选一个不可能成为真主题名的字符串：用真实感的名字（曾经是 "neon"）
+  // 一旦哪天真加了同名主题，这条用例会静默失效——依然是绿的，但不再测它想测的。
+  store.setItem("ps.settings", JSON.stringify({ theme: "__not_a_theme__" }));
   expect(loadSettings(store).theme).toBe("dark");
+  expect(THEMES).not.toContain("__not_a_theme__");
 });
 
-test("loadSettings accepts system theme", () => {
-  const store = memStore();
-  store.setItem("ps.settings", JSON.stringify({ theme: "system" }));
-  expect(loadSettings(store).theme).toBe("system");
+test("loadSettings accepts every theme it advertises", () => {
+  // 逐个走一遍 THEMES，新增主题时忘了同步白名单会被这里抓到
+  // （症状是用户选了新主题、刷新后被打回深色）。
+  for (const theme of THEMES) {
+    const store = memStore();
+    store.setItem("ps.settings", JSON.stringify({ theme }));
+    expect(loadSettings(store).theme).toBe(theme);
+  }
 });
 
 test("default fontSize is 10", () => {
