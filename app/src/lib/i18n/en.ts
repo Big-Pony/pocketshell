@@ -373,6 +373,8 @@ export default {
     close: "Close",
     checking: "Checking for updates…",
     upToDate: "You're up to date",
+    checkFailed: "Couldn't reach version info — try again later",
+    checkFailedDetail: "Network unreachable, or GitHub API rate-limited (60/hr anonymous)",
     checkNow: "Check for updates",
     done: "Updated to {version}",
     phase: {

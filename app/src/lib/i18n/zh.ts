@@ -373,6 +373,8 @@ export default {
     close: "关闭",
     checking: "检查更新中…",
     upToDate: "已是最新版本",
+    checkFailed: "查不到版本信息，请稍后重试",
+    checkFailedDetail: "网络不通或 GitHub 接口限流（匿名 60 次/小时）",
     checkNow: "检查更新",
     done: "已更新到 {version}",
     phase: {

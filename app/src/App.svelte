@@ -790,6 +790,10 @@
         onCheckUpdate={async () => {
           await refreshUpdate(true);
           if (updInfo?.hasUpdate) updOpen = true;
+          // 查不到版本号（网络不通 / GitHub 接口限流 / 仓库关闭更新）时 latest
+          // 为 null。这跟「确实已是最新」是两回事，不能都报「已是最新版本」——
+          // 否则真有新版时用户只会看到一句安心话，永远发现不了更新。
+          else if (!updInfo?.latest) showToast(tr("update.checkFailed"), { detail: tr("update.checkFailedDetail"), ms: 3500 });
           else showToast(tr("update.upToDate"));
         }} />
     </div>
