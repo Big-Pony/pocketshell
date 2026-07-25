@@ -28,3 +28,26 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
 export function hasUpdate(current: string, latest: string): boolean {
   return compareSemver(current, latest) === -1;
 }
+
+/**
+ * After an OTA reconnect: should the page clear its caches and reload?
+ *
+ * Compares the version this frontend was BUILT from against the version the
+ * agent is running now — that mismatch is the definition of the stale-frontend
+ * bug (the app ships embedded in the agent, so they are meant to be identical).
+ *
+ * Deliberately not `!hasUpdate`: that only says the agent caught up with the
+ * latest GitHub release, which says nothing about whether THIS page is stale.
+ *
+ * `phase` is the in-flight OTA phase (null when no update was running), so an
+ * ordinary reconnect never triggers a reload.
+ */
+export function shouldReloadAfterUpdate(
+  appVersion: string,
+  agentVersion: string,
+  phase: string | null,
+): boolean {
+  if (!phase) return false;
+  if (!agentVersion) return false;
+  return agentVersion !== appVersion;
+}

@@ -21,6 +21,8 @@
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import UpdateDialog from "./components/UpdateDialog.svelte";
   import type { CheckResult } from "./lib/update";
+  import { shouldReloadAfterUpdate } from "./lib/update";
+  import { hardReset } from "./lib/cache-admin";
   import type { AppCommand } from "./lib/input-router";
   import { reset, type SelState } from "./lib/terminal-select";
   import { makeSwipeTracker } from "./lib/swipe";
@@ -181,6 +183,16 @@
       // restart finished successfully — clear the in-progress UI + badge and
       // let the user know.
       void refreshUpdate().then(() => {
+        // The agent restarted onto a new version: this page is now the OLD
+        // frontend talking to a NEW agent. Drop the version-named cache buckets
+        // and reload so the two are back in lockstep (see lib/cache-admin.ts).
+        // Cost: unsaved editor buffers are lost. Terminals are fine — tmux is
+        // the real session and replay backfills the output on re-attach.
+        if (shouldReloadAfterUpdate(__APP_VERSION__, updInfo?.current ?? "", updPhase)) {
+          showToast(tr("update.reloading", { version: updInfo!.current }), { ms: 3000 });
+          setTimeout(() => void hardReset(), 800); // let the toast be seen
+          return;
+        }
         if (updPhase && updInfo && !updInfo.hasUpdate) {
           showToast(tr("update.done", { version: updInfo.current }));
           updOpen = false;

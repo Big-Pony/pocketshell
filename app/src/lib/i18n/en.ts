@@ -377,6 +377,7 @@ export default {
     checkFailedDetail: "Network unreachable, or GitHub API rate-limited (60/hr anonymous)",
     checkNow: "Check for updates",
     done: "Updated to {version}",
+    reloading: "Updated to {version} — reloading…",
     phase: {
       downloading: "Downloading…",
       verifying: "Verifying…",
