@@ -8,6 +8,7 @@
   import DeviceManager from "./DeviceManager.svelte";
   import OperationGuide from "./OperationGuide.svelte";
   import { hardReset } from "../lib/cache-admin";
+  import { THEME_SWATCHES } from "../lib/theme";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
@@ -149,16 +150,36 @@
 
 <div class="stg-scroll">
 <div class="stg">
-  <!-- Theme -->
-  <div class="set">
+  <!-- Theme. A row per palette rather than the usual .seg: six segments do not
+       fit at 390px (and overflow outright in English), and a colour scheme is
+       the one setting worth previewing before you pick it. -->
+  <div class="set col">
     <div class="grow">
       <div class="label">{$t('settings.theme.label')}</div>
       <div class="desc">{$t('settings.theme.desc')}</div>
     </div>
-    <div class="seg">
-      <button class:on={settings.theme === "dark"} onclick={() => update("theme", "dark")}>{$t('settings.theme.dark')}</button>
-      <button class:on={settings.theme === "light"} onclick={() => update("theme", "light")}>{$t('settings.theme.light')}</button>
-      <button class:on={settings.theme === "system"} onclick={() => update("theme", "system")}>{$t('settings.theme.system')}</button>
+    <div class="themes" role="radiogroup" aria-label={$t('settings.theme.label')}>
+      <button class="theme" role="radio" aria-checked={settings.theme === "system"}
+        class:on={settings.theme === "system"} onclick={() => update("theme", "system")}>
+        <span class="tick" aria-hidden="true"></span>
+        <span class="tname">
+          {$t('settings.theme.system')}
+          <s>{$t('settings.theme.systemDesc')}</s>
+        </span>
+      </button>
+      {#each THEME_SWATCHES as sw (sw.id)}
+        <button class="theme" role="radio" aria-checked={settings.theme === sw.id}
+          class:on={settings.theme === sw.id} onclick={() => update("theme", sw.id)}>
+          <span class="tick" aria-hidden="true"></span>
+          <span class="tname">{$t(`settings.theme.${sw.id}`)}</span>
+          <span class="sw" aria-hidden="true">
+            {#each sw.colors as c}<i style="background:{c}"></i>{/each}
+          </span>
+          <span class="tag">
+            {sw.scheme === "light" ? $t('settings.theme.schemeLight') : $t('settings.theme.schemeDark')}
+          </span>
+        </button>
+      {/each}
     </div>
   </div>
 
@@ -376,9 +397,73 @@
     border-bottom: 1px solid var(--line);
     font-size: 13px;
   }
+  /* Stacked variant: label on top, control below (theme picker). */
+  .set.col { flex-direction: column; align-items: stretch; gap: 8px; }
   .grow { flex: 1; min-width: 0; }
   .label { font-size: 13px; }
   .desc { font-size: 10.5px; color: var(--dim); margin-top: 2px; line-height: 1.4; }
+
+  /* ---- Theme picker ---- */
+  .themes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    background: var(--seg-bg);
+  }
+  .theme {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 40px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-size: 12.5px;
+    text-align: left;
+  }
+  .theme.on {
+    background: var(--seg-active-bg);
+    box-shadow: var(--seg-active-ring), var(--seg-shadow);
+  }
+  .theme:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* Radio dot: filled ring when picked. Colour is the only cue in the swatch
+     row, so the dot carries the state redundantly (not colour-only). */
+  .tick {
+    flex: 0 0 auto;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    border: 1.5px solid var(--line-strong);
+    position: relative;
+  }
+  .theme.on .tick { border-color: var(--accent); }
+  .theme.on .tick::after {
+    content: "";
+    position: absolute; inset: 2.5px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .tname { flex: 1; min-width: 0; }
+  .tname s { display: block; text-decoration: none; font-size: 10px; color: var(--dim); margin-top: 1px; }
+  .sw { flex: 0 0 auto; display: flex; gap: 2px; }
+  .sw i {
+    width: 13px; height: 18px;
+    border-radius: 2px;
+    /* Neutral hairline so both near-black and near-white swatches stay legible
+       against whichever theme is currently painting the panel. */
+    box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+  }
+  .tag {
+    flex: 0 0 auto;
+    font-size: 9.5px;
+    color: var(--dimmer);
+    min-width: 1.6em;
+    text-align: right;
+  }
   .val { font-size: 11px; color: var(--dim); min-width: 2.4em; text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; }
   input[type="range"] { width: 104px; accent-color: var(--accent); }
   .seg {

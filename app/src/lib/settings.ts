@@ -5,7 +5,20 @@
 
 const KEY = "ps.settings";
 
-export type ThemePref = "dark" | "light" | "system";
+/**
+ * Theme ids match the `:root[data-theme="…"]` blocks in app.css one-for-one
+ * (plus "system", which resolves to dark/light at apply time). Adding one here
+ * means adding a token block there — and mirroring the list into index.html's
+ * inline FOUC guard, which cannot import from this module.
+ */
+export type ThemePref =
+  | "dark"        // 石墨橙（默认，深）
+  | "light"       // 暖白仪表（浅）
+  | "osc"         // 示波青（深）
+  | "blackout"    // 纯黑银（深）
+  | "prussian"    // 普鲁士蓝（深）
+  | "vermilion"   // 朱砂宣纸（浅）
+  | "system";
 export type Language = "zh" | "en";
 export type VibrateLevel = "off" | "light" | "medium" | "strong";
 
@@ -25,7 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: "zh",
 };
 
-const THEMES: ThemePref[] = ["dark", "light", "system"];
+export const THEMES: ThemePref[] = ["dark", "light", "osc", "blackout", "prussian", "vermilion", "system"];
 const LANGS: Language[] = ["zh", "en"];
 const VIBES: VibrateLevel[] = ["off", "light", "medium", "strong"];
 
