@@ -45,9 +45,10 @@
 
 <style>
   .fp { display: flex; flex-direction: column; height: 100%; }
-  .subtabs { display: flex; gap: 4px; margin: 6px 8px; padding: 3px; flex: 0 0 auto; background: var(--seg-bg); border: 1px solid var(--seg-line); border-radius: 999px; }
-  .subtabs button { flex: 1; padding: 6px 0; border: 0; background: transparent; color: var(--dim); border-radius: 999px; font-size: 0.72rem; }
-  .subtabs button.on { background: var(--seg-active-bg); color: var(--seg-active-text); font-weight: 600; box-shadow: var(--seg-shadow); }
-  .branch { margin-left: 4px; font-size: 0.6rem; color: var(--amber); font-weight: 600; }
+  .subtabs { display: flex; gap: 3px; margin: 6px 8px 0; padding: 3px; flex: 0 0 auto; background: var(--seg-bg); border: 1px solid var(--seg-line); border-radius: 7px; }
+  .subtabs button { flex: 1; padding: 6px 0; border: 0; background: transparent; color: var(--dim); border-radius: var(--radius-sm); font-size: 0.72rem; }
+  .subtabs button.on { background: var(--seg-active-bg); color: var(--seg-active-text); font-weight: 600; box-shadow: var(--seg-active-ring), var(--seg-shadow); }
+  /* 分支名与分割条一致用主色，不再是 amber */
+  .branch { margin-left: 5px; font-size: 0.6rem; color: var(--accent); font-weight: 600; font-family: "JetBrains Mono", ui-monospace, monospace; }
   .body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 </style>

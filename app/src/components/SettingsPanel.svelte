@@ -350,52 +350,59 @@
 
 <style>
   .stg-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
-  .stg { padding: 8px; color: var(--text); }
+  .stg { padding: 4px 10px 10px; color: var(--text); }
+  /* 左标签 + 右控件的行式布局（原为上下堆叠，纵向过长） */
   .set {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 4px;
+    min-height: 44px;
+    padding: 8px 2px;
     border-bottom: 1px solid var(--line);
-    font-size: 14px;
+    font-size: 13px;
   }
-  .grow { flex: 1; }
-  .label { font-size: 14px; }
-  .desc { font-size: 11px; color: var(--dim); margin-top: 3px; }
-  .val { font-size: 12px; color: var(--dim); min-width: 2.5em; text-align: right; }
-  input[type="range"] { width: 110px; accent-color: var(--primary-bg); }
+  .grow { flex: 1; min-width: 0; }
+  .label { font-size: 13px; }
+  .desc { font-size: 10.5px; color: var(--dim); margin-top: 2px; line-height: 1.4; }
+  .val { font-size: 11px; color: var(--dim); min-width: 2.4em; text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; }
+  input[type="range"] { width: 104px; accent-color: var(--accent); }
   .seg {
     display: flex;
     gap: 2px;
     background: var(--seg-bg);
     border: 1px solid var(--seg-line);
-    border-radius: 999px;
-    padding: 2px;
+    border-radius: 7px;
+    padding: 3px;
+    flex: 0 0 auto;
   }
   .seg button {
     background: transparent;
     border: 0;
     color: var(--dim);
-    padding: 5px 12px;
-    font-size: 12px;
-    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 11.5px;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
   }
   .seg button.on {
     background: var(--seg-active-bg);
     color: var(--seg-active-text);
     font-weight: 600;
-    box-shadow: var(--seg-shadow);
+    box-shadow: var(--seg-active-ring), var(--seg-shadow);
   }
+  /* 次操作：透明底 + 描边（实心留给真正的主操作） */
   .btn {
-    background: var(--primary-bg);
-    color: var(--primary-text);
-    border: 0;
-    border-radius: 999px;
-    padding: 7px 14px;
-    font-size: 13px;
-    font-weight: 600;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
+    flex: 0 0 auto;
   }
+  .btn:active { background: var(--panel2); }
   .btn:disabled { opacity: 0.5; cursor: default; }
 
   /* Notifications */
@@ -410,21 +417,23 @@
   .notify-head .label { color: var(--accent); font-weight: 600; }
   .chev { color: var(--dim); font-size: 0.8rem; }
   .err { color: var(--red); font-size: 11px; margin-top: 3px; }
+  /* 分区标题走共同设计语言：mono 大写小标题 */
   .nsub {
     color: var(--dimmer);
-    font-size: 0.66rem;
-    font-weight: 700;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.6rem;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 14px 4px 6px;
+    letter-spacing: 0.06em;
+    margin: 14px 2px 6px;
   }
   .webhook-head { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
   .add-btn {
-    background: var(--accent-soft);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    padding: 5px 12px;
+    background: var(--primary-bg);
+    color: var(--primary-text);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 5px 11px;
     font-size: 0.72rem;
     font-weight: 600;
   }

@@ -58,7 +58,7 @@
       <div class="st">{$t('git.changes')}</div>
       {#each changes as c}
         <button class="chg" onclick={() => onOpenDiff((root === "/" ? "" : root) + "/" + c.path)}>
-          <span class="g g-{c.status}">{c.status}</span><span class="cp mono">{c.path}</span>
+          <span class="g g-{c.status}" title={c.status} aria-label={c.status} role="img"></span><span class="cp mono">{c.path}</span>
         </button>
       {/each}
       {#if !changes.length}<div class="empty">{$t('git.clean')}</div>{/if}
@@ -80,20 +80,29 @@
 </div>
 
 <style>
-  .git { height: 100%; overflow-y: auto; padding: 8px; font-size: 0.72rem; }
+  .git { height: 100%; overflow-y: auto; padding: 8px 10px; font-size: 0.72rem; }
   .hint, .empty, .gn { color: var(--dim); padding: 10px; }
   .gn { color: var(--amber); }
   .sec { margin-bottom: 12px; }
-  .st { color: var(--accent-text); font-weight: 600; margin-bottom: 4px; }
+  /* 分区标题走共同设计语言：mono 大写小标题 */
+  .st {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--dimmer); font-weight: 600; margin: 12px 0 6px;
+  }
   .cur { color: var(--text); }
-  .brs { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
-  .br { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 2px 6px; color: var(--dim); }
-  .br.on { color: var(--accent-text); border-color: var(--accent); }
-  .tip { color: var(--dimmer); font-size: 0.64rem; }
-  .chg, .cm, .more { display: flex; gap: 6px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 4px; align-items: center; }
+  .brs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 5px; }
+  .br { border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; color: var(--dim); }
+  .br.on { color: var(--accent); border-color: var(--accent); }
+  .tip { color: var(--dimmer); font-size: 0.62rem; }
+  .chg, .cm, .more { display: flex; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 2px; align-items: center; }
   .chg:active, .cm:active { background: var(--panel); }
-  .g { font-weight: 700; } .g-M { color: var(--amber); } .g-A { color: var(--ok); } .g-D { color: var(--red); } .g-\? { color: var(--dim); }
-  .cm { flex-wrap: wrap; } .h { color: var(--amber); } .m { flex: 1; } .meta { color: var(--dim); font-size: 0.64rem; width: 100%; }
+  /* 与目录树同一套语言：3px 竖色条，状态字母进 aria-label */
+  .g { width: 3px; height: 14px; border-radius: 2px; flex: 0 0 auto; background: transparent; }
+  .g-M { background: var(--amber); } .g-A { background: var(--ok); } .g-D { background: var(--red); } .g-\? { background: var(--dimmer); }
+  .cm { flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .h { color: var(--accent); } .m { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--dimmer); font-size: 0.62rem; width: 100%; }
   .files { padding: 2px 0 6px 14px; } .cf em { color: var(--dim); font-style: normal; }
-  .more { color: var(--accent-text); justify-content: center; }
+  .more { color: var(--accent); justify-content: center; }
 </style>

@@ -291,11 +291,19 @@
   <ul class="tree" bind:this={treeEl} onscroll={onScroll}>
     {#each rows as { n, depth } (n.path)}
       <li class="row-wrap">
+        <!-- git 标记从彩色文字改成行首 3px 竖色条：省下横向空间，且不论层级
+             多深都排成齐整的一列（缩进加在 .row 上，色条在它外面）。
+             色条只有颜色没有形状，所以状态字母放进 title/aria-label，
+             不让这条信息变成纯色觉依赖。 -->
+        {#if n.git}
+          <span class="g g-{n.git}" title={n.git} aria-label={n.git} role="img"></span>
+        {:else}
+          <span class="g" aria-hidden="true"></span>
+        {/if}
         <button class="row" style="padding-left: {6 + depth * 14}px"
           onclick={() => toggle(n)}>
           <span class="tw">{n.type === "dir" ? (n.expanded ? "▾" : "▸") : "·"}</span>
-          <span class="nm">{n.name}</span>
-          {#if n.git}<span class="g g-{n.git}">{n.git}</span>{/if}
+          <span class="nm" class:dir={n.type === "dir"}>{n.name}</span>
         </button>
         <button class="more" aria-label={$t('common.more')}
           onclick={(e) => { e.stopPropagation(); openMenu(n, e.currentTarget); }}>⋯</button>
@@ -404,11 +412,16 @@
 
 <style>
   .ft { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
-  .pathbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
-  .root-switch, .root-refresh { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); padding: 2px 9px; font-size: 0.8rem; line-height: 1.4; }
-  .root-switch:active, .root-refresh:active { background: var(--key); }
+  .pathbar { display: flex; align-items: center; gap: 6px; padding: 7px 8px 5px; }
+  /* 路径栏三个控件统一成 25px 方角图标钮 */
+  .root-switch, .root-refresh {
+    flex: 0 0 auto; width: 25px; height: 25px; display: grid; place-items: center;
+    background: var(--panel); border: 1px solid var(--line-strong); color: var(--dim);
+    border-radius: var(--radius-sm); padding: 0; font-size: 0.8rem; line-height: 1;
+  }
+  .root-switch:active, .root-refresh:active { background: var(--panel2); color: var(--text); }
   .path-text {
-    flex: 1; min-width: 0; font-size: 0.68rem; color: var(--dim);
+    flex: 1; min-width: 0; font-size: 0.66rem; color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     /* Left-side ellipsis: the rtl container places the ellipsis at the visual
        left, while the inner <bdi> isolates the path as one LTR run so its
@@ -418,24 +431,29 @@
   }
   .path-text bdi { unicode-bidi: isolate; }
   .path-text:active { color: var(--text); }
-  .root-anchor { flex: 0 0 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; }
-  .root-anchor .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }
+  /* 项目根圆钮：形状保持圆形（与方角图标钮区分开，它是「锚点」不是动作） */
+  .root-anchor { flex: 0 0 auto; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 50%; width: 25px; height: 25px; display: grid; place-items: center; padding: 0; }
+  .root-anchor .ring { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--dim); display: grid; place-items: center; }
   .root-anchor .ring::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--dim); }
   .root-anchor.on { border-color: var(--accent); }
   .root-anchor.on .ring { border-color: var(--accent); }
   .root-anchor.on .ring::after { background: var(--accent); }
-  .filter { margin: 0 8px 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 6px 8px; font-size: 0.72rem; }
+  .filter { margin: 0 8px 4px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); padding: 6px 9px; font-size: 0.72rem; outline: none; }
+  .filter:focus { border-color: var(--accent); }
   .ft-notice { font-size: 0.68rem; color: var(--amber); padding: 2px 10px; }
   .tree { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
-  .row-wrap { display: flex; align-items: center; width: 100%; }
-  .row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); text-align: left; padding: 7px 6px; font-size: 0.74rem; }
+  /* 行高压到 30px：一屏能多看几行 */
+  .row-wrap { display: flex; align-items: center; width: 100%; height: 30px; }
+  .row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; color: var(--text); text-align: left; padding: 0 6px; font-size: 0.74rem; }
   .row:active { background: var(--panel); }
-  .more { flex: 0 0 auto; background: transparent; border: 0; color: var(--dim); padding: 0 6px; font-size: 1rem; line-height: 1; }
+  .more { flex: 0 0 auto; background: transparent; border: 0; color: var(--dimmer); padding: 0 6px; font-size: 0.95rem; line-height: 1; }
   .more:active { color: var(--text); }
-  .tw { width: 1em; color: var(--dim); }
+  .tw { width: 1em; color: var(--dimmer); font-size: 0.62rem; flex: 0 0 auto; }
   .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .g { font-size: 0.6rem; font-weight: 700; }
-  .g-M { color: var(--amber); } .g-A { color: var(--ok); } .g-D { color: var(--red); } .g-\? { color: var(--dim); }
+  .nm.dir { font-weight: 600; }
+  /* git 状态：行首 3px 竖色条，缩进无关，永远对齐成一列 */
+  .g { width: 3px; height: 15px; border-radius: 2px; flex: 0 0 auto; margin-right: 5px; background: transparent; }
+  .g-M { background: var(--amber); } .g-A { background: var(--ok); } .g-D { background: var(--red); } .g-\? { background: var(--dimmer); }
 
   .confirm-overlay {
     position: fixed; inset: 0; z-index: 40;

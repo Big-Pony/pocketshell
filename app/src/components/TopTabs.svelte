@@ -196,7 +196,15 @@
     border-bottom: 1px solid var(--tab-line);
     flex: 1; min-width: 0; width: 100%;
   }
-  .strip { display: flex; align-items: flex-end; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
+  /* margin-bottom:-1px 让 strip 自身向下盖住 .toptabs 的下边线，卡片贴着
+     strip 底边（align-items:flex-end）因而正好压在线上，与终端连成一体。
+     不能改用卡片 `position:relative; top:1px` 下移——strip 有 overflow-x:auto，
+     溢出的那 1px 会被裁掉，分隔线反而横穿卡片。 */
+  .strip {
+    display: flex; align-items: flex-end; gap: 3px; flex: 1; min-width: 0;
+    overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory;
+    margin-bottom: -1px;
+  }
   .strip::-webkit-scrollbar { display: none; }
   .ops { flex: 0 0 auto; }
   .tab {
@@ -204,7 +212,7 @@
     padding: 6px 13px 7px; border: 1px solid transparent; border-bottom: none;
     border-radius: 6px 6px 0 0; background: var(--tab-bg); color: var(--dim);
     font-size: 0.72rem; white-space: nowrap; scroll-snap-align: start;
-    position: relative; top: 1px;   /* 压住下边线，卡片与终端连成一体 */
+    position: relative;
     transition: background 0.15s, color 0.15s;
     /* Multi-tap must not raise the phone's native selection / callout menu. */
     -webkit-touch-callout: none;

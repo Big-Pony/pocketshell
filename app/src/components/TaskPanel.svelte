@@ -47,17 +47,14 @@
 <div class="tp">
 <ul class="list">
   {#each sessions as s (s.name)}
-    <li class="sess-card">
-      <div class="row-wrap">
-        <button
-          class="row"
-          onclick={() => onSelect(s.name)}
-        >
+    <li class="sess-card" class:live={!s.closed && s.state !== "done"}>
+      <button class="row" onclick={() => onSelect(s.name)}>
+        <!-- 第一行：状态点 + 会话名 + 状态词 + 动作区 -->
+        <span class="r1">
           <span class="dot {stateDotClass(s.state)}"></span>
-          <span class="info">
-            <span class="name mono">{s.name}<em class={s.state === "wait" ? "w" : ""}>{$t('tasks.state.' + s.state)}</em></span>
-            <span class="last mono">{s.lastLine}</span>
-          </span>
+          <span class="name mono">{s.name}</span>
+          <em class="st" class:w={s.state === "wait"}>{$t('tasks.state.' + s.state)}</em>
+          <span class="sp"></span>
           {#if s.closed}
             <span class="act act-del" role="button" tabindex="0"
               onpointerdown={(e) => e.stopPropagation()}
@@ -65,12 +62,20 @@
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClose(s.name); } }}
             >{$t('tasks.action.close')}</span>
           {:else}
+            <!-- 主操作（进入/打开）常驻，不收进 ⋯：⋯ 菜单里只有重命名/复制/
+                 终止，没有「打开」，收起来会让后台会话失去可见的进入口。
+                 拥挤问题靠两行布局解决（状态与输出预览分行），不靠砍按钮。 -->
             <span class="act">{$t('tasks.action.' + actionLabel(s))}</span>
+            <span class="more" role="button" tabindex="0" aria-label={$t('common.more')}
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget as HTMLElement); }}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openMenu(s.name, e.currentTarget as HTMLElement); } }}
+            >⋯</span>
           {/if}
-        </button>
-        <button class="more" aria-label={$t('common.more')}
-          onclick={(e) => { e.stopPropagation(); openMenu(s.name, e.currentTarget); }}>⋯</button>
-      </div>
+        </span>
+        <!-- 第二行：最后一行输出预览 -->
+        <span class="last mono">{s.lastLine}</span>
+      </button>
 
       {#if menuFor === s.name}
         <ContextMenu
@@ -119,57 +124,78 @@
     flex: 1;
   }
   .sess-card {
-    margin-bottom: 8px;
+    margin-bottom: 7px;
     position: relative;
   }
   .row {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 5px;
     width: 100%;
-    border: 0;
     background: var(--panel);
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
     color: inherit;
-    padding: 11px 12px;
+    padding: 9px 10px;
     text-align: left;
     user-select: none;
+    position: relative;
   }
   .row:active { background: var(--panel2); }
+  /* 运行中/等待中的会话左侧一道橙色竖条，扫一眼就能从列表里挑出来 */
+  .sess-card.live .row::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent);
+  }
+  .r1 { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+  .sp { flex: 1; }
   .dot {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     flex: 0 0 auto;
   }
   .dot-run { background: var(--ok); box-shadow: 0 0 5px var(--ok); animation: pulse 1.4s infinite; }
-  .dot-wait { background: var(--amber); animation: pulse 0.9s infinite; }
+  .dot-wait { background: var(--amber); box-shadow: 0 0 5px var(--amber); animation: pulse 0.9s infinite; }
   .dot-done { background: var(--dimmer); }
   .dot-idle { background: var(--blue); }
   @keyframes pulse { 50% { opacity: 0.35; } }
 
-  .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .name { font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-  .name em {
+  .name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .st {
     font-style: normal;
-    font-size: 0.64rem;
+    font-size: 0.62rem;
     font-weight: 400;
     color: var(--dim);
+    flex: 0 0 auto;
   }
-  .name em.w { color: var(--amber); }
-  .last { color: var(--dimmer); font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st.w { color: var(--amber); }
+  .last { color: var(--dimmer); font-size: 0.66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .act {
     font-size: 0.7rem;
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--panel2);
-    padding: 6px 14px;
+    color: var(--primary-text);
+    background: var(--primary-bg);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    padding: 5px 12px;
     flex: 0 0 auto;
   }
 
-  .act-del { color: var(--red); border-color: var(--red); background: transparent; cursor: pointer; }
+  .act-del { color: var(--red); border-color: var(--line-strong); background: transparent; cursor: pointer; font-weight: 400; }
 
   .confirm-overlay {
     position: fixed;
@@ -203,29 +229,25 @@
   .dlg-btns button.danger { background: var(--red); color: var(--on-danger); border-color: transparent; }
 
   .tp { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-  .row-wrap { display: flex; align-items: center; }
-  .row { flex: 1; min-width: 0; }
   .more {
     flex: 0 0 auto;
-    background: transparent;
-    border: 0;
     color: var(--dim);
-    padding: 0 10px;
-    font-size: 1rem;
+    padding: 2px 4px;
+    font-size: 0.95rem;
     line-height: 1;
   }
   .more:active { color: var(--text); }
   .list { min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .empty { padding: 16px; color: var(--dim); text-align: center; }
   .pnote {
-    font-size: 0.68rem;
+    font-size: 0.66rem;
     color: var(--dimmer);
     background: var(--panel);
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-lg);
-    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 9px 11px;
     line-height: 1.7;
-    margin-top: 4px;
+    margin-top: 3px;
   }
   .pnote b { color: var(--dim); font-weight: 600; }
 </style>
