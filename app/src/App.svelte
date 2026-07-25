@@ -12,6 +12,8 @@
   import FilePanel from "./components/FilePanel.svelte";
   import FilePreview from "./components/FilePreview.svelte";
   import BottomBar from "./components/BottomBar.svelte";
+  import StatusBar from "./components/StatusBar.svelte";
+  import type { LinkMetrics } from "./lib/connection";
   import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
@@ -116,6 +118,36 @@
   const cmdLines = new Map<string, CmdLineState>();
   let hints = $state<string[]>([]);
 
+  // ---- 分割条数据 ----
+  // 链路指标由 connection 每个心跳周期结算一次推过来（复用心跳定时器，无新开销）。
+  let metrics = $state<LinkMetrics>({ latency: null, rxBytes: 0, txBytes: 0, elapsedMs: 0 });
+  conn.onMetrics((m) => { metrics = m; });
+
+  // Git 分支提到 App 层，与文件面板共享同一次 git.branches 结果——分割条不新增
+  // 轮询。切根（rootTick）与文件面板刷新（treeTick）时跟着更新。
+  let gitBranch = $state("");
+  let gitDirty = $state(false);
+  // 切根 / 目录树刷新时跟着更新（这两个 tick 本就代表「项目根或工作区变了」）。
+  $effect(() => { rootTick; treeTick; void refreshGitBranch(); });
+  async function refreshGitBranch() {
+    if (status !== "online") return;
+    const cwd = loadProjectRoot();
+    try {
+      const b = (await conn.rpc("git.branches", { cwd })) as { current?: string };
+      gitBranch = b?.current ?? "";
+    } catch {
+      gitBranch = "";   // 非 git 仓库 / 未设项目根 → 左侧整块隐藏
+      gitDirty = false;
+      return;
+    }
+    try {
+      const s = (await conn.rpc("git.status", { cwd })) as { files?: unknown[] };
+      gitDirty = (s?.files?.length ?? 0) > 0;
+    } catch {
+      gitDirty = false;
+    }
+  }
+
   function cmdState(id: string): CmdLineState {
     let s = cmdLines.get(id);
     if (!s) { s = emptyCmdLine(); cmdLines.set(id, s); }
@@ -143,6 +175,7 @@
     status = s;
     if (s === "online" && !wasOnline) {
       reportPresence();
+      void refreshGitBranch();   // 重连后补一次，分割条左侧才不会一直空着
       // Fresh connect (incl. reconnect after a self-restart update): re-check.
       // If we were mid-update and the reconnect shows we're now current, the
       // restart finished successfully — clear the in-progress UI + badge and
@@ -662,14 +695,15 @@
 
 <div class="shell">
   <div class="topbar">
-    <span class="brand mono">◧ Pocket<b>Shell</b></span>
+    <span class="brand mono">pocket<b>shell</b></span>
     <span class="version mono">v{updInfo?.current ?? ""}</span>
     {#if updInfo?.hasUpdate}
       <button class="upd-badge" onclick={() => (updOpen = true)} aria-label={$t('update.badge')} title={$t('update.badge')}><span class="upd-dot">●</span>{$t('update.badge')}</button>
     {/if}
-    <div class="conn conn-{status}">
+    <!-- 连接状态收成纯色点：文字信息由分割条的延迟数字承担。色点本身不带
+         文字，所以 aria-label/title 必须保留 app.status.* 三条文案。 -->
+    <div class="conn conn-{status}" role="status" aria-label={$t('app.status.' + status)} title={$t('app.status.' + status)}>
       <span class="conn-dot"></span>
-      <span class="conn-text mono">{$t('app.status.' + status)}</span>
     </div>
     <button class="fs-btn" aria-label={pageFullscreen ? $t('app.fullscreen.exit') : $t('app.fullscreen.enter')} onclick={togglePageFullscreen}>
       {#if pageFullscreen}
@@ -729,9 +763,13 @@
     {/if}
   </div>
 
-  <div class="divider" class:hidden={fullscreen} role="separator" onpointerdown={onDividerDown} onpointermove={onDividerMove} onpointerup={onDividerUp}>
-    <div class="grip"></div>
-  </div>
+  {#if !fullscreen}
+    <StatusBar
+      branch={gitBranch} dirty={gitDirty}
+      latency={metrics.latency} rxBytes={metrics.rxBytes} elapsedMs={metrics.elapsedMs}
+      online={status === "online"}
+      onDown={onDividerDown} onMove={onDividerMove} onUp={onDividerUp} />
+  {/if}
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
       <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
@@ -793,7 +831,11 @@
     display: flex;
     flex-direction: column;
     height: 100dvh;
-    background: var(--bg);
+    /* 机身顶部一层极弱暖光，让石墨底不死板；浅色主题下 --shell-glow 为
+       transparent（暖白底铺橙渐变会显脏）。 */
+    background:
+      radial-gradient(130% 55% at 50% -8%, var(--shell-glow), transparent 62%),
+      var(--bg);
     overflow: hidden;
     position: relative;
   }
@@ -802,21 +844,24 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px 8px;
-    background: var(--bg);
+    height: 44px;
+    padding: 0 13px;
+    background: transparent;
+    border-bottom: 1px solid var(--line);
     flex: 0 0 auto;
   }
   .brand {
     font-weight: 700;
     letter-spacing: 0.2px;
-    font-size: 0.94rem;
+    font-size: 0.84rem;
     color: var(--text);
   }
-  .brand b { color: var(--accent); font-weight: 700; }
+  .brand b { color: var(--brand-sig); font-weight: 700; }
   .version {
-    font-size: 0.62rem;
+    font-size: 0.56rem;
     color: var(--dimmer);
-    font-weight: 600;
+    font-weight: 500;
+    letter-spacing: 0.06em;
     margin-top: 2px;
   }
   .upd-badge {
@@ -845,42 +890,37 @@
   @media (prefers-reduced-motion: reduce) {
     .upd-badge .upd-dot { animation: none; }
   }
+  /* 连接状态：纯色点，25px 命中区（与全屏钮同高） */
   .conn {
     margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.68rem;
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 25px;
+    height: 25px;
     color: var(--dim);
   }
-  .conn-online { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
-  .conn-connecting { color: var(--amber); background: var(--amber-soft); border-color: var(--amber); }
-  .conn-offline { color: var(--red); background: var(--red-soft); border-color: var(--red); }
+  .conn-online { color: var(--ok); }
+  .conn-connecting { color: var(--amber); }
+  .conn-offline { color: var(--red); }
   .conn-dot {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: currentColor;
-  }
-  .conn-online .conn-dot { box-shadow: 0 0 6px currentColor; }
-  .conn-text {
-    min-width: 3em;
-    text-align: right;
+    box-shadow: 0 0 6px currentColor;
   }
   .fs-btn {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 30px;
-    height: 30px;
+    width: 27px;
+    height: 25px;
     padding: 0;
     background: transparent;
     border: 0;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     color: var(--dim);
     cursor: pointer;
     transition: color 0.15s, background 0.15s;
@@ -889,15 +929,14 @@
   .fs-btn:hover { color: var(--text); }
   .fs-btn:active { background: var(--keyhi); }
 
+  /* 索引卡片 tab 自带下边线与内边距，外层不再加 padding，否则卡片压不住线 */
   .tabs-wrap {
     flex: 0 0 auto;
     position: relative;
     overflow: hidden;
-    background: var(--bg);
+    background: transparent;
     display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 0 8px;
+    align-items: stretch;
   }
   .banner {
     background: var(--banner-bg);
@@ -917,14 +956,16 @@
     flex: 0 0 auto;
   }
 
+  /* 与索引卡片 tab 连成一体：不再是浮在底色上的圆角盒子，改为通栏平铺，
+     卡片底边直接坐在这块区域上沿。 */
   .top {
     position: relative;
     min-height: 0;
     overflow: hidden;
     background: var(--term-bg);
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-lg);
-    margin: 0 8px;
+    border: 0;
+    border-radius: 0;
+    margin: 0;
     /* Phase 1 defensive fix (best-effort pending real-device RCA): keep vertical
        scroll native but let horizontal drags stay as pointer events instead of
        being resolved into a native gesture that cancels them. */
@@ -943,22 +984,6 @@
   .hint-title { font-size: 15px; color: var(--term-text); }
   .hint-body { font-size: 12px; }
 
-  .divider {
-    flex: 0 0 auto;
-    background: transparent;
-    padding: 7px 0;
-    touch-action: none;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-  .grip {
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--keyhi);
-  }
-
   .bottom {
     min-height: 0;
     overflow: hidden;
@@ -976,7 +1001,7 @@
     flex: 1;
     min-height: 0;
   }
-  .divider.hidden, .bottom.hidden, .panel-slot.hidden { display: none; }
+  .bottom.hidden, .panel-slot.hidden { display: none; }
 
   .toast {
     position: absolute;

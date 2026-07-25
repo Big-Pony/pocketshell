@@ -60,6 +60,23 @@ type InputCb = (sessionId: string) => void;
 type UpdateCb = (u: { phase: string; pct?: number; message?: string; version?: string }) => void;
 type NotificationCb = (m: { sessionId: string; title: string; body: string; ts: number }) => void;
 
+/**
+ * 分割条要的链路指标。全部来自既有数据流的记账：延迟复用心跳（ping/pong 本就
+ * 在跑），吞吐是收发帧的字节累加——不新增协议、不新增定时器、不新增采样。
+ * latency 为 null 表示当前无有效样本（刚连上 / 连丢两个心跳周期 / 已断线）。
+ */
+export interface LinkMetrics {
+  latency: number | null;
+  /** 结算窗口内收到的密文字节数（链路实际下行流量） */
+  rxBytes: number;
+  /** 结算窗口内发出的密文字节数（上行只有按键，暂不显示，留作日后用） */
+  txBytes: number;
+  /** 窗口时长，供 formatRate 算速率 */
+  elapsedMs: number;
+}
+
+type MetricsCb = (m: LinkMetrics) => void;
+
 export class Connection {
   private ws!: WebSocketLike;
   private open = false;
@@ -99,6 +116,23 @@ export class Connection {
   private hbTimer?: number;
   private lastRx = 0;
 
+  // ---- 链路指标（分割条）----
+  private metricsCbs: MetricsCb[] = [];
+  // 只跟踪最近一个 ping 的时间戳，不做队列。协议里 ping/pong 不带 id，两者
+  // 在线路上无法一一对应，所以用「未回应 ping 计数」判定样本是否可信：
+  // 计数为 1 时收到的 pong 必然对应 pingSentAt，算出的 RTT 有效；计数 >1 说明
+  // 这个 pong 属于某个更早的、时间戳已被覆盖的 ping，样本作废——否则会把
+  // 「最近一次 ping 至今的时长」当成 RTT 显示出一个明显偏小的错误数字。
+  private pingSentAt: number | null = null;
+  private pingsOutstanding = 0;
+  private latency: number | null = null;
+  // 连续多少个心跳周期没拿到 RTT 样本。超过 2 个周期就清空，避免长期显示
+  // 一个早已过期的数字。
+  private missedPongs = 0;
+  private rxBytes = 0;
+  private txBytes = 0;
+  private windowStart = 0;
+
   private channel!: SecureChannel;
   private makeChannel: () => SecureChannel;
   private handshakeTimeoutMs: number;
@@ -121,17 +155,56 @@ export class Connection {
     for (const cb of this.statusCbs) cb(s);
   }
 
+  /** 订阅链路指标（延迟 / 吞吐）。每个心跳周期结算一次。 */
+  onMetrics(cb: MetricsCb): () => void {
+    this.metricsCbs.push(cb);
+    return () => { this.metricsCbs = this.metricsCbs.filter((c) => c !== cb); };
+  }
+
+  /** 结算并广播一个窗口，然后清零重新计。心跳定时器与断线时各调一次。 */
+  private emitMetrics(): void {
+    const now = this.sched.now();
+    const m: LinkMetrics = {
+      latency: this.latency,
+      rxBytes: this.rxBytes,
+      txBytes: this.txBytes,
+      elapsedMs: Math.max(0, now - this.windowStart),
+    };
+    this.rxBytes = 0;
+    this.txBytes = 0;
+    this.windowStart = now;
+    for (const cb of this.metricsCbs) cb(m);
+  }
+
+  private resetMetrics(): void {
+    this.pingSentAt = null;
+    this.pingsOutstanding = 0;
+    this.latency = null;
+    this.missedPongs = 0;
+    this.rxBytes = 0;
+    this.txBytes = 0;
+    this.windowStart = this.sched.now();
+  }
+
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.lastRx = this.sched.now();
+    this.resetMetrics();
     this.hbTimer = this.sched.setInterval(() => {
       if (this.sched.now() - this.lastRx > this.livenessMs) {
         this.stopHeartbeat();
         this.ws.close();
         return;
       }
+      // 上一轮的 ping 没等到 pong：连丢两轮就把延迟清空（宁可不显示，也不
+      // 显示一个过期数字）。
+      if (this.pingsOutstanding > 0 && ++this.missedPongs >= 2) this.latency = null;
+      // 心跳周期即结算窗口——复用同一个定时器，不新增 timer。
+      this.emitMetrics();
       if (this.open && this.channel.state === "transport") {
-        this.ws.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "ping" })))));
+        this.pingSentAt = this.sched.now();
+        this.pingsOutstanding++;
+        this.send({ type: "ping" });
       }
     }, this.heartbeatMs);
   }
@@ -238,6 +311,8 @@ export class Connection {
       if (socket !== this.ws) return;
       this.lastRx = this.sched.now();
       const bytes = new Uint8Array(ev.data);
+      // 下行记账：密文帧长度 = 链路实际流量（含握手帧，它也确实占带宽）。
+      this.rxBytes += bytes.byteLength;
       const r = this.channel.receive(bytes);
       if (r.status === "fail") { this.clearHsTimer(); this.ws.close(); return; }
       if (r.status === "handshake") {
@@ -255,11 +330,11 @@ export class Connection {
 
   private flushAndRestore(socket: WebSocketLike): void {
     const pending = this.queue; this.queue = [];
-    for (const raw of pending) socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(raw))));
+    for (const raw of pending) this.sendRaw(socket, raw);
     for (const id of this.attached) {
-      socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 })))));
+      this.sendRaw(socket, encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 }));
     }
-    socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "listSessions" })))));
+    this.sendRaw(socket, encode({ type: "listSessions" }));
   }
 
   private onEstablished(socket: WebSocketLike): void {
@@ -271,7 +346,7 @@ export class Connection {
     const pair = this.getPairing();
     if (pair) {
       this.pairing = true;
-      socket.send(this.channel.send(new Uint8Array(new TextEncoder().encode(encode({ type: "pair", code: pair.code, deviceName: pair.deviceName })))));
+      this.sendRaw(socket, encode({ type: "pair", code: pair.code, deviceName: pair.deviceName }));
       this.setStatus("connecting"); // stay connecting until paired
       return;
     }
@@ -285,6 +360,10 @@ export class Connection {
     this.rejectAllPending();
     this.open = false;
     this.pairing = false;
+    // 断线期间延迟与吞吐显示为空（不是 `--` 占位）：先清零再广播一次，
+    // 订阅者立刻看到空值，不会停在断线前的最后一个数字上。
+    this.resetMetrics();
+    this.emitMetrics();
     // A pairing attempt that keeps closing before the handshake completes is
     // being rejected by the agent (closed pairing window / wrong agent key) —
     // the agent rejects at the handshake with no pair_failed message, so this
@@ -348,6 +427,16 @@ export class Connection {
       }
     } else if (msg.type === "rpcChunk") {
       this.handleRpcChunk(msg);
+    } else if (msg.type === "pong") {
+      // 恰好一个未回应的 ping 时，这个 pong 必然是它的回应，RTT 可信。
+      // 多于一个说明有 pong 迟到，无法判断这个 pong 对应哪次 ping，样本作废
+      // （只消账，不更新数字）。
+      if (this.pingsOutstanding === 1 && this.pingSentAt !== null) {
+        this.latency = Math.max(0, this.sched.now() - this.pingSentAt);
+        this.missedPongs = 0;
+      }
+      if (this.pingsOutstanding > 0) this.pingsOutstanding--;
+      if (this.pingsOutstanding === 0) this.pingSentAt = null;
     } else if (msg.type === "update") {
       const u = { phase: msg.phase, pct: msg.pct, message: msg.message, version: msg.version };
       for (const cb of this.updateCbs) cb(u);
@@ -405,10 +494,20 @@ export class Connection {
   private send(msg: ClientMsg): void {
     const raw = encode(msg);
     if (this.open && this.channel && this.channel.state === "transport") {
-      this.ws.send(this.channel.send(new Uint8Array(new TextEncoder().encode(raw))));
+      this.sendRaw(this.ws, raw);
     } else {
       this.queue.push(raw);
     }
+  }
+
+  /**
+   * 唯一的出站口：加密 + 发送 + 上行字节记账。所有 socket.send 都走这里，
+   * 免得日后新增一条消息路径时又漏了记账。
+   */
+  private sendRaw(socket: WebSocketLike, raw: string): void {
+    const frame = this.channel.send(new Uint8Array(new TextEncoder().encode(raw)));
+    this.txBytes += frame.byteLength;
+    socket.send(frame);
   }
 
   newSession(name: string, opt: { cmd?: string; cwd?: string; kind?: "tmux" | "shell" } = {}): void {

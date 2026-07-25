@@ -168,7 +168,7 @@
     padding: 3px 8px;
     font-size: 0.68rem;
   }
-  .dm-row button:not(:disabled):active { background: var(--red); color: #fff; border-color: var(--red); }
+  .dm-row button:not(:disabled):active { background: var(--red); color: var(--on-danger); border-color: var(--red); }
   .dm-row button:disabled { opacity: 0.4; }
   .dm-empty { color: var(--dim); font-size: 0.72rem; padding: 10px 0; text-align: center; }
 </style>

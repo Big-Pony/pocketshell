@@ -83,6 +83,11 @@
 
   function autoFocus(node: HTMLElement) { node.focus(); }
 
+  // Hoisted out of the tab loop on purpose: `{#each tabs as t}` shadows the
+  // svelte-i18n `t` store, so `$t(...)` inside the loop body resolves to the
+  // loop variable, not the store. Deriving it here keeps locale reactivity.
+  const closeLabel = $derived($t('tabs.ariaClose'));
+
   let strip = $state<HTMLElement | null>(null);
   // First scroll (e.g. a restored far-right active tab on mount) jumps instantly;
   // later scrolls animate.
@@ -121,6 +126,16 @@
           {#if t.shell}<span class="sh-glyph mono">❯</span>{:else}<span class="dot {stateDotClass(t.state)}"></span>{/if}
         {/if}
         <span class="name">{t.title}</span>
+        {#if t.id === activeId}
+          <!-- 显式关闭钮：降低对三击手势的依赖，手势 FSM 原样保留。
+               stopPropagation 让它不进 stepTap，否则一次点击会既开确认框
+               又被记成一次 tap。 -->
+          <span class="x mono" role="button" tabindex="0" aria-label={closeLabel}
+            onpointerdown={(e) => e.stopPropagation()}
+            onpointerup={(e) => { e.stopPropagation(); onTabCancel(); openClose(t, e.timeStamp); }}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openClose(t, e.timeStamp); } }}
+          >×</span>
+        {/if}
       </button>
     {/each}
   </nav>
@@ -173,35 +188,54 @@
   /* flex:1 + min-width:0 so this fills .tabs-wrap and lets .strip actually
      overflow-scroll; without it the content width pushes .ops (the +) past the
      parent's overflow:hidden edge and off-screen. */
-  .toptabs { display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 2px 12px 10px; flex: 1; min-width: 0; width: 100%; }
-  .strip { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
+  /* 索引卡片式 tab：卡片底边压在 .toptabs 的下边线上，激活态与终端底同色，
+     视觉上「卡片连着终端」。align-items:flex-end 让卡片贴着这条线长上去。 */
+  .toptabs {
+    display: flex; align-items: flex-end; gap: 3px;
+    background: transparent; padding: 5px 10px 0;
+    border-bottom: 1px solid var(--tab-line);
+    flex: 1; min-width: 0; width: 100%;
+  }
+  .strip { display: flex; align-items: flex-end; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
   .strip::-webkit-scrollbar { display: none; }
   .ops { flex: 0 0 auto; }
   .tab {
-    flex: none; display: flex; align-items: center; gap: 6px;
-    padding: 6px 13px; border: 1px solid var(--tab-line);
-    border-radius: 999px; background: var(--tab-bg); color: var(--dim);
-    font-size: 0.74rem; white-space: nowrap; scroll-snap-align: start;
+    flex: none; display: flex; align-items: center; gap: 7px;
+    padding: 6px 13px 7px; border: 1px solid transparent; border-bottom: none;
+    border-radius: 6px 6px 0 0; background: var(--tab-bg); color: var(--dim);
+    font-size: 0.72rem; white-space: nowrap; scroll-snap-align: start;
+    position: relative; top: 1px;   /* 压住下边线，卡片与终端连成一体 */
     transition: background 0.15s, color 0.15s;
     /* Multi-tap must not raise the phone's native selection / callout menu. */
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
   }
-  .tab.active { background: var(--tab-active-bg); color: var(--tab-active-text); border-color: var(--tab-active-line); font-weight: 600; }
+  .tab.active { background: var(--tab-active-bg); color: var(--tab-active-text); border-color: var(--tab-active-line); }
+  /* 激活态顶部 2px 橙线 */
+  .tab.active::after {
+    content: ""; position: absolute; top: 0; left: 10px; right: 10px;
+    height: 2px; border-radius: 0 0 2px 2px; background: var(--tab-idx-top);
+  }
   .tab.closed { opacity: 0.7; }
+  .x {
+    color: var(--dim); font-size: 0.85rem; line-height: 1;
+    margin: -2px -6px -2px 0; padding: 3px 5px;
+  }
+  .x:active { color: var(--text); }
   .dot { width: 6px; height: 6px; border-radius: 50%; }
-  .dot-run { background: var(--ok); animation: pulse 1.4s infinite; }
+  .dot-run { background: var(--ok); box-shadow: 0 0 5px var(--ok); animation: pulse 1.4s infinite; }
   .dot-wait { background: var(--amber); animation: pulse 1s infinite; }
   .dot-done { background: var(--dimmer); }
   @keyframes pulse { 50% { opacity: 0.35; } }
   .name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
   .add {
-    flex: none; background: transparent; border: 1px dashed var(--line-strong);
-    border-radius: 50%; color: var(--dim); width: 30px; height: 30px;
-    padding: 0; font-size: 1rem; line-height: 1;
+    flex: none; background: transparent; border: 0;
+    color: var(--dim); width: 30px; height: 30px;
+    padding: 0 0 6px; font-size: 1rem; line-height: 1;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
   }
-  .add:active { background: var(--keyhi); }
+  .add:active { color: var(--text); }
 
   .overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: flex; justify-content: center; align-items: flex-start; }
   .overlay .dlg { margin-top: 14vh; }

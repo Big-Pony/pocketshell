@@ -319,6 +319,17 @@ export default {
     closeFileHint: "Closes this file preview tab.",
     closeDirty: "This file has unsaved changes; closing will lose them.",
   },
+  statusbar: {
+    aria: {
+      divider: "Split handle: drag to resize the panes, double-tap for fullscreen",
+      branch: "Current Git branch",
+      latency: "Connection latency",
+      throughput: "Download rate",
+    },
+    tip: {
+      fullscreen: "Double-tap here for fullscreen",
+    },
+  },
   git: {
     notRepo: "The project root is not a Git repository",
     loadFailed: "Failed to load",

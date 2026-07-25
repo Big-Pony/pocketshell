@@ -19,9 +19,11 @@
 }
 
 /* ==========================================================================
-   双主题设计令牌（2026-07-17）
-   - :root                       → 主题 A「深色 IDE」（默认）
-   - :root[data-theme="light"]   → 主题 B「浅色极简」
+   双主题设计令牌
+   - :root                       → 主题 A「深色 · 复古仪表（石墨橙）」（默认）
+   - :root[data-theme="light"]   → 主题 B「浅色 · 暖白仪表」
+   2026-07-25 起走「石墨橙」设计语言（方向 18）：石墨机身底 + 纯橙主色 +
+   LED 绿状态灯。令牌名一律不动、只换值，因此换肤对组件是零改动的。
    新组件规则：
    1. 只允许引用变量，禁止写死颜色/阴影；两套主题都必须好看。
    2. 颜色用语义令牌（--accent 主色 / --ok 成功运行 / --primary-* 实心主按钮），
@@ -30,64 +32,71 @@
    4. 终端区固定深色（--term-*）；代码预览/编辑器跟随主题，统一走 --code-* 令牌，禁止写死颜色。
    ========================================================================== */
 :root {
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
+  /* 仪表感偏硬朗：卡片/面板统一 6px，不再用 10px 的圆润角 */
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
   --safe-bottom: env(safe-area-inset-bottom);
   --safe-top: env(safe-area-inset-top);
 
-  /* ---- 主题 A：深色 IDE（默认） ---- */
-  --bg: #0f131b;            /* 应用底 */
-  --bg-deep: #0a0d13;       /* 最深层（底栏等） */
-  --panel: #151a24;         /* 面板/卡片 */
-  --panel2: #1b2230;        /* 抬升面 */
-  --elev: #222b3b;          /* 更抬升（激活态） */
-  --line: #232c3c;
-  --line-soft: #1c2330;
-  --line-strong: #33404c;
-  --text: #d9e0ea;
-  --dim: #7e8999;
-  --dimmer: #525d6f;
+  /* ---- 主题 A：深色 · 复古仪表（默认） ---- */
+  --bg: #131416;            /* 石墨机身底 */
+  --bg-deep: #0c0d0e;       /* 最深层（底栏等） */
+  --panel: #1b1d20;         /* 面板/卡片/终端底 */
+  --panel2: #24272b;        /* 抬升面（键帽） */
+  --elev: #2c3035;          /* 更抬升（激活态） */
+  --elev2: #2c3035;         /* 键帽第二层抬升 */
+  --line: rgba(228, 229, 225, 0.07);
+  --line-soft: rgba(228, 229, 225, 0.05);
+  --line-strong: rgba(228, 229, 225, 0.13);
+  --text: #e4e5e1;          /* 暖白（非冷蓝白） */
+  --dim: #8f938e;
+  --dimmer: #5c605b;
 
-  /* 主色（品牌/主操作） */
-  --accent: #7c8cf8;
-  --accent-soft: rgba(124, 140, 248, 0.14);
-  --accent-text: #aab4fb;
-  --on-accent: #0d1020;
+  /* 机身顶部暖光：极弱，只为让石墨底不死板。刻意不复用 --accent-soft
+     ——那是「主色弱底」（.12），铺满机身会把顶栏/tab 栏染成橙褐色。 */
+  --shell-glow: rgba(255, 77, 0, 0.04);
+
+  /* 主色（品牌/主操作）：纯橙 */
+  --accent: #ff4d00;
+  --accent-soft: rgba(255, 77, 0, 0.12);
+  --accent-text: #ff7a3d;
+  --on-accent: #160800;
   /* 实心主按钮（确认/管理/发送） */
   --primary-bg: var(--accent);
   --primary-text: var(--on-accent);
 
   /* 状态色 */
-  --ok: #3ecf94;            /* 运行中/已连接 */
-  --amber: #e5b567;         /* 等待输入/警告 */
-  --red: #e5646b;           /* 危险/断开 */
-  --cyan: #56c8dc;
-  --blue: #6ea8fe;
-  --ok-soft: rgba(62, 207, 148, 0.10);
-  --ok-line: rgba(62, 207, 148, 0.24);
-  --amber-soft: rgba(229, 181, 103, 0.12);
-  --red-soft: rgba(229, 100, 107, 0.12);
-  --red-dark: #3a2a20;      /* 断线横幅底 */
-  --banner-line: #55402c;
+  --ok: #35d158;            /* 运行中/已连接（LED 绿） */
+  --amber: #e8b04b;         /* 等待输入/警告 */
+  --red: #e5564d;           /* 危险/断开 */
+  --cyan: #5bbfc9;
+  --blue: #6b9fe8;
+  --ok-soft: rgba(53, 209, 88, 0.11);
+  --ok-line: rgba(53, 209, 88, 0.26);
+  --amber-soft: rgba(232, 176, 75, 0.12);
+  --red-soft: rgba(229, 86, 77, 0.12);
+  --on-danger: #ffffff;     /* 红色实心按钮上的字（两版均为白） */
+  --red-dark: #2e1c14;      /* 断线横幅底 */
+  --banner-line: #4d3420;
 
   /* 兼容别名：历史代码大量引用 --teal（运行/连接语义=绿） */
   --teal: var(--ok);
-  --teal-dark: #06231e;
+  --teal-dark: #0b2415;
 
   /* 终端区（两版均深色） */
-  --term-bg: #0c1017;
-  --term-text: #c6d0dc;
-  --term-dim: #6b7686;
+  --term-bg: #1b1d20;
+  --term-text: #cfd2cd;
+  --term-dim: #5c605b;
 
   /* 代码区（预览+编辑器）语法配色 — 跟随主题切换；终端仍固定 --term-* */
-  --code-bg: #0c1017;
-  --code-fg: #c6d0dc;
-  --code-gutter: #6b7686;
+  --code-bg: #1b1d20;
+  --code-fg: #cfd2cd;
+  --code-gutter: #5c605b;
   --code-active-line: rgba(255, 255, 255, 0.04);
-  --code-selection: rgba(124, 140, 248, 0.28);
-  --code-cursor: #7c8cf8;
+  --code-selection: rgba(255, 77, 0, 0.26);
+  --code-cursor: #ff4d00;
   --code-keyword: #c678dd;
   --code-string: #98c379;
   --code-comment: #5c6370;
@@ -97,43 +106,57 @@
   --code-attr: #56b6c2;
 
   /* 键盘键帽 */
-  --key: #1b2230;
-  --key-bg-image: linear-gradient(180deg, #202839, #1b2230);
-  --keyhi: #2d3a46;
-  --key-line: #29334a;
+  --key: #24272b;
+  --key-bg-image: none;
+  --keyhi: #2c3035;
+  --key-line: rgba(0, 0, 0, 0.4);
   --key-text: var(--text);
-  --key-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
-  --key-mod-bg: #12161f;
-  --key-enter-bg: linear-gradient(180deg, #8f9df9, #6c7cf0);
-  --key-enter-text: #0d1020;
-  --key-enter-line: #8f9df9;
+  --key-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.42);
+  --key-inset: inset 0 1px 0 rgba(228, 229, 225, 0.05);  /* 键帽顶部内高光 */
+  --key-mod-bg: #17181b;
+  --key-enter-bg: linear-gradient(180deg, #ff6a24, #f04400);
+  --key-enter-text: #ffffff;
+  --key-enter-line: rgba(255, 77, 0, 0.5);
+  --key-enter-shadow: 0 2px 0 #8a2800;
 
   /* 分段控件（键盘子 tab / 布局切换 / 主题切换） */
-  --seg-bg: var(--panel);
-  --seg-line: var(--line-soft);
-  --seg-active-bg: var(--elev);
+  --seg-bg: var(--bg);
+  --seg-line: var(--line);
+  --seg-active-bg: var(--elev2);
   --seg-active-text: var(--text);
+  --seg-active-ring: inset 0 0 0 1px var(--line-strong);
   --seg-shadow: none;
 
-  /* 上区 tab */
+  /* 上区 tab —— 索引卡片式：激活态与终端底同色，视觉上卡片连着终端 */
   --tab-bg: transparent;
-  --tab-line: var(--line-soft);
-  --tab-active-bg: var(--accent-soft);
-  --tab-active-text: var(--accent-text);
-  --tab-active-line: rgba(124, 140, 248, 0.35);
+  --tab-line: var(--line-strong);
+  --tab-idx-bg: var(--panel);
+  --tab-idx-line: var(--line-strong);
+  --tab-idx-top: var(--accent);
+  --tab-active-bg: var(--tab-idx-bg);
+  --tab-active-text: var(--text);
+  --tab-active-line: var(--tab-idx-line);
+
+  /* 信息分割条（StatusBar） */
+  --bar-bg: var(--bg);
+  --bar-text: var(--dimmer);
+  --bar-grip: var(--elev2);
+
+  /* 品牌高亮字色（pocket|shell 的 shell） */
+  --brand-sig: var(--accent);
 
   /* 底栏 */
-  --bb-bg: var(--bg-deep);
-  --bb-line: var(--line-soft);
-  --bb-active: var(--accent-text);
+  --bb-bg: var(--bg);
+  --bb-line: var(--line);
+  --bb-active: var(--accent);
   --bb-indicator: var(--accent);
 
   /* 弹层 */
-  --overlay-bg: rgba(7, 9, 11, 0.72);
-  --dlg-bg: #1b2230;
-  --menu-bg: #1e2936;
-  --pop-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --toast-bg: #222b3b;
+  --overlay-bg: rgba(6, 7, 8, 0.72);
+  --dlg-bg: #24272b;
+  --menu-bg: #24272b;
+  --pop-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --toast-bg: #2c3035;
   --toast-text: var(--text);
 
   /* 断线横幅 */
@@ -141,46 +164,52 @@
   --banner-text: var(--amber);
 }
 
-/* ---- 主题 B：浅色极简 ---- */
+/* ---- 主题 B：浅色 · 暖白仪表 ---- */
 :root[data-theme="light"] {
-  --bg: #f5f5f2;            /* 纸白 */
-  --bg-deep: #efefeb;
+  --bg: #f7f6f3;            /* 暖纸白 */
+  --bg-deep: #efeee9;
   --panel: #ffffff;
-  --panel2: #f0f0ec;
+  --panel2: #f2f1ec;
   --elev: #ffffff;
-  --line: #e5e5e0;
-  --line-soft: #ececea;
-  --line-strong: #d0d0ca;
-  --text: #1b1f26;
-  --dim: #6c727b;
-  --dimmer: #a2a8b0;
+  --elev2: #ffffff;
+  --line: #e6e4dd;
+  --line-soft: #edebe4;
+  --line-strong: #d4d2c9;
+  --text: #1a1a18;
+  --dim: #6d706a;
+  --dimmer: #a3a49c;
 
-  --accent: #2f6bde;
-  --accent-soft: rgba(47, 107, 222, 0.09);
-  --accent-text: #2f6bde;
+  /* 暖白底上铺任何橙渐变都会显脏，浅色机身不要暖光 */
+  --shell-glow: transparent;
+
+  /* 浅底降明度保对比度；--accent 只用于文字/边框/指示器 */
+  --accent: #e04000;
+  --accent-soft: rgba(224, 64, 0, 0.09);
+  --accent-text: #c23800;
   --on-accent: #ffffff;
-  /* 浅色版实心主按钮 = 近黑 */
-  --primary-bg: #1b1f26;
+  /* 浅色版实心主按钮 = 近黑（浅底上大面积纯橙实心会刺眼） */
+  --primary-bg: #1a1a18;
   --primary-text: #ffffff;
 
-  --ok: #1a9e6b;
-  --amber: #c98a1b;
-  --red: #d5494d;
+  --ok: #1a9e5c;
+  --amber: #c4880f;
+  --red: #d1443c;
   --cyan: #0e8fa8;
   --blue: #2f6bde;
-  --ok-soft: rgba(26, 158, 107, 0.08);
-  --ok-line: rgba(26, 158, 107, 0.25);
-  --amber-soft: rgba(201, 138, 27, 0.10);
-  --red-soft: rgba(213, 73, 77, 0.10);
+  --ok-soft: rgba(26, 158, 92, 0.09);
+  --ok-line: rgba(26, 158, 92, 0.25);
+  --amber-soft: rgba(196, 136, 15, 0.10);
+  --red-soft: rgba(209, 68, 60, 0.10);
+  --on-danger: #ffffff;
   --red-dark: #fde8e7;
   --banner-line: #f0d3d2;
 
   --teal-dark: #e6f5ef;
 
   /* 终端区保持深色（同主题 A） */
-  --term-bg: #0e1219;
-  --term-text: #c6d0dc;
-  --term-dim: #6b7686;
+  --term-bg: #16181a;
+  --term-text: #cfd2cd;
+  --term-dim: #5c605b;
 
   /* 代码区（预览+编辑器）语法配色 — 浅色主题 */
   --code-bg: #ffffff;
@@ -199,37 +228,49 @@
 
   --key: #ffffff;
   --key-bg-image: none;
-  --keyhi: #f0f0ec;
-  --key-line: #dcdcd7;
+  --keyhi: #f2f1ec;
+  --key-line: #dcdad2;
   --key-text: var(--text);
   --key-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.08);
-  --key-mod-bg: #f3f3ef;
-  --key-enter-bg: #1b1f26;
+  --key-inset: none;
+  --key-mod-bg: #f2f1ec;
+  --key-enter-bg: #1a1a18;
   --key-enter-text: #ffffff;
-  --key-enter-line: #1b1f26;
+  --key-enter-line: #1a1a18;
+  --key-enter-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.18);
 
-  --seg-bg: #ebebe7;
+  --seg-bg: #eceae4;
   --seg-line: transparent;
   --seg-active-bg: #ffffff;
   --seg-active-text: var(--text);
+  --seg-active-ring: none;
   --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 
-  --tab-bg: var(--panel);
+  --tab-bg: transparent;
   --tab-line: var(--line);
-  --tab-active-bg: var(--text);
-  --tab-active-text: #ffffff;
-  --tab-active-line: var(--text);
+  --tab-idx-bg: var(--panel);
+  --tab-idx-line: var(--line);
+  --tab-idx-top: var(--accent);
+  --tab-active-bg: var(--tab-idx-bg);
+  --tab-active-text: var(--text);
+  --tab-active-line: var(--tab-idx-line);
+
+  --bar-bg: var(--bg-deep);
+  --bar-text: var(--dimmer);
+  --bar-grip: #d8d7d2;
+
+  --brand-sig: var(--accent);
 
   --bb-bg: var(--panel);
   --bb-line: var(--line);
-  --bb-active: var(--text);
-  --bb-indicator: var(--text);
+  --bb-active: var(--accent);
+  --bb-indicator: var(--accent);
 
-  --overlay-bg: rgba(27, 31, 38, 0.35);
+  --overlay-bg: rgba(26, 26, 24, 0.35);
   --dlg-bg: #ffffff;
   --menu-bg: #ffffff;
   --pop-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
-  --toast-bg: #1b1f26;
+  --toast-bg: #1a1a18;
   --toast-text: #ffffff;
 
   --banner-bg: #fde8e7;

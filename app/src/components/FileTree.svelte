@@ -453,7 +453,7 @@
   .dlg-hint { font-size: 0.68rem; color: var(--amber); margin-bottom: 16px; }
   .dlg-btns { display: flex; gap: 8px; }
   .dlg-btns button { flex: 1; padding: 9px 0; border-radius: var(--radius-md); border: 1px solid var(--line); font-size: 0.75rem; background: var(--key); color: var(--text); }
-  .dlg-btns button.danger { background: var(--red); color: #fff; border-color: transparent; }
+  .dlg-btns button.danger { background: var(--red); color: var(--on-danger); border-color: transparent; }
   .dlg-btns button.danger.armed { outline: 2px solid var(--amber); }
   .nf-input { width: 100%; box-sizing: border-box; margin-bottom: 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text); padding: 8px 10px; font-size: 0.75rem; }
   .dlg-btns button.ok { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; font-weight: 700; }

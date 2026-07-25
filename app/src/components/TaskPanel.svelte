@@ -200,7 +200,7 @@
     background: var(--key);
     color: var(--text);
   }
-  .dlg-btns button.danger { background: var(--red); color: #fff; border-color: transparent; }
+  .dlg-btns button.danger { background: var(--red); color: var(--on-danger); border-color: transparent; }
 
   .tp { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .row-wrap { display: flex; align-items: center; }
