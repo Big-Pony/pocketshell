@@ -64,3 +64,11 @@ test("formatBranch renders no branch as empty so the group hides entirely", () =
   expect(formatBranch("")).toBe("");
   expect(formatBranch("   ")).toBe("");
 });
+
+test("formatRate rounds heartbeat-only traffic down to a clean 0KB/s", () => {
+  // 心跳帧本身几十字节，摊到 10s 窗口约 0.005KB/s。空闲时该显示干净的
+  // 0KB/s，而不是一个永远挂着的 0.0KB/s。
+  expect(formatRate(60, 10_000)).toBe("0KB/s");
+  // 但真有小流量时仍然看得见
+  expect(formatRate(600, 10_000)).toBe("0.1KB/s");
+});

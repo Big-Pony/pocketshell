@@ -29,9 +29,11 @@ export function formatRate(bytes: number, elapsedMs: number): string {
   const perSec = Math.max(0, bytes) / (elapsedMs / 1000);
   if (perSec >= 1024 * 1024) return `${(perSec / (1024 * 1024)).toFixed(1)}MB/s`;
   if (perSec >= 1024) return `${Math.round(perSec / 1024)}KB/s`;
-  // 1KB/s 以下给一位小数，免得一切都显示成 0KB/s 看不出有没有流量
+  // 1KB/s 以下给一位小数，免得小流量一律显示成 0KB/s 看不出有没有数据。
+  // 但心跳本身也占几十字节，摊到 10s 窗口是 0.0x KB/s —— 真正空闲时该显示
+  // 干净的 `0KB/s`，而不是一个永远挂着的 `0.0KB/s`。
   const kb = perSec / 1024;
-  return `${kb === 0 ? "0" : kb.toFixed(1)}KB/s`;
+  return kb < 0.05 ? "0KB/s" : `${kb.toFixed(1)}KB/s`;
 }
 
 /**
