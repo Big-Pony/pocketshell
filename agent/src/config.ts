@@ -10,6 +10,7 @@ import { createPairing, type Pairing } from "./pairing";
 import { createRateLimiter, type RateLimiter } from "./rate-limit";
 import { createAudit, fileAuditWriter, type Audit } from "./audit";
 import { openSnippetStore, type SnippetStore } from "./snippet-store";
+import { openHintStore, type HintStore } from "./hint-store";
 
 export interface AgentConfig {
   listen: { host: string; port: number };
@@ -26,6 +27,7 @@ export interface AgentConfig {
   rateLimiter: RateLimiter;
   audit: Audit;
   snippets: SnippetStore;
+  hints: HintStore;
   tmpDir: string;
   adminEnabled: boolean;
   update: { enabled: boolean; repo: string | null };
@@ -153,6 +155,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   // hold no Noise identity, so they authenticate with this bearer token instead).
   const notifyToken = loadOrCreateNotifyToken(keyDir);
   const snippets = openSnippetStore(join(keyDir, "pocketshell.db"));
+  const hints = openHintStore(join(keyDir, "pocketshell.db"));
   const tmpDir = join(keyDir, "tmp");
   mkdirSync(tmpDir, { recursive: true });
 
@@ -183,6 +186,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     rateLimiter,
     audit,
     snippets,
+    hints,
     tmpDir,
     adminEnabled,
     update,

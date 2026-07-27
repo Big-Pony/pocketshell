@@ -314,6 +314,15 @@ export function startServer(deps: Deps = {}) {
     else for (const conn of conns.values()) sendSecure(conn, msg);
   };
 
+  // 需求 5 限额。超限整批拒绝而不静默截断——截断后的命令语义可能完全不同
+  // （`rm -rf /tmp/x` 截成 `rm -rf /`），必须让用户知道。
+  const HINT_MAX_LEN = 200;      // 单条字符数
+  const HINT_MAX_BATCH = 500;    // 单次提交条数
+  const HINT_MAX_TOTAL = 2000;   // 库总量
+
+  // hints 变更只广播一个无载荷通知，各端自行 rpc("hints.list") 重拉全量。
+  const broadcastHintsChanged = () => broadcastAll({ type: "hintsChanged" });
+
   // update.apply orchestration: download+verify -> (macOS) re-sign -> smoke
   // check -> atomic same-dir swap -> restart. `applying` gates concurrent
   // triggers; the promise is fire-and-forget (the RPC caller only learns
@@ -535,12 +544,48 @@ export function startServer(deps: Deps = {}) {
       case "removeSnippet":
         if (config.snippets.remove(msg.id)) pushSnippets();
         break;
+      case "addHints": {
+        const texts = Array.isArray(msg.texts) ? msg.texts.filter((t): t is string => typeof t === "string") : [];
+        if (texts.length > HINT_MAX_BATCH) {
+          sendSecure(conn, { type: "error", code: "hints_limit", message: `batch > ${HINT_MAX_BATCH}` });
+          break;
+        }
+        if (texts.some((t) => t.length > HINT_MAX_LEN)) {
+          sendSecure(conn, { type: "error", code: "hints_limit", message: `entry > ${HINT_MAX_LEN} chars` });
+          break;
+        }
+        if (config.hints.count() + texts.length > HINT_MAX_TOTAL) {
+          sendSecure(conn, { type: "error", code: "hints_limit", message: `total > ${HINT_MAX_TOTAL}` });
+          break;
+        }
+        try {
+          if (config.hints.addMany(texts).length > 0) broadcastHintsChanged();
+        } catch (e) { sendSecure(conn, { type: "error", code: "hints_add_failed", message: String(e) }); }
+        break;
+      }
+      case "updateHint": {
+        if (typeof msg.text !== "string" || msg.text.length > HINT_MAX_LEN) {
+          sendSecure(conn, { type: "error", code: "hints_limit", message: `entry > ${HINT_MAX_LEN} chars` });
+          break;
+        }
+        if (config.hints.update(msg.id, msg.text)) broadcastHintsChanged();
+        else sendSecure(conn, { type: "error", code: "hint_not_found", message: msg.id });
+        break;
+      }
+      case "removeHint":
+        if (config.hints.remove(msg.id)) broadcastHintsChanged();
+        break;
+      case "clearHints":
+        config.hints.clear();
+        broadcastHintsChanged();
+        break;
       case "rpc": {
         const { id, method, params } = msg;
         const p = (params ?? {}) as any;
         try {
           let result: unknown;
           switch (method) {
+            case "hints.list": result = { items: config.hints.list().map((r) => ({ id: r.id, text: r.text })) }; break;
             case "fs.tree": result = fsTree(String(p.path)); break;
             case "fs.read": result = fsRead(String(p.path)); break;
             case "fs.diff": result = fsDiff(String(p.path), p.cwd ? String(p.cwd) : undefined); break;
