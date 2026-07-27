@@ -14,7 +14,7 @@
   import BottomBar from "./components/BottomBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import type { LinkMetrics } from "./lib/connection";
-  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, type TopTab } from "./lib/top-tabs";
+  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, groupByKind, type TopTab } from "./lib/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -342,13 +342,16 @@
   const topSessions = $derived(
     sessions.filter((s) => !backgrounded.has(s.name) && (s.attached || s.closed))
   );
-  const topOrder = $derived(
-    visibleOrder(
+  const topOrder = $derived.by(() => {
+    const base = visibleOrder(
       tabOrder,
       new Set([...topSessions.map((s) => s.name), ...fileTabs.map((t) => t.id)]),
       topSessions.map((s) => s.name),
-    )
-  );
+    );
+    return settings.groupTabsByType
+      ? groupByKind(base, new Set(fileTabs.map((t) => t.id)))
+      : base;
+  });
   const activeTopId = $derived(activeTop && topOrder.includes(activeTop) ? activeTop : (activeId || topOrder[0] || ""));
   const topTabsView = $derived(topOrder.map((id) => {
     if (id.startsWith("file:")) {

@@ -21,8 +21,8 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", fontSize: 14, vibrate: "off", theme: "light", language: "en" }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: "off", theme: "light", language: "en" });
+  saveSettings({ layout: "win", fontSize: 14, vibrate: "off", theme: "light", language: "en", groupTabsByType: false }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: "off", theme: "light", language: "en", groupTabsByType: false });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
@@ -117,4 +117,20 @@ test("detectLanguage follows navigator.language (zh* -> zh, else en)", () => {
   } finally {
     if (desc) Object.defineProperty(Navigator.prototype, "language", desc);
   }
+});
+
+test("groupTabsByType 默认为 false", () => {
+  expect(loadSettings(memStore()).groupTabsByType).toBe(false);
+});
+
+test("groupTabsByType 可持久化并读回", () => {
+  const store = memStore();
+  saveSettings({ ...DEFAULT_SETTINGS, groupTabsByType: true }, store);
+  expect(loadSettings(store).groupTabsByType).toBe(true);
+});
+
+test("groupTabsByType 非布尔脏数据回落 false", () => {
+  const store = memStore();
+  store.setItem("ps.settings", JSON.stringify({ groupTabsByType: "yes" }));
+  expect(loadSettings(store).groupTabsByType).toBe(false);
 });

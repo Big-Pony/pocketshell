@@ -28,6 +28,7 @@ export interface Settings {
   vibrate: VibrateLevel;
   theme: ThemePref;
   language: Language;
+  groupTabsByType: boolean;   // 需求 4：终端 tab 靠左、文件 tab 靠右
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   vibrate: "medium",
   theme: "dark",
   language: "zh",
+  groupTabsByType: false,     // 默认关闭，维持现状
 };
 
 export const THEMES: ThemePref[] = ["dark", "light", "osc", "blackout", "prussian", "vermilion", "system"];
@@ -66,6 +68,7 @@ export function loadSettings(store: Storage = localStorage): Settings {
       vibrate: coerceVibrate(parsed.vibrate),
       theme: THEMES.includes(parsed.theme) ? parsed.theme : DEFAULT_SETTINGS.theme,
       language: LANGS.includes(parsed.language) ? parsed.language : detectLanguage(),
+      groupTabsByType: parsed.groupTabsByType === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS, language: detectLanguage() };

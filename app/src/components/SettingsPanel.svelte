@@ -183,6 +183,18 @@
     </div>
   </div>
 
+  <!-- Group tabs by type (req 4) -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('settings.groupTabs.label')}</div>
+      <div class="desc">{$t('settings.groupTabs.desc')}</div>
+    </div>
+    <div class="seg">
+      <button class:on={!settings.groupTabsByType} onclick={() => update("groupTabsByType", false)}>{$t('settings.groupTabs.off')}</button>
+      <button class:on={settings.groupTabsByType} onclick={() => update("groupTabsByType", true)}>{$t('settings.groupTabs.on')}</button>
+    </div>
+  </div>
+
   <!-- Language -->
   <div class="set">
     <div class="grow">

@@ -81,6 +81,12 @@ export default {
       label: "键盘布局",
       desc: "全键盘 tab 采用笔记本布局，默认 Mac",
     },
+    groupTabs: {
+      label: "分类排列标签",
+      desc: "终端标签靠左、文件标签靠右，各自按最近打开排序",
+      on: "开启",
+      off: "关闭",
+    },
     vibrate: {
       label: "按键震动",
       desc: "自定义键盘按下时短振一下",

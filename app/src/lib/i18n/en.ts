@@ -81,6 +81,12 @@ export default {
       label: "Keyboard layout",
       desc: "The full-keyboard tab uses a laptop layout; default Mac",
     },
+    groupTabs: {
+      label: "Group tabs by type",
+      desc: "Terminals on the left, files on the right; each sorted by most recently opened",
+      on: "On",
+      off: "Off",
+    },
     vibrate: {
       label: "Key vibration",
       desc: "Short haptic pulse on each key press",
