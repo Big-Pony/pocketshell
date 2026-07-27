@@ -300,6 +300,10 @@ export default {
     empty: "还没有自定义指令，点右上角 ＋ 添加",
     delConfirm: "删除指令「{label}」？",
     hint: "自定义指令会同步到同一 Agent 下的所有设备。",
+    manage: "管理",
+    done: "完成",
+    edit: "编辑指令",
+    manageHint: "管理模式：点击指令编辑，× 删除",
   },
   editor: {
     edit: "编辑",

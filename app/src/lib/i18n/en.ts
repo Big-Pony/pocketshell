@@ -300,6 +300,10 @@ export default {
     empty: "No custom snippets yet — tap ＋ above to add one",
     delConfirm: "Delete snippet “{label}”?",
     hint: "Custom snippets sync to all devices on the same agent.",
+    manage: "Manage",
+    done: "Done",
+    edit: "Edit snippet",
+    manageHint: "Manage mode: tap to edit, × to delete",
   },
   editor: {
     edit: "Edit",

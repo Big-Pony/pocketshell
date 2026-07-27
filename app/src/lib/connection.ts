@@ -554,6 +554,9 @@ export class Connection {
   addSnippet(i: { group: string; label: string; command: string; autoEnter: boolean }): void {
     this.send({ type: "addSnippet", group: i.group, label: i.label, command: i.command, autoEnter: i.autoEnter });
   }
+  updateSnippet(id: string, i: { group: string; label: string; command: string; autoEnter: boolean }): void {
+    this.send({ type: "updateSnippet", id, group: i.group, label: i.label, command: i.command, autoEnter: i.autoEnter });
+  }
   removeSnippet(id: string): void { this.send({ type: "removeSnippet", id }); }
   onSnippets(cb: (s: Snippet[]) => void): () => void {
     this.snippetsCbs.push(cb);

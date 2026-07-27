@@ -9,8 +9,22 @@
   let { conn, onInsert }: { conn: Connection; onInsert: (text: string) => void } = $props();
 
   let customs = $state<Snippet[]>([]);
+  let mode = $state<"use" | "manage">("use");
   let adding = $state(false);
+  let editing = $state<Snippet | null>(null);
+  const dlgOpen = $derived(adding || editing !== null);
   let form = $state({ group: "", label: "", command: "", autoEnter: true });
+
+  function closeDlg() { adding = false; editing = null; }
+  function openAdd() { editing = null; form = { group: form.group, label: "", command: "", autoEnter: true }; adding = true; }
+  function openEdit(s: Snippet) {
+    adding = false;
+    form = { group: s.group, label: s.label, command: s.command, autoEnter: s.autoEnter };
+    editing = s;
+  }
+  // 管理是临时态，不跨面板切换保留（底栏面板 keep-alive 会留住组件实例）
+  function exitManage() { mode = "use"; closeDlg(); }
+  function tapSnippet(s: Snippet) { if (mode === "manage") openEdit(s); else insert(s); }
 
   $effect(() => {
     const off = conn.onSnippets((s) => (customs = s));
@@ -21,12 +35,18 @@
   const groups = $derived(mergeSnippets(customs));
 
   function insert(s: Snippet) { onInsert(s.command + (s.autoEnter ? "\r" : "")); }
-  function isCustom(s: Snippet) { return !s.id.startsWith("builtin:"); }
   function submit() {
     if (!form.label.trim() || !form.command.trim()) return;
-    conn.addSnippet({ group: form.group.trim() || tr("snippets.defaultGroup"), label: form.label.trim(), command: form.command, autoEnter: form.autoEnter });
+    const payload = {
+      group: form.group.trim() || tr("snippets.defaultGroup"),
+      label: form.label.trim(),
+      command: form.command,
+      autoEnter: form.autoEnter,
+    };
+    if (editing) conn.updateSnippet(editing.id, payload);
+    else conn.addSnippet(payload);
     form = { group: form.group, label: "", command: "", autoEnter: true };
-    adding = false;
+    closeDlg();
   }
   function del(s: Snippet) {
     if (!confirm(tr("snippets.delConfirm", { label: s.label }))) return;
@@ -38,10 +58,18 @@
 <div class="sp">
   <div class="sp-head">
     <span class="title">{$t('snippets.title')}</span>
-    <button class="add-btn" onclick={() => (adding = true)}>{$t('snippets.add')}</button>
+    {#if mode === "manage"}
+      <button class="add-btn" onclick={exitManage}>{$t('snippets.done')}</button>
+    {:else}
+      <div class="head-btns">
+        <button class="manage-btn" onclick={() => (mode = "manage")}>{$t('snippets.manage')}</button>
+        <button class="add-btn" onclick={openAdd}>{$t('snippets.add')}</button>
+      </div>
+    {/if}
   </div>
 
   <div class="groups">
+    {#if mode === "manage"}<div class="manage-hint">{$t('snippets.manageHint')}</div>{/if}
     {#if groups.length === 0}
       <div class="sp-empty">{$t('snippets.empty')}</div>
     {/if}
@@ -50,10 +78,10 @@
       <div class="sp-items">
         {#each g.items as s (s.id)}
           <div class="sp-row">
-            <button class="ins" onclick={() => insert(s)} title={s.command}>
+            <button class="ins" onclick={() => tapSnippet(s)} title={s.command}>
               {s.label}{#if s.autoEnter}<span class="cr">⏎</span>{/if}
             </button>
-            {#if isCustom(s)}<button class="del" onclick={() => del(s)} aria-label={$t('common.delete')}>×</button>{/if}
+            {#if mode === "manage"}<button class="del" onclick={() => del(s)} aria-label={$t('common.delete')}>×</button>{/if}
           </div>
         {/each}
       </div>
@@ -62,19 +90,19 @@
   </div>
 </div>
 
-{#if adding}
-  <div class="overlay" role="presentation" onclick={() => (adding = false)}>
-    <div class="dlg" role="dialog" aria-modal="true" aria-label={$t('snippets.add')} tabindex="-1"
+{#if dlgOpen}
+  <div class="overlay" role="presentation" onclick={closeDlg}>
+    <div class="dlg" role="dialog" aria-modal="true" aria-label={editing ? $t('snippets.edit') : $t('snippets.add')} tabindex="-1"
       onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => { if (e.key === 'Escape') adding = false; }}>
-      <div class="dlg-title">{$t('snippets.add')}</div>
+      onkeydown={(e) => { if (e.key === 'Escape') closeDlg(); }}>
+      <div class="dlg-title">{editing ? $t('snippets.edit') : $t('snippets.add')}</div>
       <input class="dlg-input" use:autoFocus bind:value={form.group} placeholder={$t('snippets.groupPh')} />
       <input class="dlg-input" bind:value={form.label} placeholder={$t('snippets.labelPh')} />
       <input class="dlg-input" bind:value={form.command} placeholder={$t('snippets.cmdPh')}
         onkeydown={(e) => { if (e.key === 'Enter') submit(); }} />
       <label class="check"><input type="checkbox" bind:checked={form.autoEnter} /> {$t('snippets.autoEnter')}</label>
       <div class="dlg-btns">
-        <button onclick={() => (adding = false)}>{$t('snippets.cancel')}</button>
+        <button onclick={closeDlg}>{$t('snippets.cancel')}</button>
         <button class="primary" onclick={submit}>{$t('snippets.save')}</button>
       </div>
     </div>
@@ -106,6 +134,21 @@
     padding: 6px 12px;
     font-size: 0.72rem;
     font-weight: 600;
+  }
+  .head-btns { display: flex; gap: 6px; align-items: center; }
+  .manage-btn {
+    background: var(--key);
+    color: var(--text);
+    border: 1px solid var(--key-line);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 0.72rem;
+  }
+  .manage-btn:active { background: var(--keyhi); }
+  .manage-hint {
+    font-size: 0.68rem;
+    color: var(--dim);
+    padding: 6px 2px 2px;
   }
   .check {
     font-size: 0.72rem;

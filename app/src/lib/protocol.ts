@@ -41,6 +41,7 @@ export type ClientMsg =
   | { type: "listDevices" }
   | { type: "listSnippets" }
   | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
+  | { type: "updateSnippet"; id: string; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "removeSnippet"; id: string }
   | { type: "revokeDevice"; pubKey: string }
   // rpc methods mirror agent/src/protocol.ts: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply
