@@ -82,9 +82,8 @@
   }
 </script>
 
+<!-- 说明文案由设置面板的入口行常驻显示（hints.desc），这里不再重复一遍 -->
 <div class="hm">
-  <div class="hm-desc">{$t('hints.desc')}</div>
-
   {#if notice}<div class="hm-notice">{notice}</div>{/if}
 
   <div class="hm-list">
@@ -118,7 +117,6 @@
 <style>
   /* 只引用 app.css 的语义令牌，不写死颜色——6 套主题共用 */
   .hm { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 8px; }
-  .hm-desc { font-size: 0.68rem; color: var(--dim); line-height: 1.6; }
   .hm-notice {
     font-size: 0.68rem; color: var(--accent-text);
     background: var(--accent-soft); border-radius: var(--radius-sm); padding: 6px 8px;
