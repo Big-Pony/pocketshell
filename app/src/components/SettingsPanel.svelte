@@ -6,6 +6,7 @@
   import type { Settings } from "../lib/settings";
   import { urlBase64ToUint8Array, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import DeviceManager from "./DeviceManager.svelte";
+  import HintManager from "./HintManager.svelte";
   import OperationGuide from "./OperationGuide.svelte";
   import { hardReset } from "../lib/cache-admin";
   import { THEME_SWATCHES } from "../lib/theme";
@@ -20,6 +21,7 @@
   }
 
   let showDevices = $state(false);
+  let showHints = $state(false);
   let showGuide = $state(false);
   let checkingUpdate = $state(false);
   async function checkNow() {
@@ -254,6 +256,18 @@
       {showDevices ? $t('settings.devices.close') : $t('settings.devices.manage')}
     </button>
   </div>
+
+  <!-- Custom input suggestions (req 5) -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('hints.title')}</div>
+      <div class="desc">{$t('hints.desc')}</div>
+    </div>
+    <button class="btn" onclick={() => (showHints = !showHints)}>
+      {showHints ? $t('hints.close') : $t('hints.entry')}
+    </button>
+  </div>
+  {#if showHints}<HintManager {conn} />{/if}
 
   <!-- Operation guide -->
   <div class="set">
