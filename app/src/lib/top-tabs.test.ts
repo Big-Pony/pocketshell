@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, filePathFromTabId, stepTap, TAP_RESET, TAP_WINDOW_MS, findTabByPath, replaceTabPath, openOrReuseFileTab, type TopTab, type TapState } from "./top-tabs";
+import { fileTabId, openFileTab, closeFileTab, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, filePathFromTabId, stepTap, TAP_RESET, TAP_WINDOW_MS, findTabByPath, replaceTabPath, openOrReuseFileTab, groupByKind, type TopTab, type TapState } from "./top-tabs";
 
 test("fileTabId is stable per path+mode", () => {
   expect(fileTabId("/a.ts", "code")).toBe("file:code:/a.ts");
@@ -159,4 +159,36 @@ describe("in-place file tab navigation helpers", () => {
     const ids = new Set(r.tabs.map((t) => t.id));
     expect(ids.size).toBe(2);            // no duplicate keys
   });
+});
+
+test("groupByKind 终端在前文件在后，两组各自倒序", () => {
+  const order = ["t1", "file:code:/a", "t2", "file:code:/b"];
+  const fileIds = new Set(["file:code:/a", "file:code:/b"]);
+  expect(groupByKind(order, fileIds)).toEqual(["t2", "t1", "file:code:/b", "file:code:/a"]);
+});
+
+test("groupByKind 空输入返回空数组", () => {
+  expect(groupByKind([], new Set())).toEqual([]);
+});
+
+test("groupByKind 纯终端只做倒序", () => {
+  expect(groupByKind(["a", "b", "c"], new Set())).toEqual(["c", "b", "a"]);
+});
+
+test("groupByKind 纯文件只做倒序", () => {
+  const ids = new Set(["f1", "f2"]);
+  expect(groupByKind(["f1", "f2"], ids)).toEqual(["f2", "f1"]);
+});
+
+test("groupByKind 不在 fileIds 中的 id 归为终端组", () => {
+  // id 形如 file:… 但不在集合里（例如已关闭的陈旧 id）仍按终端处理，
+  // 判定依据只有集合，不看字符串前缀
+  const out = groupByKind(["file:code:/x", "t1"], new Set());
+  expect(out).toEqual(["t1", "file:code:/x"]);
+});
+
+test("groupByKind 不修改入参", () => {
+  const order = ["t1", "t2"];
+  groupByKind(order, new Set());
+  expect(order).toEqual(["t1", "t2"]);
 });

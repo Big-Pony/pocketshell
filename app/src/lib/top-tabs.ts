@@ -136,3 +136,20 @@ export function visibleOrder(order: string[], valid: Set<string>, extras: string
   for (const id of extras) if (valid.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
   return out;
 }
+
+/**
+ * 按类型分组重排 top tab 顺序（需求 4「分类排列标签」开关开启时用）：
+ * 终端 tab 在前、文件 tab 在后，两组各自倒序。
+ *
+ * `order`（= tabOrder）是追加序，最早打开的在最前；倒序后「最近打开」排在
+ * 各自组的最左边，符合需求。判定用 fileIds 集合而不是 id 字符串前缀——
+ * openOrReuseFileTab 会在 id 冲突时追加 "~"，集合判定不受 id 变形影响。
+ *
+ * 纯函数，不修改入参。
+ */
+export function groupByKind(order: string[], fileIds: Set<string>): string[] {
+  const terms: string[] = [];
+  const files: string[] = [];
+  for (const id of order) (fileIds.has(id) ? files : terms).push(id);
+  return [...terms.reverse(), ...files.reverse()];
+}
