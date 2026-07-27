@@ -1,5 +1,8 @@
 // agent/src/hint-store.test.ts
 import { test, expect } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openHintStore } from "./hint-store";
 
 function freshStore() {
@@ -74,11 +77,16 @@ test("clear 清空全部", () => {
 });
 
 test("持久化到文件后重开仍在", () => {
-  const dir = process.env.POCKETSHELL_KEY_DIR ?? "/tmp";
-  const path = `${dir}/hint-test-${process.pid}.db`;
-  let n = 0;
-  const s1 = openHintStore(path, { now: () => 5, genId: () => `p${++n}` });
-  s1.addMany(["persisted"]);
-  const s2 = openHintStore(path, { now: () => 9, genId: () => `q${++n}` });
-  expect(s2.list().map((r) => r.text)).toEqual(["persisted"]);
+  // 固定用 tmpdir 而非 POCKETSHELL_KEY_DIR：跑测试时后者常指向真实 keyDir，
+  // 会把 .db 残留物写进生产目录。用完即删，不留垃圾。
+  const path = join(tmpdir(), `hint-test-${process.pid}.db`);
+  try {
+    let n = 0;
+    const s1 = openHintStore(path, { now: () => 5, genId: () => `p${++n}` });
+    s1.addMany(["persisted"]);
+    const s2 = openHintStore(path, { now: () => 9, genId: () => `q${++n}` });
+    expect(s2.list().map((r) => r.text)).toEqual(["persisted"]);
+  } finally {
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(path + suffix, { force: true });
+  }
 });
