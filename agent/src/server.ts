@@ -526,6 +526,12 @@ export function startServer(deps: Deps = {}) {
           pushSnippets();
         } catch (e) { sendSecure(conn, { type: "error", code: "snippet_add_failed", message: String(e) }); }
         break;
+      case "updateSnippet":
+        try {
+          if (config.snippets.update(msg.id, { group: msg.group, label: msg.label, command: msg.command, autoEnter: msg.autoEnter })) pushSnippets();
+          else sendSecure(conn, { type: "error", code: "snippet_not_found", message: msg.id });
+        } catch (e) { sendSecure(conn, { type: "error", code: "snippet_update_failed", message: String(e) }); }
+        break;
       case "removeSnippet":
         if (config.snippets.remove(msg.id)) pushSnippets();
         break;

@@ -13,6 +13,7 @@ export interface SnippetStore {
   list(): SnippetRecord[];
   add(i: { group: string; label: string; command: string; autoEnter: boolean }): SnippetRecord;
   remove(id: string): boolean;
+  update(id: string, i: { group: string; label: string; command: string; autoEnter: boolean }): boolean;
 }
 
 let counter = 0;
@@ -53,6 +54,15 @@ export function openSnippetStore(
     },
     remove(id) {
       const info = db.run("DELETE FROM snippets WHERE id = ?", [id]);
+      return info.changes > 0;
+    },
+    update(id, i) {
+      // 有意不碰 created_at：list() 按 created_at 排序，保持原值才能让编辑后的
+      // 条目留在列表原位，而不是跳到末尾。
+      const info = db.run(
+        "UPDATE snippets SET grp = ?, label = ?, command = ?, auto_enter = ? WHERE id = ?",
+        [i.group, i.label, i.command, i.autoEnter ? 1 : 0, id],
+      );
       return info.changes > 0;
     },
   };

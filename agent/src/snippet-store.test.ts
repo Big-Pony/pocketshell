@@ -32,6 +32,37 @@ test("remove deletes by id and reports hit/miss", () => {
   expect(s.list()).toHaveLength(0);
 });
 
+test("update 修改字段但不改 createdAt，列表位置不变", () => {
+  const s = freshStore();
+  const a = s.add({ group: "g", label: "first", command: "one", autoEnter: false });
+  s.add({ group: "g", label: "second", command: "two", autoEnter: false });
+  const beforeCreatedAt = s.list()[0].createdAt;
+
+  expect(s.update(a.id, { group: "g2", label: "edited", command: "one-x", autoEnter: true })).toBe(true);
+
+  const list = s.list();
+  expect(list.map((r) => r.label)).toEqual(["edited", "second"]); // 仍在第一位
+  expect(list[0].id).toBe(a.id);                                   // id 不变
+  expect(list[0].createdAt).toBe(beforeCreatedAt);                 // createdAt 不变
+  expect(list[0].group).toBe("g2");
+  expect(list[0].command).toBe("one-x");
+  expect(list[0].autoEnter).toBe(true);
+});
+
+test("update 对不存在的 id 返回 false 且不新增记录", () => {
+  const s = freshStore();
+  s.add({ group: "g", label: "a", command: "a", autoEnter: false });
+  expect(s.update("nope", { group: "x", label: "x", command: "x", autoEnter: false })).toBe(false);
+  expect(s.list()).toHaveLength(1);
+});
+
+test("update 可以把 autoEnter 从 true 改回 false", () => {
+  const s = freshStore();
+  const r = s.add({ group: "g", label: "a", command: "a", autoEnter: true });
+  s.update(r.id, { group: "g", label: "a", command: "a", autoEnter: false });
+  expect(s.list()[0].autoEnter).toBe(false);
+});
+
 test("persists across reopen of the same file", () => {
   const dir = process.env.POCKETSHELL_KEY_DIR ?? "/tmp";
   const path = `${dir}/snip-test-${process.pid}.db`;
