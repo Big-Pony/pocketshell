@@ -1,5 +1,5 @@
 import { test, expect, beforeEach, describe } from "vitest";
-import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow, collectExpandedPaths, type FileNode } from "./file-tree";
+import { loadProjectRoot, saveProjectRoot, clearProjectRoot, toFileNodes, setChildren, collapse, filterTree, loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow, collectExpandedPaths, parentOf, type FileNode } from "./file-tree";
 
 beforeEach(() => localStorage.clear());
 
@@ -95,4 +95,24 @@ describe("collectExpandedPaths", () => {
     const got = collectExpandedPaths(tree);
     expect([...got].sort()).toEqual(["/p", "/p/src"]);
   });
+});
+
+test("parentOf 返回上一级目录", () => {
+  expect(parentOf("/a/b")).toBe("/a");
+});
+
+test("parentOf 一级目录的父级是根", () => {
+  expect(parentOf("/a")).toBe("/");
+});
+
+test("parentOf 根目录的父级仍是根", () => {
+  expect(parentOf("/")).toBe("/");
+});
+
+test("parentOf 忽略结尾斜杠", () => {
+  expect(parentOf("/a/b/")).toBe("/a");
+});
+
+test("parentOf 深层路径", () => {
+  expect(parentOf("/Users/myt/project/app")).toBe("/Users/myt/project");
 });

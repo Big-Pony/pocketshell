@@ -10,6 +10,16 @@ export interface FileNode {
   expanded?: boolean; children?: FileNode[];
 }
 
+/**
+ * 返回 path 的父目录。根目录 "/" 的父级仍是 "/"。
+ * 结尾斜杠先剥掉再取父级，所以 "/a/b/" 与 "/a/b" 等价。
+ */
+export function parentOf(path: string): string {
+  const p = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  const i = p.lastIndexOf("/");
+  return i <= 0 ? "/" : p.slice(0, i);
+}
+
 export function loadProjectRoot(): string {
   try { return localStorage.getItem(ROOT_KEY) || "/"; } catch { return "/"; }
 }

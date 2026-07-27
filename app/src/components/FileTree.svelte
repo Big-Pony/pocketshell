@@ -6,7 +6,7 @@
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
     loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow,
-    toFileNodes, setChildren, collapse, filterTree, collectExpandedPaths, type FileNode
+    toFileNodes, setChildren, collapse, filterTree, collectExpandedPaths, parentOf, type FileNode
   } from "../lib/file-tree";
   import { getBrowseCache, setBrowseCache } from "../lib/file-tree-cache";
   import { IDLE, press, type ArmState } from "../lib/confirm-armed";
@@ -166,10 +166,6 @@
     menuAnchor = anchor;
   }
 
-  function parentOf(path: string): string {
-    const i = path.lastIndexOf("/");
-    return i <= 0 ? "/" : path.slice(0, i);
-  }
   async function refreshParent(path: string) {
     const parent = parentOf(path);
     try {
