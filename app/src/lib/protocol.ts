@@ -26,6 +26,10 @@ export interface Snippet {
   id: string; group: string; label: string; command: string; autoEnter: boolean;
 }
 
+// 需求 5：输入联想条目。读取走 rpc `hints.list`（可被 rpcChunk 分片），
+// 写操作走下面的专用消息，变更后广播无载荷的 `hintsChanged` 让各端重拉。
+export interface Hint { id: string; text: string }
+
 export type ClientMsg =
   | { type: "attach"; sessionId: string; lastSeq?: number }
   | { type: "detach"; sessionId: string }
@@ -43,8 +47,12 @@ export type ClientMsg =
   | { type: "addSnippet"; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "updateSnippet"; id: string; group: string; label: string; command: string; autoEnter: boolean }
   | { type: "removeSnippet"; id: string }
+  | { type: "addHints"; texts: string[] }
+  | { type: "updateHint"; id: string; text: string }
+  | { type: "removeHint"; id: string }
+  | { type: "clearHints" }
   | { type: "revokeDevice"; pubKey: string }
-  // rpc methods mirror agent/src/protocol.ts: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply
+  // rpc methods mirror agent/src/protocol.ts: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply / hints.list
   | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =
@@ -58,6 +66,10 @@ export type ServerMsg =
   | { type: "paired"; ok: true }
   | { type: "devices"; devices: DeviceInfo[] }
   | { type: "snippets"; items: Snippet[] }
+  // hints 变更通知（无载荷）：收到后各端自行 rpc("hints.list") 重拉。
+  // 不像 snippets 那样带全量列表——联想库可达数百 KB，超过单个 Noise 消息
+  // 的 65535 字节上限；rpc 响应则有 rpcChunk 分片兜底。
+  | { type: "hintsChanged" }
   | { type: "response"; id: string; ok: true; result: unknown }
   | { type: "response"; id: string; ok: false; error: { code: string; message: string } }
   | { type: "rpcChunk"; id: string; index: number; total: number; data: string }

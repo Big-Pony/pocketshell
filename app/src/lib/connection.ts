@@ -2,7 +2,7 @@
 // encode/decode, dispatch. Noise handshake, reconnect state machine, secure
 // storage, pairing, and rpc() are added in later slices.
 // S4b: in-channel pairing — send pair on established, await paired, then normal flow.
-import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo, type Snippet } from "./protocol";
+import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo, type Snippet, type Hint } from "./protocol";
 import { toB64, fromB64 } from "./bytes";
 import { ChunkReassembler } from "./rpc-chunks";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
@@ -92,6 +92,7 @@ export class Connection {
   private pairing = false;
   private devicesCbs: ((d: DeviceInfo[]) => void)[] = [];
   private snippetsCbs: ((s: Snippet[]) => void)[] = [];
+  private hintsChangedCbs: (() => void)[] = [];
   private updateCbs: UpdateCb[] = [];
   private notificationCbs: NotificationCb[] = [];
   private establishedThisSocket = false;
@@ -416,6 +417,8 @@ export class Connection {
       for (const cb of this.devicesCbs) cb(msg.devices);
     } else if (msg.type === "snippets") {
       for (const cb of this.snippetsCbs) cb(msg.items);
+    } else if (msg.type === "hintsChanged") {
+      for (const cb of this.hintsChangedCbs) cb();
     } else if (msg.type === "response") {
       const p = this.pending.get(msg.id);
       if (p) {
@@ -561,6 +564,17 @@ export class Connection {
   onSnippets(cb: (s: Snippet[]) => void): () => void {
     this.snippetsCbs.push(cb);
     return () => { this.snippetsCbs = this.snippetsCbs.filter((c) => c !== cb); };
+  }
+  // 需求 5：读走 rpc（可被 rpcChunk 分片），写走专用消息，变更由
+  // `hintsChanged` 通知各端自行重拉。
+  listHints(): Promise<{ items: Hint[] }> { return this.rpc("hints.list") as Promise<{ items: Hint[] }>; }
+  addHints(texts: string[]): void { this.send({ type: "addHints", texts }); }
+  updateHint(id: string, text: string): void { this.send({ type: "updateHint", id, text }); }
+  removeHint(id: string): void { this.send({ type: "removeHint", id }); }
+  clearHints(): void { this.send({ type: "clearHints" }); }
+  onHintsChanged(cb: () => void): () => void {
+    this.hintsChangedCbs.push(cb);
+    return () => { this.hintsChangedCbs = this.hintsChangedCbs.filter((c) => c !== cb); };
   }
   onDevices(cb: (d: DeviceInfo[]) => void): () => void {
     this.devicesCbs.push(cb);
