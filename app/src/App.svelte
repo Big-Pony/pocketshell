@@ -39,6 +39,7 @@
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
   import { suggest, delta } from "./lib/command-suggest";
   import { suggestSlash } from "./lib/slash-catalog";
+  import { splitPools } from "./lib/hints";
   import { CATALOG } from "./lib/command-catalog";
   import { t } from "svelte-i18n";
   import { applyLanguage, tr } from "./lib/i18n";
@@ -119,6 +120,13 @@
   const terms = new Map<string, Terminal>();
   const cmdLines = new Map<string, CmdLineState>();
   let hints = $state<string[]>([]);
+  // 需求 5：用户自定义联想库。hintsChanged 广播无载荷，收到后重拉全量。
+  let customHints = $state<{ shell: string[]; slash: string[] }>({ shell: [], slash: [] });
+  async function reloadCustomHints() {
+    try { customHints = splitPools((await conn.listHints()).items.map((h) => h.text)); }
+    catch { /* 断线时保持现状 */ }
+  }
+  conn.onHintsChanged(() => { void reloadCustomHints(); });
 
   // ---- 分割条数据 ----
   // 链路指标由 connection 每个心跳周期结算一次推过来（复用心跳定时器，无新开销）。
@@ -158,10 +166,12 @@
   function recomputeHints() {
     const s = cmdLines.get(activeId);
     // req 7-2: a line starting with '/' means the user is composing a
-    // CC/Codex slash command → suggest from the built-in slash catalog instead
-    // of shell history/catalog. delta()/onHint reuse unchanged.
+    // CC/Codex slash command → suggest from the slash catalog instead of
+    // shell history/catalog. 需求 5：两条链路各自先拼用户自定义池。
     hints = s && s.trusted
-      ? (s.line.startsWith("/") ? suggestSlash(s.line) : suggest(s.line, s.history, CATALOG))
+      ? (s.line.startsWith("/")
+          ? suggestSlash(s.line, customHints.slash)
+          : suggest(s.line, s.history, customHints.shell, CATALOG))
       : [];
   }
 
@@ -178,6 +188,7 @@
     if (s === "online" && !wasOnline) {
       reportPresence();
       void refreshGitBranch();   // 重连后补一次，分割条左侧才不会一直空着
+      void reloadCustomHints();  // 需求 5：连上/重连后拉一次自定义联想库
       // Fresh connect (incl. reconnect after a self-restart update): re-check.
       // If we were mid-update and the reconnect shows we're now current, the
       // restart finished successfully — clear the in-progress UI + badge and
