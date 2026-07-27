@@ -275,6 +275,9 @@
         <button class="key" data-key-id="Del"
           onpointerdown={(e) => { e.preventDefault(); keyDown("Del"); }}
           onpointerup={() => keyUp("Del")} onpointercancel={() => keyUp("Del")} onpointerleave={() => keyUp("Del")}>Del</button>
+        <button class="key" data-key-id="Space"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("Space"); }}
+          onpointerup={() => keyUp("Space")} onpointercancel={() => keyUp("Space")} onpointerleave={() => keyUp("Space")}>space</button>
       </div>
       <div class="ops-main">
         <div class="dpad">
@@ -558,7 +561,7 @@
   }
   .ops-row {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 4px;
   }
   .ops-row .key { min-height: 2.6em; font-size: 0.74rem; }
