@@ -161,7 +161,9 @@
     padding: 8px 0; font-size: 0.72rem;
   }
   .hm-btn:active { background: var(--keyhi); }
-  .hm-btn.danger { color: var(--red); }
+  /* 危险态底色换 --panel：--red 铺在更亮的 --key 上，石墨橙下对比度只有 4.12
+     （低于 WCAG AA 4.5）；--panel 在 6 套主题下均 ≥4.56。实测见测试报告。 */
+  .hm-btn.danger { color: var(--red); background: var(--panel); }
   .hm-primary {
     flex: 0 0 auto; background: var(--primary-bg); color: var(--primary-text);
     border: 1px solid transparent; border-radius: var(--radius-md);
