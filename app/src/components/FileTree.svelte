@@ -285,6 +285,17 @@
   <input class="filter" bind:value={query} placeholder={$t('filetree.filterPh')} />
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
   <ul class="tree" bind:this={treeEl} onscroll={onScroll}>
+    <!-- 合成根节点上方的 ".." 上探行：点击把面板根切到父目录（走 applyRoot，
+         写 localStorage + 进历史根，⇄ 可回退）。根目录没有上一级，过滤时也不显示。 -->
+    {#if root !== "/" && !query}
+      <li class="row-wrap">
+        <span class="g" aria-hidden="true"></span>
+        <button class="row" style="padding-left: 6px" onclick={() => applyRoot(parentOf(root))}>
+          <span class="tw">▴</span>
+          <span class="nm dir">..</span>
+        </button>
+      </li>
+    {/if}
     {#each rows as { n, depth } (n.path)}
       <li class="row-wrap">
         <!-- git 标记从彩色文字改成行首 3px 竖色条：省下横向空间，且不论层级
