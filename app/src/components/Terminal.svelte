@@ -75,6 +75,7 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { Connection } from "../lib/connection";
   import { fromB64 } from "../lib/bytes";
+  import type { TermHistoryResult } from "../lib/protocol";
 
   let {
     conn,
@@ -255,10 +256,12 @@
     // holds. Called once when the pane (re)enters shell mode and on a cols change
     // (xterm wraps history to the current width, so a resize invalidates it).
     let lastCols = term.cols;
+    // 重排/回到 normal buffer 时用：清空后按当前宽度重灌整份历史。
+    // 首屏 seed 不走这里（那条路不能 clear，见 seedFromHistory）。
     const reloadHistory = async () => {
       if (currentBuffer !== "normal") return;
       try {
-        const h = (await conn.rpc("term.history", { session: sessionId })) as { data: string };
+        const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
         term.clear();
         // capture-pane lines are trimmed and bare-\n separated; xterm runs with
         // convertEol:false, so a bare \n moves down WITHOUT returning to column
@@ -266,6 +269,25 @@
         // from vim, where no live repaint masks it). Normalize to \r\n.
         if (h?.data) term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
       } catch { /* best-effort */ }
+    };
+
+    // 首屏 seed：拉一份快照写进空白终端，然后用快照的 seq 订阅之后的增量。
+    // 与 reloadHistory 的区别有两点，都很关键：
+    //   1) 不 clear —— 终端此刻本就是空的，clear 只会多一次无谓重绘；
+    //   2) 结尾要 attach(seq, {seed:true}) 把实时流接上。
+    // 顺序上服务端是「先取号后快照」，所以快照期间到达的输出必然 > seq，
+    // 会被这次 attach 补上：宁可重叠几帧也不丢字节。
+    //
+    // 失败也必须 attach —— 否则首屏空白之外连实时输出都收不到。此时退回
+    // attach(0)（不带 seed），走原来的 replay 重放路径兜底。
+    const seedFromHistory = async () => {
+      try {
+        const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
+        if (h?.data) term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
+        conn.attach(sessionId, h?.seq ?? 0, { seed: true });
+      } catch {
+        conn.attach(sessionId);
+      }
     };
 
     // Activation path (R1). A dirty stash means the byte stream is incomplete,
@@ -302,7 +324,12 @@
     // stream, so history is (re)seeded only on the edge into the normal buffer and
     // on a cols change.
     let paneInfoSeq = 0;
-    let appliedMode: PaneMode | null = null;
+    // 初值给 "normal" 而不是 null：首屏已由 seedFromHistory 灌过内容了，
+    // 若这里留 null，第一次 classifyPane 必然判定为「mode 变化 → normal」，
+    // 从而多跑一次 reloadHistory（clear + 重写全量）—— 那正是这次要消灭的
+    // 双重渲染。会话真处在 alt buffer（vim/htop）时，第一次 poll 会判定
+    // normal→alt 并走 term.redraw，行为不变。
+    let appliedMode: PaneMode | null = "normal";
     let pollTimer: ReturnType<typeof setInterval> | undefined;
     let classifyDebounce: ReturnType<typeof setTimeout> | undefined;
     // A4: pausing also drops a pending input-debounced classify — a hidden or
@@ -371,10 +398,14 @@
       classifyDebounce = setTimeout(() => void classifyPane(), 200);
     });
 
-    // Session is created by App (SessionTabs "new"); here we only attach + size.
+    // Session is created by App (SessionTabs "new"); here we only seed + size.
     // Input is routed by the custom keyboard (S5b) through conn.sendInput —
     // xterm is display-only.
-    conn.attach(sessionId);
+    //
+    // 首屏走 history 快照而不是 attach 重放：tmux 的 capture-pane 是真实画面，
+    // 而 replay 环形缓冲只有 256KB 且只覆盖「agent 启动以来」，接管外部或
+    // 重启前的 tmux 会话时可能是空的。seedFromHistory 内部负责 attach。
+    void seedFromHistory();
     refit();
     onReady?.(sessionId, term);
     // The classifyPane poll is NOT started here: the visibility $effect below
