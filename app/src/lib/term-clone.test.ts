@@ -1,16 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { readTermFont, prepareRowsClone, ownerClassOf } from "./term-clone";
+import { readTermFont, cleanCapture } from "./term-clone";
 
-describe("ownerClassOf", () => {
-  it("finds the xterm owner class among others", () => {
-    expect(ownerClassOf(["terminal", "xterm", "xterm-dom-renderer-owner-1"])).toBe(
-      "xterm-dom-renderer-owner-1",
-    );
-  });
-  it("returns undefined when absent", () => {
-    expect(ownerClassOf(["foo", "bar"])).toBeUndefined();
-  });
-});
+// prepareRowsClone / ownerClassOf are gone with the DOM-clone approach: under
+// the WebGL renderer there are no row elements to clone and no per-instance
+// owner class to carry. Copy mode now renders tmux's plain-text capture.
 
 describe("readTermFont", () => {
   it("pulls the four font metrics off a computed-style-like source", () => {
@@ -30,36 +23,34 @@ describe("readTermFont", () => {
       letterSpacing: "0px",
     });
   });
+
+  it("returns empty strings rather than undefined when metrics are missing", () => {
+    expect(readTermFont({ getPropertyValue: () => "" })).toEqual({
+      fontFamily: "", fontSize: "", lineHeight: "", letterSpacing: "",
+    });
+  });
 });
 
-describe("prepareRowsClone", () => {
-  function rows(): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "xterm-rows";
-    el.setAttribute("aria-hidden", "true");
-    const line = document.createElement("div");
-    line.innerHTML = '<span style="color:#0f0">line ok</span>';
-    el.appendChild(line);
-    return el;
-  }
-
-  it("returns a detached deep clone, not the original", () => {
-    const src = rows();
-    const clone = prepareRowsClone(src);
-    expect(clone).not.toBe(src);
-    expect(clone.parentNode).toBeNull();
-    expect(clone.querySelectorAll("span").length).toBe(1);
+describe("cleanCapture", () => {
+  // capture-pane pads to the pane width and always runs to the bottom of the
+  // screen — invisible on screen, very visible in a paste.
+  it("strips the trailing padding spaces tmux adds to every row", () => {
+    expect(cleanCapture("a.txt      \nb.txt   ")).toBe("a.txt\nb.txt");
   });
 
-  it("preserves text content and inline colour spans", () => {
-    const clone = prepareRowsClone(rows());
-    expect(clone.textContent).toBe("line ok");
-    expect(clone.querySelector("span")?.getAttribute("style")).toContain("color");
+  it("drops the slab of blank rows at the bottom of the pane", () => {
+    expect(cleanCapture("out\n\n   \n\n")).toBe("out");
   });
 
-  it("forces the clone selectable and unhides it", () => {
-    const clone = prepareRowsClone(rows());
-    expect(clone.style.userSelect).toBe("text");
-    expect(clone.getAttribute("aria-hidden")).toBeNull();
+  it("keeps interior blank lines — they are part of the output's shape", () => {
+    expect(cleanCapture("head\n\ntail")).toBe("head\n\ntail");
+  });
+
+  it("keeps leading indentation (code, tree output)", () => {
+    expect(cleanCapture("  indented  \n    more  ")).toBe("  indented\n    more");
+  });
+
+  it("returns an empty string for an all-blank capture", () => {
+    expect(cleanCapture("\n  \n\n")).toBe("");
   });
 });

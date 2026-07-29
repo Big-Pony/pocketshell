@@ -1,15 +1,24 @@
-// req 7-5 (copy-mode): helpers for the terminal "copy mode" overlay.
+// Helpers for the terminal "copy mode" overlay (TermCopyOverlay).
 //
-// Approach: when the user enters copy mode we clone xterm's already-rendered
-// `.xterm-rows` node into a plain overlay. The clone is a "dead" DOM subtree —
-// cloneNode does NOT copy event listeners, so it carries none of xterm's touch
-// handling that otherwise hijacks a long-press into a scroll. It keeps xterm's
-// inline colour spans (colours preserved) and its exact layout (no reflow), and
-// with user-select:text a mobile long-press selects it natively, exactly like
-// the file preview's <pre>.
+// History, because the shape of this file is otherwise puzzling: copy mode used
+// to clone xterm's rendered `.xterm-rows` DOM into a listener-free overlay so a
+// mobile long-press could select it natively. That worked only under the DOM
+// renderer. Since the terminal moved to the WebGL renderer there are no row
+// elements at all — glyphs live in a GPU texture — so `.xterm-rows` is empty and
+// the clone produced a blank overlay.
+//
+// Copy mode now asks the agent for the pane's text (`term.capture` without
+// colours, which tmux emits as clean plain text) and renders it into a plain
+// <pre>. That is strictly better than reading xterm's buffer: it is not capped
+// by xterm's scrollback and `-J` restores tmux-folded long lines instead of the
+// hard-wrapped copies the frontend holds. The trade-off, accepted deliberately,
+// is that colours are lost — the clipboard wants text.
+//
+// What survives from the clone era is the font metrics, which the overlay still
+// copies off the live terminal so its text lines up with what the user sees.
 
-// The font-related computed properties the overlay must copy from the live
-// terminal so the cloned rows keep xterm's metrics (monospace alignment).
+// The font-related computed properties the overlay copies from the live
+// terminal so the rendered text keeps xterm's metrics (monospace alignment).
 export interface TermFont {
   fontFamily: string;
   fontSize: string;
@@ -28,22 +37,17 @@ export function readTermFont(cs: { getPropertyValue(prop: string): string }): Te
   };
 }
 
-// xterm scopes its colour CSS under a per-instance owner class
-// (`xterm-dom-renderer-owner-N`). A clone placed outside the live `.xterm`
-// loses those colours unless its container carries the same owner class.
-export function ownerClassOf(classes: Iterable<string>): string | undefined {
-  for (const c of classes) if (c.includes("xterm-dom-renderer-owner")) return c;
-  return undefined;
-}
-
-// Deep-clone the rows node for the overlay and force it selectable. Returns a
-// detached clone (the caller appends it). Strips aria-hidden so the copied text
-// is exposed to selection/AT rather than hidden. cloneNode(true) intentionally
-// drops xterm's listeners — that's the whole point.
-export function prepareRowsClone(rows: HTMLElement): HTMLElement {
-  const clone = rows.cloneNode(true) as HTMLElement;
-  clone.removeAttribute("aria-hidden");
-  clone.style.userSelect = "text";
-  clone.style.webkitUserSelect = "text";
-  return clone;
+// Tidy a raw tmux capture for display + copying.
+//
+// capture-pane pads every row to the pane width and always runs to the bottom of
+// the visible screen, so a raw capture ends in a slab of blank lines and each
+// line carries trailing spaces. Both are invisible on screen but very visible
+// once pasted, so they are stripped here rather than in the component.
+// Interior blank lines are preserved — they are part of the output's shape.
+export function cleanCapture(text: string): string {
+  return text
+    .split("\n")
+    .map((l) => l.replace(/\s+$/, ""))
+    .join("\n")
+    .replace(/\n+$/, "");
 }

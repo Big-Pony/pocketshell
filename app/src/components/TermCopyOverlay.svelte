@@ -2,44 +2,58 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import type { Terminal } from "@xterm/xterm";
-  import { prepareRowsClone, readTermFont, ownerClassOf } from "../lib/term-clone";
+  import { readTermFont, cleanCapture } from "../lib/term-clone";
+  import type { Connection } from "../lib/connection";
+  import type { TermCaptureResult } from "../lib/protocol";
+  import { fromB64 } from "../lib/bytes";
 
-  // req 7-5 (copy mode): overlay a selectable clone of the terminal's visible
-  // rows so a mobile long-press can select text natively (see lib/term-clone.ts).
-  let { term, onClose, onCopy }: {
+  // Copy mode: cover the terminal with plain, selectable text so a mobile
+  // long-press can select it natively (xterm hijacks touch into scrolling).
+  //
+  // The text comes from the agent (`term.capture`, colours off → tmux emits
+  // clean plain text), NOT from the terminal's DOM. The old implementation
+  // cloned xterm's `.xterm-rows`; under the WebGL renderer those rows do not
+  // exist and the overlay came up blank. Asking tmux is also simply better
+  // source data: not capped by xterm's scrollback, and `-J` restores folded
+  // long lines instead of the hard-wrapped copies the frontend holds.
+  // Colours are lost — accepted, the clipboard wants text.
+  let { conn, sessionId, term, onClose, onCopy }: {
+    conn: Connection;
+    sessionId: string;
     term: Terminal | undefined;
     onClose: () => void;
     onCopy: (text: string) => void;
   } = $props();
 
-  let holder: HTMLDivElement;
-  let empty = $state(false);
+  let holder: HTMLPreElement;
+  let text = $state("");
+  let loading = $state(true);
+  let empty = $derived(!loading && text.trim() === "");
 
   onMount(() => {
+    // Keep the live terminal's metrics so the overlay's text lines up with what
+    // the user was just looking at.
     const root = term?.element;
-    if (!root) { empty = true; return; }
-    // Copy xterm's font metrics so the clone keeps monospace alignment.
-    const font = readTermFont(getComputedStyle(root));
-    holder.style.fontFamily = font.fontFamily;
-    holder.style.fontSize = font.fontSize;
-    holder.style.lineHeight = font.lineHeight;
-    holder.style.letterSpacing = font.letterSpacing;
-    // xterm's colour rules are scoped under its owner class; the clone must carry
-    // it or every glyph renders in the default foreground (colours lost).
-    const owner = ownerClassOf(root.classList);
-    if (owner) holder.classList.add(owner);
-    // Clone AFTER the DOM renderer has flushed its rows (double rAF) — otherwise
-    // a just-activated terminal may still have empty rows.
-    let r1 = 0, r2 = 0;
-    r1 = requestAnimationFrame(() => {
-      r2 = requestAnimationFrame(() => {
-        const rows = root.querySelector(".xterm-rows") as HTMLElement | null;
-        if (!rows) { empty = true; return; }
-        holder.appendChild(prepareRowsClone(rows));
-        empty = holder.textContent?.trim() === "";
-      });
-    });
-    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
+    if (root && holder) {
+      const font = readTermFont(getComputedStyle(root));
+      holder.style.fontFamily = font.fontFamily;
+      holder.style.fontSize = font.fontSize;
+      holder.style.lineHeight = font.lineHeight;
+      holder.style.letterSpacing = font.letterSpacing;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = (await conn.rpc("term.capture", { session: sessionId })) as TermCaptureResult;
+        if (cancelled) return;
+        text = r?.data ? cleanCapture(new TextDecoder().decode(fromB64(r.data))) : "";
+      } catch {
+        if (!cancelled) text = ""; // offline / dead pane → the empty hint
+      } finally {
+        if (!cancelled) loading = false;
+      }
+    })();
+    return () => { cancelled = true; };
   });
 
   function selectAll() {
@@ -50,7 +64,10 @@
     sel?.addRange(r);
   }
   function copySel() {
-    onCopy(window.getSelection()?.toString() ?? "");
+    // Prefer the user's selection; with none, "copy" on a screenful of text most
+    // usefully means all of it rather than nothing.
+    const s = window.getSelection()?.toString() ?? "";
+    onCopy(s.trim() ? s : text);
   }
 </script>
 
@@ -64,7 +81,8 @@
     <button class="cm-btn primary" onclick={onClose}>{$t('copymode.done')}</button>
   </div>
   <div class="cm-content">
-    <div class="cm-rows" bind:this={holder}></div>
+    <pre class="cm-rows" bind:this={holder}>{text}</pre>
+    {#if loading}<div class="cm-empty">{$t('copymode.loading')}</div>{/if}
     {#if empty}<div class="cm-empty">{$t('copymode.empty')}</div>{/if}
   </div>
 </div>
@@ -116,12 +134,12 @@
     color: var(--term-text);
     -webkit-overflow-scrolling: touch;
   }
-  /* 克隆节点由 JS 插入，不带 scope 属性，必须用 :global 命中 */
-  .cm-content :global(.xterm-rows),
-  .cm-content :global(.xterm-rows > div) {
+  /* 纯文本一份，长行不折（与终端一致，横向滚动由 .cm-content 提供）。
+     user-select + touch-callout 是手机长按能唤起系统选择手柄的关键。 */
+  .cm-rows {
+    margin: 0;
     white-space: pre;
-  }
-  .cm-content :global(.cm-rows) {
+    color: var(--term-text);
     user-select: text;
     -webkit-user-select: text;
     -webkit-touch-callout: default;

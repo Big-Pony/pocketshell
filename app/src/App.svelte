@@ -828,7 +828,7 @@
       </div>
     {/if}
     {#if copyMode}
-      <TermCopyOverlay term={activeTerm()}
+      <TermCopyOverlay {conn} sessionId={activeId} term={activeTerm()}
         onClose={() => (copyMode = false)}
         onCopy={(text) => {
           if (text.trim()) { writeClip(text, tr("app.toast.copiedSelection")); copyMode = false; }

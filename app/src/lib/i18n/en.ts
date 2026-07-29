@@ -207,6 +207,7 @@ export default {
   copymode: {
     title: "Copy mode",
     hint: "Long-press to select",
+    loading: "Loading…",
     selectAll: "All",
     copy: "Copy",
     done: "Done",

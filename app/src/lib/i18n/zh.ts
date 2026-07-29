@@ -207,6 +207,7 @@ export default {
   copymode: {
     title: "复制模式",
     hint: "长按选中文本",
+    loading: "读取中…",
     selectAll: "全选",
     copy: "复制选中",
     done: "完成",
