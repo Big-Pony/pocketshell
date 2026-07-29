@@ -227,7 +227,101 @@ test("capture() 不给 back 时不去查 cursor_y（少一次 spawn）", async (
 
 test("capture() 失败返回空 data 而不是抛", async () => {
   const term = new TerminalService({ tmux: () => fail() });
-  expect(await term.capture("gone")).toEqual({ data: "" });
+  expect(await term.capture("gone")).toEqual({ data: "", atTop: true });
+  term.dispose();
+});
+
+// ---- capture({back, endBack}): 复制模式的「上翻分页」----
+// 实测 tmux 3.6b：`-S -50 -E -41` 恰好 10 行，`-S -100 -E -91` 是更早的 10 行，
+// 两段无重叠可无缝拼接。endBack 与 back 同源（都是「光标往上第几行」），
+// 区间闭合：覆盖 back - endBack + 1 行。
+
+test("capture({back, endBack}) 把区间两端都解析成 -S/-E（不再固定 -E -）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("23|500\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 400, endBack: 201 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-377"); // 23 - 400
+  expect(cap[cap.indexOf("-E") + 1]).toBe("-178"); // 23 - 201
+  term.dispose();
+});
+
+test("capture() 不给 endBack 时 -E 仍是 -（底部）—— 老调用方不回归", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("23|500\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 41 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-E") + 1]).toBe("-");
+  term.dispose();
+});
+
+// atTop 必须由后端算：tmux 的 `-J` 会把折行接成一行，返回的**行数少于请求的行数**
+// （实测 40 列 pane 请求 6 行、-J 后只有 4 行），所以前端无法用「行数不足 200」
+// 判断到顶。越过顶部时 tmux 也不报错、不返回空行，而是**钳位重发最老那一行**
+// （实测 hist=379 时 -S -900 与 -S -379 返回同一行），前端据此判断会拿到重复内容。
+test("capture() 用 history_size 判定是否已到历史顶部（前端无法从行数推断）", async () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("23|379\n") : ok("OUT")),
+  });
+  // -S = 23 - 300 = -277，比最老行 -379 新 → 还有更早的
+  expect((await term.capture("work", { back: 300, endBack: 101 })).atTop).toBe(false);
+  // -S = 23 - 402 = -379，正好是最老一行 → 到顶
+  expect((await term.capture("work", { back: 402, endBack: 203 })).atTop).toBe(true);
+  term.dispose();
+});
+
+test("capture() 整段都在历史顶部之外时返回空，不让 tmux 钳位出重复行", async () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("23|379\n") : ok("OLDEST_LINE")),
+  });
+  // -E = 23 - 500 = -477，已在最老行 -379 之上 → 整段不存在
+  const r = await term.capture("work", { back: 699, endBack: 500 });
+  expect(r).toEqual({ data: "", atTop: true });
+  term.dispose();
+});
+
+test("capture() 全量（不给 back）就是到顶的定义 —— atTop 为真", async () => {
+  const term = new TerminalService({ tmux: () => ok("OUT") });
+  expect((await term.capture("work")).atTop).toBe(true);
+  term.dispose();
+});
+
+test("capture({endBack}) 非法值（非整数/负数/大于 back）退化为 -E -，不拼垃圾进 argv", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("23|500\n") : ok("OUT"); },
+  });
+  await term.capture("work", { back: 100, endBack: Number.NaN });
+  await term.capture("work", { back: 100, endBack: 1.5 });
+  await term.capture("work", { back: 100, endBack: -1 });
+  await term.capture("work", { back: 100, endBack: 101 }); // 终点比起点还早
+  for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
+    expect(cap[cap.indexOf("-E") + 1]).toBe("-");
+  }
+  term.dispose();
+});
+
+test("capture({endBack}) 在 back 无效时一并忽略（区间无起点就没有区间）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("23|500\n") : ok("OUT"); },
+  });
+  await term.capture("work", { back: -5, endBack: 10 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  expect(cap[cap.indexOf("-E") + 1]).toBe("-");
   term.dispose();
 });
 

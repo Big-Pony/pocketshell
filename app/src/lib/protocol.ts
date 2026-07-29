@@ -103,11 +103,22 @@ export interface TermHistoryResult {
 // 给 xterm 看：默认不带颜色（`-e` 关掉后 tmux 输出即纯文本，实测 3.6b 一个 SGR
 // 都没有）。没有 seq——它不接管实时流，纯粹是一次性取文本。
 //
-// 请求参数：{ session: string; colors?: boolean; back?: number }
+// 请求参数：{ session: string; colors?: boolean; back?: number; endBack?: number }
 //   back = 「从光标往上数几行开始取」。**是相对光标的距离，不是绝对行号**：
 //   前端 xterm 的行坐标与 tmux 的可见区顶行不同源（实测同一 pane，xterm
 //   cursorY=23 而 tmux cursor_y=3），传绝对行号会切错段。后端用 tmux 自己的
 //   `#{cursor_y}` 把它解析成 `-S`。
+//   endBack = 同一把尺子的另一端：区间在光标往上第几行**闭合**（含该行）。
+//   不给就是 `-E -`（可见区底部，老调用方的行为）。两个都给即取
+//   `back - endBack + 1` 行 —— 复制模式的「上翻加载更早 200 行」靠它，
+//   否则每页都要把底部已经加载过的内容重传一遍。实测 tmux 3.6b 相邻区间
+//   精确拼接（`-S -50 -E -41` 与 `-S -100 -E -91` 各 10 行、不重不漏）。
 export interface TermCaptureResult {
   data: string; // base64 的 capture-pane 字节；colors 未开时为纯文本
+  // 这一页之前**没有更早的内容**了。必须由后端算，前端两条显而易见的推断都
+  // 是错的（均在 tmux 3.6b 实测）：`-J` 会把折行接成一行，所以「返回行数少于
+  // 请求行数」不代表到顶；越过顶部 tmux 也不报错、不返回空，而是**钳位重发
+  // 最老那一行**（hist=379 时 -S -900 与 -S -379 返回同一行），前端照着翻会
+  // 无限追加重复内容。后端用 `#{history_size}` 定位最老一行来判定。
+  atTop: boolean;
 }

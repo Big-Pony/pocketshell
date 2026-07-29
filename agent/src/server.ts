@@ -608,15 +608,17 @@ export function startServer(deps: Deps = {}) {
               break;
             }
             // 复制路径专用：默认纯文本（无 SGR），可给 back（光标往上第几行）
-            // 只取某一轮命令的输出。不取 seq —— 它不接管实时流。
-            // shell 会话没有 tmux pane，与 term.history 一样退化为空。
+            // 只取某一轮命令的输出，再给 endBack 就是一个闭区间（复制模式上翻
+            // 分页靠它，否则每页都要重传底部已有内容）。不取 seq —— 它不接管
+            // 实时流。shell 会话没有 tmux pane，与 term.history 一样退化为空。
             case "term.capture": {
               const sid = String(p.session);
               result = shell.has(sid)
-                ? { data: "" }
+                ? { data: "", atTop: true }
                 : await terminal.capture(sid, {
                     colors: !!p.colors,
                     back: p.back == null ? undefined : Number(p.back),
+                    endBack: p.endBack == null ? undefined : Number(p.endBack),
                   });
               break;
             }
