@@ -640,13 +640,13 @@ export function startServer(deps: Deps = {}) {
               return;
             }
             case "update.check": {
-              // The switch(method) block above this line is synchronous end to
-              // end, but checkLatest() needs to await a network call. Rather
-              // than promote handleClient/onMessage to async (touching every
-              // other case's control flow), this case sends its own response
-              // from an async IIFE and returns immediately — mirroring the
-              // `default:` branch below, which already returns early to bypass
-              // the post-switch sendRpcResult(...) call.
+              // checkLatest() needs to await a network call. This case sends its
+              // own response from an async IIFE and returns immediately —
+              // mirroring the `default:` branch below, which already returns
+              // early to bypass the post-switch sendRpcResult(...) call.
+              // (handleClient is async since term.history moved to tmuxAsync, so
+              // the IIFE is no longer strictly required here; it is kept because
+              // returning early also skips the shared post-switch send path.)
               const force = !!p.force;
               void (async () => {
                 try {
@@ -756,7 +756,17 @@ export function startServer(deps: Deps = {}) {
       }
       return;
     }
-    handleClient(conn, text);
+    // handleClient 是 async（term.history 走 tmuxAsync），而它的 switch 主体不在
+    // 总 try/catch 里：一次 reject（tmux 缺失、spawn 失败）会变成未处理的 Promise
+    // rejection 直接掀掉进程，而不是像同步时代那样被这里兜住。回一条 rpc 风格的
+    // error 帧让客户端能自愈，不静默吞掉。
+    void handleClient(conn, text).catch((e) => {
+      try {
+        sendSecure(conn, { type: "error", code: "internal", message: String(e) });
+      } catch {
+        // 连回错都失败（信道已废）——放弃，别再抛
+      }
+    });
   };
 
   const onlineIpByPub = () => {
