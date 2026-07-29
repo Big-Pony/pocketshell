@@ -72,6 +72,7 @@
   import { onMount, onDestroy } from "svelte";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
+  import { WebglAddon } from "@xterm/addon-webgl";
   import { Connection } from "../lib/connection";
   import { fromB64 } from "../lib/bytes";
 
@@ -166,6 +167,19 @@
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    // 渲染器：默认的 DOM 渲染器每个字符一个 <span>，2000 行 × 80 列 ≈ 16 万节点，
+    // 是「打开大输出会话卡十几秒」的耗时主项。WebGL 走 GPU 纹理图集，快一个量级。
+    // 必须能静默回落：不支持 WebGL2 的设备（旧安卓、关了硬件加速的浏览器）若让
+    // 异常冒出去会白屏，而 DOM 渲染器虽慢但永远可用。
+    // onContextLoss 覆盖「先成功、后来 GPU 上下文被系统回收」的情况（手机切后台
+    // 常见），此时同样要退回 DOM 而不是留一个死画面。
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {
+      // 回落到 DOM 渲染器（xterm 默认），不打扰用户
+    }
     // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays
     // editable the phone keyboard pops up (and, because our on-screen keys
     // preventDefault focus-steal, never leaves). xterm is display-only here

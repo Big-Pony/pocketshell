@@ -21,6 +21,7 @@
         "@codemirror/view": "^6.43.6",
         "@lezer/highlight": "^1.2.3",
         "@xterm/addon-fit": "^0.10.0",
+        "@xterm/addon-webgl": "0.18.0",
         "@xterm/xterm": "^5.5.0",
         "dompurify": "^3.4.12",
         "highlight.js": "^11.11.1",
@@ -282,6 +283,8 @@
     "@vitest/utils": ["@vitest/utils@2.1.9", "https://mirrors.cloud.tencent.com/npm/@vitest/utils/-/utils-2.1.9.tgz", { "dependencies": { "@vitest/pretty-format": "2.1.9", "loupe": "^3.1.2", "tinyrainbow": "^1.2.0" } }, "sha512-v0psaMSkNJ3A2NMrUEHFRzJtDPFn+/VWZ5WxImB21T9fjucJRmS7xCS3ppEnARb9y11OAzaD+P2Ps+b+BGX5iQ=="],
 
     "@xterm/addon-fit": ["@xterm/addon-fit@0.10.0", "https://mirrors.cloud.tencent.com/npm/@xterm/addon-fit/-/addon-fit-0.10.0.tgz", { "peerDependencies": { "@xterm/xterm": "^5.0.0" } }, "sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ=="],
+
+    "@xterm/addon-webgl": ["@xterm/addon-webgl@0.18.0", "https://mirrors.cloud.tencent.com/npm/@xterm/addon-webgl/-/addon-webgl-0.18.0.tgz", { "peerDependencies": { "@xterm/xterm": "^5.0.0" } }, "sha512-xCnfMBTI+/HKPdRnSOHaJDRqEpq2Ugy8LEj9GiY4J3zJObo3joylIFaMvzBwbYRg8zLtkO0KQaStCeSfoaI2/w=="],
 
     "@xterm/xterm": ["@xterm/xterm@5.5.0", "https://mirrors.cloud.tencent.com/npm/@xterm/xterm/-/xterm-5.5.0.tgz", {}, "sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A=="],
 
