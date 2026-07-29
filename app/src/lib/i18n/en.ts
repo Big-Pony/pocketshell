@@ -208,10 +208,14 @@ export default {
     title: "Copy mode",
     hint: "Long-press to select",
     loading: "Loading…",
-    selectAll: "All",
+    selectAll: "Select loaded",
     copy: "Copy",
     done: "Done",
     empty: "Nothing to copy",
+    loadingMore: "Loading earlier…",
+    scrollUpForMore: "Scroll up to load earlier output",
+    noMore: "Start of history",
+    loadedRows: "{n} rows loaded",
   },
   tasks: {
     state: {
