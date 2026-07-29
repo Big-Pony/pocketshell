@@ -155,7 +155,10 @@
       // without a UTF-8 locale under launchd; fixed by `tmux -u` in
       // agent/src/terminal.ts. This chain is kept as a belt-and-suspenders.
       fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
-      scrollback: 5000,
+      // 对齐 tmux 的 history-limit（2000）：capture-pane 最多就吐这么多行，
+      // 多出的配额只会白占内存（xterm.js#791 实测 160×24 + 5000 行 ≈ 34MB）。
+      // 若日后调大 tmux history-limit，这里要同步调大，否则历史会被 xterm 截断。
+      scrollback: 2000,
       unicodeVersion: "11",
       convertEol: false,
       cursorBlink: true,
