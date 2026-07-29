@@ -12,6 +12,7 @@
     "dev": "vite",
     "build": "vite build && bun run scripts/compress-dist.ts",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "gen:icons": "bun run scripts/gen-icons.ts"
   },
   "dependencies": {
@@ -48,6 +49,7 @@
     "@types/markdown-it": "^14.1.2",
     "jsdom": "^25.0.0",
     "svelte": "^5.0.0",
+    "typescript": "^7.0.2",
     "vite": "^5.4.0",
     "vitest": "^2.1.0"
   }

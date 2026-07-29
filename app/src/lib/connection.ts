@@ -81,6 +81,32 @@ export interface LinkMetrics {
 
 type MetricsCb = (m: LinkMetrics) => void;
 
+// ---- rpc 死线 ----
+// 旧实现给每个 rpc 一个固定 10s 死线，但计时器在**入队**那一刻就开始跑：
+// uploadChunksWindowed 会同时压 4 片、每片上线约 60KB，第 4 片的预算全耗在
+// 等前 3 片排空上。上行低于约 200kbps 时这个死线物理上不可能满足，健康的上传
+// 会在几百 KB 处整体失败（实测 150kbps 必现，同链路把窗口降到 1 就正常）。
+//
+// 改为按「排在前面 + 自己」的字节数放大：基线仍是 10s（小 rpc 行为不变，
+// 活性检测照旧），再按一个保守的最低可用带宽折算传输时间。这不是在猜真实
+// 带宽，而是给出一个「慢到这个程度也不该判死」的下界。
+export const RPC_BASE_TIMEOUT_MS = 10_000;
+// 保守下界：50kbps 有效上行。比这更慢的链路上传本来也没有可用性可言。
+const MIN_ASSUMED_BYTES_PER_SEC = (50 * 1000) / 8;
+// 硬上限：再慢也必须有个尽头，否则 agent 假死时前端会永远挂着。
+export const RPC_MAX_TIMEOUT_MS = 5 * 60_000;
+
+// 10s 基线本身就够排空这么多字节（按上面的下界算），所以只有超出这部分的
+// 排队量才需要额外加时——小 rpc 因此拿到的仍是**恰好** 10s，行为零变化。
+const BASE_COVERED_BYTES = (RPC_BASE_TIMEOUT_MS / 1000) * MIN_ASSUMED_BYTES_PER_SEC;
+
+/** 给定「本次 rpc 及其之前排队的字节数」，算出该用多长的死线。 */
+export function rpcDeadlineMs(queuedBytes: number): number {
+  const excess = Math.max(0, queuedBytes - BASE_COVERED_BYTES);
+  const drainMs = (excess / MIN_ASSUMED_BYTES_PER_SEC) * 1000;
+  return Math.min(RPC_MAX_TIMEOUT_MS, RPC_BASE_TIMEOUT_MS + drainMs);
+}
+
 export class Connection {
   private ws!: WebSocketLike;
   private open = false;
@@ -102,7 +128,9 @@ export class Connection {
   private establishedThisSocket = false;
   private pairFailStreak = 0;
   private rpcSeq = 0;
-  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }>();
+  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number; bytes?: number }>();
+  // 已发出但未结算的 rpc 字节总量，用于把死线按排队量放大（见 rpcDeadlineMs）。
+  private inflightBytes = 0;
   // WP-6: rpcChunk reassembly buffers share the pending rpc's exact lifetime —
   // dropped on settle/timeout, cleared on disconnect.
   private chunks = new ChunkReassembler();
@@ -235,17 +263,30 @@ export class Connection {
 
   rpc(method: string, params?: unknown): Promise<unknown> {
     const id = String(++this.rpcSeq);
+    const raw = encode({ type: "rpc", id, method, params } as ClientMsg);
+    const bytes = raw.length; // UTF-8 ≈ length here; payloads are base64/ASCII
     return new Promise<unknown>((resolve, reject) => {
+      // The deadline covers everything queued AHEAD of this call too: on a
+      // slow uplink those bytes must drain before this rpc's own bytes even
+      // start moving, and its timer is already running the whole time.
+      const budgetFor = this.inflightBytes + bytes;
       const timer = this.sched.setTimeout(() => {
+        this.releaseRpc({ bytes });
         this.pending.delete(id);
         this.chunks.drop(id);
         const e = new Error("rpc_timeout") as Error & { code?: string };
         e.code = "rpc_timeout";
         reject(e);
-      }, 10_000);
-      this.pending.set(id, { resolve, reject, timer });
+      }, rpcDeadlineMs(budgetFor));
+      this.inflightBytes += bytes;
+      this.pending.set(id, { resolve, reject, timer, bytes });
       this.send({ type: "rpc", id, method, params });
     });
+  }
+
+  /** Release an rpc's queued-byte reservation once it settles (any outcome). */
+  private releaseRpc(p: { bytes?: number }): void {
+    this.inflightBytes = Math.max(0, this.inflightBytes - (p.bytes ?? 0));
   }
 
   private rejectAllPending(): void {
@@ -256,6 +297,7 @@ export class Connection {
       p.reject(e);
     }
     this.pending.clear();
+    this.inflightBytes = 0;
     this.chunks.clear();
   }
 
@@ -427,6 +469,7 @@ export class Connection {
       const p = this.pending.get(msg.id);
       if (p) {
         this.pending.delete(msg.id);
+        this.releaseRpc(p);
         this.chunks.drop(msg.id); // defensive: single frame after partial chunks
         this.sched.clearTimeout(p.timer);
         if (msg.ok) p.resolve(msg.result);
@@ -479,6 +522,7 @@ export class Connection {
       this.chunks.drop(msg.id);
       if (p) {
         this.pending.delete(msg.id);
+        this.releaseRpc(p);
         this.sched.clearTimeout(p.timer);
         const e = new Error(`rpc_chunk_invalid:${r.reason}`) as Error & { code?: string };
         e.code = "rpc_chunk_invalid";

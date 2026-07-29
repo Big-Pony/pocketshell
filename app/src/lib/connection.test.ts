@@ -1,5 +1,5 @@
 import { test, expect, vi } from "vitest";
-import { Connection, type WebSocketLike, type Scheduler } from "./connection";
+import { Connection, rpcDeadlineMs, RPC_BASE_TIMEOUT_MS, RPC_MAX_TIMEOUT_MS, type WebSocketLike, type Scheduler } from "./connection";
 import { encode, decodeClient, type ServerMsg } from "./protocol";
 import { toB64 } from "./bytes";
 
@@ -74,6 +74,68 @@ test("rpc rejects with rpc_timeout after 10s", async () => {
   const h = harness();
   const p = h.conn.rpc("fs.tree", { path: "/" });
   const guard = expect(p).rejects.toMatchObject({ code: "rpc_timeout" });
+  h.sched.advance(10_000);
+  await guard;
+});
+
+// ──────────────────────────────────────────────────────────────
+// Bandwidth-aware rpc deadline. The fixed 10s timer was a deadline on a
+// QUEUE the caller does not control: uploadChunksWindowed keeps 4 chunks of
+// ~60KB wire bytes in flight, so chunk #4's timer starts while chunks #1-3
+// still occupy the uplink. Below ~200kbps that is unmeetable and a healthy
+// upload dies at a few hundred KB. The deadline now grows with the bytes
+// queued ahead of the call, so a slow link stretches the budget instead of
+// failing; a dead agent is still caught because the budget is finite.
+// ──────────────────────────────────────────────────────────────
+
+test("rpcDeadlineMs: base for small payloads, grows with queue, hard-capped", () => {
+  expect(rpcDeadlineMs(0)).toBe(RPC_BASE_TIMEOUT_MS);
+  expect(rpcDeadlineMs(1_000)).toBe(RPC_BASE_TIMEOUT_MS);   // covered by the base
+  // A full 4×60KB upload window queued ahead must buy well beyond the base.
+  expect(rpcDeadlineMs(4 * 60_000)).toBeGreaterThan(RPC_BASE_TIMEOUT_MS * 2);
+  expect(rpcDeadlineMs(Number.MAX_SAFE_INTEGER)).toBe(RPC_MAX_TIMEOUT_MS);
+});
+
+test("chunks queued behind a full upload window survive past 10s", async () => {
+  const h = harness();
+  // The real upload window: 4 chunks of ~60KB issued back-to-back. Chunk #1 is
+  // at the head of the queue and legitimately keeps the base deadline; #2-#4
+  // are the ones the old fixed timer killed while they waited their turn.
+  const ps = Array.from({ length: 4 }, () => h.conn.rpc("fs.uploadChunk", { dataB64: "x".repeat(60_000) }));
+  const outcomes = ps.map((p) => p.then(() => "ok", (e) => e.code));
+  h.deliver({ type: "response", id: "1", ok: true, result: { written: 1 } } as any);
+  // Well past the old deadline — the slow uplink is still draining chunk #1.
+  h.sched.advance(15_000);
+  for (let i = 1; i < 4; i++) {
+    h.deliver({ type: "response", id: String(i + 1), ok: true, result: { written: 1 } } as any);
+  }
+  await expect(Promise.all(outcomes)).resolves.toEqual(["ok", "ok", "ok", "ok"]);
+});
+
+test("a small rpc keeps the 10s base deadline", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.tree", { path: "/" });
+  const guard = expect(p).rejects.toMatchObject({ code: "rpc_timeout" });
+  h.sched.advance(10_000);
+  await guard;
+});
+
+test("the deadline is finite even for a huge queue (dead agent still detected)", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.uploadChunk", { dataB64: "x".repeat(60_000) });
+  const guard = expect(p).rejects.toMatchObject({ code: "rpc_timeout" });
+  h.sched.advance(10 * 60_000); // 10 minutes: nothing may hang forever
+  await guard;
+});
+
+test("queued bytes are released once an rpc settles, so later rpcs are not over-budgeted", async () => {
+  const h = harness();
+  const big = h.conn.rpc("fs.uploadChunk", { dataB64: "x".repeat(60_000) });
+  h.deliver({ type: "response", id: "1", ok: true, result: {} } as any);
+  await expect(big).resolves.toEqual({});
+  // With the queue drained, a small rpc is back to the base deadline.
+  const small = h.conn.rpc("fs.tree", { path: "/" });
+  const guard = expect(small).rejects.toMatchObject({ code: "rpc_timeout" });
   h.sched.advance(10_000);
   await guard;
 });
