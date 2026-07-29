@@ -123,6 +123,76 @@ test("history() captures the pane even when alternate_on is set", async () => {
   term.dispose();
 });
 
+// ---- capture(): 复制路径用的纯文本导出（任务2/3）----
+// 实测（tmux 3.6b）：capture-pane 不带 -e 输出就是干净纯文本，一个 SGR 转义
+// 都没有；带 -e 才有颜色。复制要的是可粘贴的文本，所以走不带 -e 的那条。
+
+test("capture() 默认不带 -e —— 复制路径要纯文本，不能夹 SGR 转义", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("PLAIN_1\nPLAIN_2"); },
+  });
+  const r = await term.capture("work");
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("PLAIN_1\nPLAIN_2");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).not.toContain("-e");
+  expect(cap).toEqual(["-u", "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("capture({colors:true}) 才加 -e —— 首屏 seed 仍要颜色", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("X"); },
+  });
+  await term.capture("work", { colors: true });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("capture({start}) 把起点行号传给 -S（任务3 的回车锚点）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("OUT"); },
+  });
+  await term.capture("work", { start: 12 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-p", "-J", "-S", "12", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("capture({start}) 非整数/负数一律退回全量 -S -（不把垃圾拼进 argv）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("OUT"); },
+  });
+  await term.capture("work", { start: -5 });
+  await term.capture("work", { start: Number.NaN });
+  for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
+    expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  }
+  term.dispose();
+});
+
+test("capture() 失败返回空 data 而不是抛", async () => {
+  const term = new TerminalService({ tmux: () => fail() });
+  expect(await term.capture("gone")).toEqual({ data: "" });
+  term.dispose();
+});
+
+test("history() 仍是带颜色的全量 capture（委托 capture 后行为不变）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("H"); },
+  });
+  const r = await term.history("work", 9);
+  expect(r.seq).toBe(9);
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
 test("paneInfo() reports current command and alternate-screen state", () => {
   const term = new TerminalService({
     tmux: (args) => (args[0] === "display-message" ? ok("vim|1") : ok()),

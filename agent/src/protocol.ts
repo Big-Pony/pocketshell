@@ -57,7 +57,8 @@ export type ClientMsg =
   | { type: "removeHint"; id: string }
   | { type: "clearHints" }
   | { type: "revokeDevice"; pubKey: string }
-  // rpc methods: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply / hints.list
+  // rpc methods: fs.* / git.* / term.* (history/capture/paneInfo/redraw) /
+  // terminal.pwd / preview.mint / update.check / update.apply / hints.list
   | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =
@@ -110,4 +111,14 @@ export function decodeServer(raw: string): ServerMsg {
 export interface TermHistoryResult {
   data: string; // base64 的 capture-pane 原始字节（含 SGR）
   seq: number; // 快照时的 replay latestSeq；无输出记录时为 0
+}
+
+// term.capture 的 rpc 响应体。与 term.history 的区别是**给人看/给剪贴板**而不是
+// 给 xterm 看：默认不带颜色（`-e` 关掉后 tmux 输出即纯文本，实测 3.6b 一个 SGR
+// 都没有），可选 `start` 指定起始行（复制某一轮命令的输出）。没有 seq——它不接管
+// 实时流，纯粹是一次性取文本。
+//
+// 请求参数：{ session: string; colors?: boolean; start?: number }
+export interface TermCaptureResult {
+  data: string; // base64 的 capture-pane 字节；colors 未开时为纯文本
 }

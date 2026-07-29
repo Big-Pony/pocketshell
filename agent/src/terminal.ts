@@ -209,9 +209,39 @@ export class TerminalService {
   // the frontend fall back to attach(0) and replay the whole ring buffer,
   // which is exactly the double-render this change removes.
   async history(name: string, seq: number): Promise<TermHistoryResult> {
-    const res = await this.tmuxAsync(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", name]);
-    if (res.exitCode !== 0) return { data: "", seq };
-    return { data: toB64(res.stdout), seq };
+    const { data } = await this.capture(name, { colors: true });
+    return { data, seq };
+  }
+
+  // Generalised pane export. `history()` above is the coloured full-scrollback
+  // flavour; the copy paths want something different on both axes:
+  //
+  //   colors — OFF by default. Verified on tmux 3.6b: WITHOUT `-e` the output
+  //     carries not a single SGR escape, so it is directly pasteable. `-e` is
+  //     only for the on-screen seed, where xterm re-interprets the colours.
+  //   start  — first line to capture, passed straight to `-S`. Negative indices
+  //     are tmux's scrollback coordinates and 0 is the top visible row, so a
+  //     caller that knows where the current command began (the frontend records
+  //     the buffer row when it sends a Return) gets exactly that command's
+  //     output instead of guessing at prompt regexes. Omitted → `-S -` (all).
+  //
+  // `start` is validated here rather than trusted: it crosses the wire from the
+  // client, and a NaN/negative would either be pasted into argv as garbage or
+  // silently reinterpreted by tmux as a scrollback offset (returning far MORE
+  // than asked for). Anything not a non-negative integer degrades to the full
+  // capture — the caller's fallback path, not an error.
+  //
+  // Async for the same reason history() is: a large capture through the SYNC
+  // runner blocks Bun's event loop and freezes output for every other session.
+  async capture(name: string, opts?: { colors?: boolean; start?: number }): Promise<{ data: string }> {
+    const s = opts?.start;
+    const from = typeof s === "number" && Number.isInteger(s) && s >= 0 ? String(s) : "-";
+    const args = ["-u", "capture-pane"];
+    if (opts?.colors) args.push("-e");
+    args.push("-p", "-J", "-S", from, "-E", "-", "-t", name);
+    const res = await this.tmuxAsync(args);
+    if (res.exitCode !== 0) return { data: "" };
+    return { data: toB64(res.stdout) };
   }
 
   // Snapshot of the tmux pane's current state. Used by the frontend to decide

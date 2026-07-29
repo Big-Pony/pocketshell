@@ -607,6 +607,19 @@ export function startServer(deps: Deps = {}) {
               result = shell.has(sid) ? { data: "", seq } : await terminal.history(sid, seq);
               break;
             }
+            // 复制路径专用：默认纯文本（无 SGR），可给 start 只取某一轮命令的
+            // 输出。不取 seq —— 它不接管实时流。shell 会话没有 tmux pane，
+            // 与 term.history 一样退化为空。
+            case "term.capture": {
+              const sid = String(p.session);
+              result = shell.has(sid)
+                ? { data: "" }
+                : await terminal.capture(sid, {
+                    colors: !!p.colors,
+                    start: p.start == null ? undefined : Number(p.start),
+                  });
+              break;
+            }
             case "term.paneInfo": result = shell.has(String(p.session)) ? { currentCommand: "", alternateOn: false, isShell: true } : terminal.paneInfo(String(p.session)); break;
             case "term.redraw": result = shell.has(String(p.session)) ? { ok: true } : terminal.redraw(String(p.session)); break;
             case "terminal.pwd": result = shell.has(String(p.session)) ? { pwd: "" } : terminal.pwd(String(p.session)); break;

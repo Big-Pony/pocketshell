@@ -285,6 +285,22 @@ test("rpc term.history with an oversize scrollback arrives COMPLETE via rpcChunk
   srv.stop();
 });
 
+test("rpc term.capture 把 colors/start 透传给 tmux，并走同一条分片通道", async () => {
+  const calls: string[][] = [];
+  const terminal = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("PLAIN"); },
+  });
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
+  const frames = await rpcFramesAsync(srv, "c1", "term.capture", { session: "work", start: 7 });
+  const reply = decodeServer(Buffer.from(frames[0]).toString("utf8"));
+  if (reply.type !== "response" || !reply.ok) throw new Error("expected ok response");
+  expect(Buffer.from((reply.result as any).data, "base64").toString("utf8")).toBe("PLAIN");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).not.toContain("-e"); // 复制路径默认纯文本
+  expect(cap[cap.indexOf("-S") + 1]).toBe("7");
+  srv.stop();
+});
+
 test("rpc error replies stay single-frame (ok:false, never chunked)", () => {
   const srv = startServer({ port: 0, channelFactory: passthroughResponder });
   const frames = rpcFrames(srv, "e1", "fs.read", { path: "/no/such/file" });
