@@ -607,9 +607,9 @@ export function startServer(deps: Deps = {}) {
               result = shell.has(sid) ? { data: "", seq } : await terminal.history(sid, seq);
               break;
             }
-            // 复制路径专用：默认纯文本（无 SGR），可给 start 只取某一轮命令的
-            // 输出。不取 seq —— 它不接管实时流。shell 会话没有 tmux pane，
-            // 与 term.history 一样退化为空。
+            // 复制路径专用：默认纯文本（无 SGR），可给 back（光标往上第几行）
+            // 只取某一轮命令的输出。不取 seq —— 它不接管实时流。
+            // shell 会话没有 tmux pane，与 term.history 一样退化为空。
             case "term.capture": {
               const sid = String(p.session);
               result = shell.has(sid)
