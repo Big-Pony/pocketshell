@@ -516,13 +516,19 @@ export class Connection {
   newSession(name: string, opt: { cmd?: string; cwd?: string; kind?: "tmux" | "shell" } = {}): void {
     this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd, kind: opt.kind });
   }
-  attach(sessionId: string, lastSeq?: number): void {
+  // opts.seed：这次 attach 紧跟在一份 term.history 快照之后，传入的 seq 就是
+  // 快照那一刻的进度，必须覆盖 seen —— 重挂载时 seen 里可能残留上一轮的旧值。
+  //
+  // 不传 seed 时保持原语义：seen 优先。断线重连的 flushAndRestore 依赖这条，
+  // seen 是「我确实已收到第 N 帧」的真实进度，被更小的数覆盖会重放已看过的内容。
+  attach(sessionId: string, lastSeq?: number, opts?: { seed?: boolean }): void {
     const subscribed = this.attached.has(sessionId);
     this.attached.add(sessionId);
-    const seq = this.seen.get(sessionId) ?? lastSeq ?? 0;
+    const seq = opts?.seed ? (lastSeq ?? 0) : (this.seen.get(sessionId) ?? lastSeq ?? 0);
     // Persist the resume point so the reconnect replay (flushAndRestore) picks
     // it up even when this attach happened while the transport was down.
-    if (!this.seen.has(sessionId)) this.seen.set(sessionId, seq);
+    // A seed overwrites unconditionally; a plain attach only fills a gap.
+    if (opts?.seed || !this.seen.has(sessionId)) this.seen.set(sessionId, seq);
     // No frame when the server is already subscribed on this socket (remount /
     // restored-tab re-attach): a duplicate attach only re-sends the backlog.
     // No frame while the transport is down either: flushAndRestore re-attaches
