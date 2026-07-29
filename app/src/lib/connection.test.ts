@@ -379,3 +379,23 @@ test("onMetrics unsubscribes cleanly", () => {
   h.sched.advance(1000);
   expect(seen.length).toBe(n);
 });
+
+test("attach 默认沿用 seen 记账，不被传入的 seq 倒退覆盖", () => {
+  const h = harness();
+  // 先收一帧，把 seen 推到 5
+  h.deliver({ type: "output", sessionId: "work", seq: 5, data: toB64(new Uint8Array([65])) } as any);
+  h.conn.attach("work", 1); // 传入一个更小的 seq
+  // sent[0] 是握手原始字节（非 JSON），只解最后一帧——即刚发出的 attach。
+  const att = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(att.type).toBe("attach");
+  expect(att.lastSeq).toBe(5); // seen 赢，不是传入的 1
+});
+
+test("attach 传 seed:true 时用传入的 seq 覆盖 seen（首屏快照接管）", () => {
+  const h = harness();
+  h.deliver({ type: "output", sessionId: "work", seq: 5, data: toB64(new Uint8Array([65])) } as any);
+  h.conn.attach("work", 99, { seed: true });
+  const att = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(att.type).toBe("attach");
+  expect(att.lastSeq).toBe(99); // 传入值赢
+});

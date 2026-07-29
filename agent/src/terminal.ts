@@ -5,7 +5,12 @@ import { spawnPty, type PtyHandle } from "./pty";
 import { inferState, StateHysteresis } from "./state";
 import { toB64 } from "./bytes";
 import { cjkFallbackLang } from "./pty-env";
-import type { SessionMeta } from "./protocol";
+import type { SessionMeta, TermHistoryResult } from "./protocol";
+
+// Sanity bound for capture()'s `back`. Generous next to tmux's default
+// history-limit (2000) so a legitimate anchor is never rejected, small enough
+// that a corrupt value can't become a silly argv token.
+export const CAPTURE_BACK_LIMIT = 1_000_000;
 
 interface Live {
   pty: PtyHandle;
@@ -196,10 +201,139 @@ export class TerminalService {
   // A full 2000-line scrollback (~200KB of SGR) does not fit one Noise frame;
   // the rpc layer chunks oversize responses (WP-6), so this always returns the
   // complete capture — the WP-1 halving-retry shrink is gone.
-  history(name: string): { data: string } {
-    const res = this.tmux(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", name]);
-    if (res.exitCode !== 0) return { data: "" };
-    return { data: toB64(res.stdout) };
+  //
+  // ASYNC on purpose: a 200KB capture through the SYNC runner blocks Bun's
+  // event loop, freezing output for EVERY other session for the duration.
+  // captureLastLine() above already uses tmuxAsync for the same reason.
+  //
+  // `seq` is passed in rather than read here: TerminalService owns no
+  // ReplayService reference (they only meet in server.ts), and injecting one
+  // would couple a plain tmux wrapper to replay bookkeeping. The caller takes
+  // the number BEFORE awaiting this capture — see the server.ts call site.
+  // It is echoed back unchanged, including on failure: dropping it would make
+  // the frontend fall back to attach(0) and replay the whole ring buffer,
+  // which is exactly the double-render this change removes.
+  async history(name: string, seq: number): Promise<TermHistoryResult> {
+    const { data } = await this.capture(name, { colors: true });
+    return { data, seq };
+  }
+
+  // Generalised pane export. `history()` above is the coloured full-scrollback
+  // flavour; the copy paths want something different on both axes:
+  //
+  //   colors — OFF by default. Verified on tmux 3.6b: WITHOUT `-e` the output
+  //     carries not a single SGR escape, so it is directly pasteable. `-e` is
+  //     only for the on-screen seed, where xterm re-interprets the colours.
+  //   back   — how many rows ABOVE the cursor to start from, i.e. "the last N
+  //     rows of the session". Resolved here into `-S` against tmux's own
+  //     `#{cursor_y}`:
+  //
+  //         -S = cursor_y - back
+  //
+  //     Verified on tmux 3.6b: `-S 0` is the top of the VISIBLE screen and
+  //     negative values count up into scrollback, so this yields 0-or-positive
+  //     while the screen is not yet full and goes negative once the start has
+  //     scrolled off — measured correct in both regimes plus the mixed case.
+  //
+  //     Why cursor-RELATIVE instead of an absolute row from the client: the
+  //     frontend's xterm and this tmux pane do NOT share a row origin. xterm's
+  //     `baseY` counts its own scrollback, and after a history seed its cursor
+  //     can sit at the bottom of the screen while tmux's real cursor is still
+  //     near the top (tmux pads the pane with blank rows that the seed does not
+  //     reproduce as cursor movement). Measured: xterm cursorY=23 against tmux
+  //     cursor_y=3 for the same pane. A distance above the cursor is invariant
+  //     to that skew; an absolute row is not, and silently copied the wrong
+  //     slice. The frontend therefore sends a distance and tmux resolves it.
+  //
+  //   endBack — the OTHER end of the same ruler: how many rows above the cursor
+  //     the slice STOPS at, inclusive. Omitted (the original behaviour, kept for
+  //     every existing caller) means `-E -`, the bottom of the visible screen.
+  //     Given both, the slice covers `back - endBack + 1` rows:
+  //
+  //         -S = cursor_y - back      -E = cursor_y - endBack
+  //
+  //     This is what makes copy mode's "load 200 more rows" pagination possible
+  //     at all: with the end pinned to the bottom, every page would re-ship
+  //     everything already on screen. Verified on tmux 3.6b that adjacent
+  //     ranges tile exactly — `-S -50 -E -41` and `-S -100 -E -91` are ten rows
+  //     each with no overlap and no gap.
+  //
+  // `back`/`endBack` are validated rather than trusted: they cross the wire, and
+  // a NaN or a float would be pasted into argv as garbage. Anything rejected
+  // degrades to the full capture — strictly more data, never an error. An
+  // `endBack` above `back` (an inverted range) is rejected the same way; without
+  // a valid `back` there is no ruler to measure it against, so it is ignored.
+  //
+  // atTop tells the client "there is nothing older than this page", and it has
+  // to be computed HERE because neither of the obvious client-side proxies
+  // works (both measured on tmux 3.6b):
+  //
+  //   - "fewer lines came back than I asked for" is wrong because `-J` JOINS
+  //     tmux-folded rows, so a 6-row request on a 40-column pane legitimately
+  //     returns 4 lines of text.
+  //   - "an empty page means the end" is wrong because tmux does not report
+  //     going past the top. It CLAMPS: with history_size=379, `-S -900` and
+  //     `-S -379` return the same oldest row, so a client walking upwards would
+  //     silently re-render duplicates forever.
+  //
+  // So the oldest addressable row is asked for directly (`#{history_size}`, the
+  // scrollback depth, putting the oldest row at `-S -history_size`) and the
+  // range is compared against it. A range that starts at or above that row is
+  // the last page; a range whose END is already above it does not exist at all
+  // and returns empty rather than tmux's clamped duplicate.
+  //
+  // Overshoot downward (measured): overshooting POSITIVE (past the bottom)
+  // yields an EMPTY capture, exit 0 — a stale anchor degrades to "nothing to
+  // copy" rather than the wrong text.
+  //
+  // Async for the same reason history() is: a large capture through the SYNC
+  // runner blocks Bun's event loop and freezes output for every other session.
+  async capture(
+    name: string,
+    opts?: { colors?: boolean; back?: number; endBack?: number },
+  ): Promise<{ data: string; atTop: boolean }> {
+    const b = opts?.back;
+    const e = opts?.endBack;
+    const valid = (n: unknown): n is number =>
+      typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= CAPTURE_BACK_LIMIT;
+    const wants = valid(b);
+    // The end is only meaningful inside a valid range, and must not sit ABOVE
+    // the start (endBack counts upward, so a larger value is EARLIER).
+    const wantsEnd = wants && valid(e) && (e as number) <= (b as number);
+    let from = "-";
+    let to = "-";
+    // Without a start row the capture is the whole scrollback, which is by
+    // definition already at the top.
+    let atTop = true;
+    if (wants) {
+      // tmux is the only authority on where its cursor is and how deep its
+      // history goes; ask it, and fall back to the full capture if the query
+      // fails (dead pane, missing tmux).
+      const q = await this.tmuxAsync([
+        "display-message", "-p", "-t", name, "#{cursor_y}|#{history_size}",
+      ]);
+      const [cyRaw = "", hsRaw = ""] = new TextDecoder().decode(q.stdout).trim().split("|");
+      const y = Number(cyRaw);
+      const hist = Number(hsRaw);
+      if (q.exitCode === 0 && Number.isFinite(y)) {
+        const start = y - (b as number);
+        from = String(start);
+        if (wantsEnd) to = String(y - (e as number));
+        if (Number.isFinite(hist)) {
+          const oldest = -hist; // `-S -history_size` is the oldest addressable row
+          atTop = start <= oldest;
+          // The whole range sits above the oldest row: tmux would clamp and hand
+          // back a duplicate of the top, so answer honestly with nothing.
+          if (wantsEnd && y - (e as number) < oldest) return { data: "", atTop: true };
+        }
+      }
+    }
+    const args = ["-u", "capture-pane"];
+    if (opts?.colors) args.push("-e");
+    args.push("-p", "-J", "-S", from, "-E", to, "-t", name);
+    const res = await this.tmuxAsync(args);
+    if (res.exitCode !== 0) return { data: "", atTop: true };
+    return { data: toB64(res.stdout), atTop };
   }
 
   // Snapshot of the tmux pane's current state. Used by the frontend to decide

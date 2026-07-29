@@ -72,8 +72,11 @@
   import { onMount, onDestroy } from "svelte";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
+  import { WebglAddon } from "@xterm/addon-webgl";
+  import { installWebgl } from "../lib/webgl-renderer";
   import { Connection } from "../lib/connection";
   import { fromB64 } from "../lib/bytes";
+  import type { TermHistoryResult } from "../lib/protocol";
 
   let {
     conn,
@@ -154,7 +157,10 @@
       // without a UTF-8 locale under launchd; fixed by `tmux -u` in
       // agent/src/terminal.ts. This chain is kept as a belt-and-suspenders.
       fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
-      scrollback: 5000,
+      // 对齐 tmux 的 history-limit（2000）：capture-pane 最多就吐这么多行，
+      // 多出的配额只会白占内存（xterm.js#791 实测 160×24 + 5000 行 ≈ 34MB）。
+      // 若日后调大 tmux history-limit，这里要同步调大，否则历史会被 xterm 截断。
+      scrollback: 2000,
       unicodeVersion: "11",
       convertEol: false,
       cursorBlink: true,
@@ -166,6 +172,30 @@
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    // 渲染器：默认的 DOM 渲染器每个字符一个 <span>，2000 行 × 80 列 ≈ 16 万节点，
+    // 是「打开大输出会话卡十几秒」的耗时主项。WebGL 走 GPU 纹理图集，快一个量级。
+    // 必须能静默回落：不支持 WebGL2 的设备（旧安卓、关了硬件加速的浏览器）若让
+    // 异常冒出去会白屏，而 DOM 渲染器虽慢但永远可用——installWebgl 内部吞掉
+    // 构造异常，返回一个 active:false 的句柄即可。
+    //
+    // GPU 上下文丢失（手机长时间使用后系统回收显存）的恢复规则见
+    // lib/webgl-renderer.ts。这里只提供两个钩子：怎么造一个新 addon，以及
+    // 恢复后拿什么重画屏幕（reloadHistory —— 上下文死掉期间到达的字节没有任何
+    // 渲染器接住，屏上内容不可信，必须从 tmux 重灌）。
+    //
+    // 注意：webglHandle 在 onMount 里赋值，但 teardown 在下面才组装，两者都在
+    // 同一个闭包里，所以这里用 let + 后面 dispose 即可。
+    const webglHandle = installWebgl({
+      create: () => {
+        const addon = new WebglAddon();
+        term.loadAddon(addon);
+        return addon;
+      },
+      // reloadHistory 声明在下面（const 提升到同一函数作用域内的 TDZ 之后才被
+      // 调用——上下文丢失最早也要等 3 秒，早已越过 onMount 同步段）。
+      reseed: () => { void reloadHistory(); },
+      log: (m) => console.warn(m),
+    });
     // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays
     // editable the phone keyboard pops up (and, because our on-screen keys
     // preventDefault focus-steal, never leaves). xterm is display-only here
@@ -238,10 +268,12 @@
     // holds. Called once when the pane (re)enters shell mode and on a cols change
     // (xterm wraps history to the current width, so a resize invalidates it).
     let lastCols = term.cols;
+    // 重排/回到 normal buffer 时用：清空后按当前宽度重灌整份历史。
+    // 首屏 seed 不走这里（那条路不能 clear，见 seedFromHistory）。
     const reloadHistory = async () => {
       if (currentBuffer !== "normal") return;
       try {
-        const h = (await conn.rpc("term.history", { session: sessionId })) as { data: string };
+        const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
         term.clear();
         // capture-pane lines are trimmed and bare-\n separated; xterm runs with
         // convertEol:false, so a bare \n moves down WITHOUT returning to column
@@ -249,6 +281,27 @@
         // from vim, where no live repaint masks it). Normalize to \r\n.
         if (h?.data) term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
       } catch { /* best-effort */ }
+    };
+
+    // 首屏 seed：拉一份快照写进空白终端，然后用快照的 seq 订阅之后的增量。
+    // 与 reloadHistory 的区别有两点，都很关键：
+    //   1) 不 clear —— 终端此刻本就是空的，clear 只会多一次无谓重绘；
+    //   2) 结尾要 attach(seq, {seed:true}) 把实时流接上。
+    // 顺序上服务端是「先取号后快照」，所以快照期间到达的输出必然 > seq，
+    // 会被这次 attach 补上：宁可重叠几帧也不丢字节。
+    //
+    // 失败也必须 attach —— 否则首屏空白之外连实时输出都收不到。此时退回
+    // attach(0)（不带 seed），走原来的 replay 重放路径兜底。
+    const seedFromHistory = async () => {
+      try {
+        const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
+        if (h?.data) {
+          term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
+        }
+        conn.attach(sessionId, h?.seq ?? 0, { seed: true });
+      } catch {
+        conn.attach(sessionId);
+      }
     };
 
     // Activation path (R1). A dirty stash means the byte stream is incomplete,
@@ -285,7 +338,12 @@
     // stream, so history is (re)seeded only on the edge into the normal buffer and
     // on a cols change.
     let paneInfoSeq = 0;
-    let appliedMode: PaneMode | null = null;
+    // 初值给 "normal" 而不是 null：首屏已由 seedFromHistory 灌过内容了，
+    // 若这里留 null，第一次 classifyPane 必然判定为「mode 变化 → normal」，
+    // 从而多跑一次 reloadHistory（clear + 重写全量）—— 那正是这次要消灭的
+    // 双重渲染。会话真处在 alt buffer（vim/htop）时，第一次 poll 会判定
+    // normal→alt 并走 term.redraw，行为不变。
+    let appliedMode: PaneMode | null = "normal";
     let pollTimer: ReturnType<typeof setInterval> | undefined;
     let classifyDebounce: ReturnType<typeof setTimeout> | undefined;
     // A4: pausing also drops a pending input-debounced classify — a hidden or
@@ -354,10 +412,14 @@
       classifyDebounce = setTimeout(() => void classifyPane(), 200);
     });
 
-    // Session is created by App (SessionTabs "new"); here we only attach + size.
+    // Session is created by App (SessionTabs "new"); here we only seed + size.
     // Input is routed by the custom keyboard (S5b) through conn.sendInput —
     // xterm is display-only.
-    conn.attach(sessionId);
+    //
+    // 首屏走 history 快照而不是 attach 重放：tmux 的 capture-pane 是真实画面，
+    // 而 replay 环形缓冲只有 256KB 且只覆盖「agent 启动以来」，接管外部或
+    // 重启前的 tmux 会话时可能是空的。seedFromHistory 内部负责 attach。
+    void seedFromHistory();
     refit();
     onReady?.(sessionId, term);
     // The classifyPane poll is NOT started here: the visibility $effect below
@@ -405,6 +467,9 @@
       unsubscribeInput?.();
       if (resizeDebounce) clearTimeout(resizeDebounce);
       stopPoll(); // also drops a pending input-debounced classify
+      // Release the WebGL addon BEFORE the terminal: it also stops any pending
+      // context-loss handler from rebuilding a renderer onto a dead terminal.
+      webglHandle.dispose();
       term?.dispose();
     };
     mounted = true;

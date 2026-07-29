@@ -56,7 +56,11 @@ type SessionsCb = (sessions: SessionMeta[]) => void;
 type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
-type InputCb = (sessionId: string) => void;
+// The bytes are handed to listeners as well as the session id: "the user just
+// typed" is not enough for a listener that needs to know WHAT was typed (the
+// copy-output anchor only moves on a Return). Purely additive — existing
+// listeners that take one argument keep working.
+type InputCb = (sessionId: string, data: Uint8Array) => void;
 type UpdateCb = (u: { phase: string; pct?: number; message?: string; version?: string }) => void;
 type NotificationCb = (m: { sessionId: string; title: string; body: string; ts: number }) => void;
 
@@ -516,13 +520,19 @@ export class Connection {
   newSession(name: string, opt: { cmd?: string; cwd?: string; kind?: "tmux" | "shell" } = {}): void {
     this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd, kind: opt.kind });
   }
-  attach(sessionId: string, lastSeq?: number): void {
+  // opts.seed：这次 attach 紧跟在一份 term.history 快照之后，传入的 seq 就是
+  // 快照那一刻的进度，必须覆盖 seen —— 重挂载时 seen 里可能残留上一轮的旧值。
+  //
+  // 不传 seed 时保持原语义：seen 优先。断线重连的 flushAndRestore 依赖这条，
+  // seen 是「我确实已收到第 N 帧」的真实进度，被更小的数覆盖会重放已看过的内容。
+  attach(sessionId: string, lastSeq?: number, opts?: { seed?: boolean }): void {
     const subscribed = this.attached.has(sessionId);
     this.attached.add(sessionId);
-    const seq = this.seen.get(sessionId) ?? lastSeq ?? 0;
+    const seq = opts?.seed ? (lastSeq ?? 0) : (this.seen.get(sessionId) ?? lastSeq ?? 0);
     // Persist the resume point so the reconnect replay (flushAndRestore) picks
     // it up even when this attach happened while the transport was down.
-    if (!this.seen.has(sessionId)) this.seen.set(sessionId, seq);
+    // A seed overwrites unconditionally; a plain attach only fills a gap.
+    if (opts?.seed || !this.seen.has(sessionId)) this.seen.set(sessionId, seq);
     // No frame when the server is already subscribed on this socket (remount /
     // restored-tab re-attach): a duplicate attach only re-sends the backlog.
     // No frame while the transport is down either: flushAndRestore re-attaches
@@ -537,7 +547,7 @@ export class Connection {
     // this is the single place a listener can hook "the user just typed" —
     // e.g. Terminal re-classifies the pane right away instead of waiting for
     // the next 2s poll (fast alt-screen entry for `vim x<CR>`).
-    for (const cb of this.inputCbs) cb(sessionId);
+    for (const cb of this.inputCbs) cb(sessionId, data);
   }
   resize(sessionId: string, cols: number, rows: number): void {
     this.send({ type: "resize", sessionId, cols, rows });

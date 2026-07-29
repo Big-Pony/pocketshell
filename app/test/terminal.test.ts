@@ -91,10 +91,12 @@ function propsFor(conn: ReturnType<typeof stubConn>, active: boolean, closed = f
   return { conn: conn as unknown as Connection, sessionId: "s1", active, closed, fontSize: 14 };
 }
 
-// Wait until onMount finished: attach sent + first paneInfo edge reseeded history.
+// Wait until onMount finished. 首屏现在走 seedFromHistory：先拉 term.history
+// 快照写入，再用快照的 seq 做 attach(seq, {seed:true}) 只订阅增量（旧流程是
+// 先 attach 重放、再被首次 paneInfo 触发的 reloadHistory 全量覆盖）。
 async function settleMount(conn: ReturnType<typeof stubConn>) {
-  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("s1"));
   await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith("term.history", { session: "s1" }));
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("s1", 0, { seed: true }));
 }
 
 // ──────────────────────────────────────────────────────────────

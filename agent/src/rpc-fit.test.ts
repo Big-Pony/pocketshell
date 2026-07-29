@@ -54,6 +54,20 @@ function rpcFrames(srv: ReturnType<typeof startServer>, id: string, method: stri
   return ws.sent;
 }
 
+// Async twin of rpcFrames: term.history now awaits an async capture-pane
+// inside handleClient, so its response frames land a microtask later than the
+// send instead of synchronously. Poll briefly, then assert as usual.
+async function rpcFramesAsync(srv: ReturnType<typeof startServer>, id: string, method: string, params: unknown): Promise<Uint8Array[]> {
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1); // marker handshake -> ready
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "rpc", id, method, params })));
+  for (let i = 0; i < 100 && ws.sent.length === 0; i++) await new Promise((r) => setTimeout(r, 1));
+  if (ws.sent.length === 0) throw new Error("no response frame");
+  return ws.sent;
+}
+
 // Client-side reassembly mirror: every frame must be an rpcChunk with
 // consecutive indexes and a constant total; the original response is the
 // JSON.parse of the concatenated shard BYTES (not strings).
@@ -139,12 +153,12 @@ function bigScrollbackTmux(total: number, calls?: string[][]) {
   };
 }
 
-test("history() keeps a small scrollback to a single full-window capture", () => {
+test("history() keeps a small scrollback to a single full-window capture", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => { calls.push(args); return args.includes("capture-pane") ? ok("line1\nline2\n") : ok(); },
   });
-  const r = term.history("work");
+  const r = await term.history("work", 0);
   term.dispose();
   expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("line1\nline2\n");
   const caps = calls.filter((a) => a.includes("capture-pane"));
@@ -152,10 +166,10 @@ test("history() keeps a small scrollback to a single full-window capture", () =>
   expect(caps[0]).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
 });
 
-test("history() returns the full oversize scrollback in ONE capture (rpc chunking carries the size)", () => {
+test("history() returns the full oversize scrollback in ONE capture (rpc chunking carries the size)", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({ tmux: bigScrollbackTmux(2000, calls) });
-  const r = term.history("work");
+  const r = await term.history("work", 0);
   term.dispose();
   // WP-1's halving retries are gone: a single -S - capture, all 2000 lines.
   const caps = calls.filter((a) => a.includes("capture-pane"));
@@ -258,16 +272,36 @@ test("rpc fs.diff of a large diff delivers ALL hunks via chunking (no truncation
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("rpc term.history with an oversize scrollback arrives COMPLETE via rpcChunk", () => {
+test("rpc term.history with an oversize scrollback arrives COMPLETE via rpcChunk", async () => {
   const terminal = new TerminalService({ tmux: bigScrollbackTmux(2000) });
   const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
-  const frames = rpcFrames(srv, "h1", "term.history", { session: "work" });
+  const frames = await rpcFramesAsync(srv, "h1", "term.history", { session: "work" });
   expect(frames.length).toBeGreaterThan(1); // ~270KB payload -> several shards
   for (const f of frames) expect(f.length).toBeLessThanOrEqual(RPC_CHUNK_FRAME_MAX_BYTES);
   const reply = reassemble(frames);
   expect(reply.ok).toBe(true);
   // the full 2000-line scrollback, not a halved prefix
   expect(Buffer.from(reply.result.data, "base64").toString("utf8")).toBe(("l".repeat(100) + "\n").repeat(2000));
+  srv.stop();
+});
+
+test("rpc term.capture 把 colors/back 透传给 tmux，并走同一条分片通道", async () => {
+  const calls: string[][] = [];
+  const terminal = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("20\n");
+      return ok("PLAIN");
+    },
+  });
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
+  const frames = await rpcFramesAsync(srv, "c1", "term.capture", { session: "work", back: 7 });
+  const reply = decodeServer(Buffer.from(frames[0]).toString("utf8"));
+  if (reply.type !== "response" || !reply.ok) throw new Error("expected ok response");
+  expect(Buffer.from((reply.result as any).data, "base64").toString("utf8")).toBe("PLAIN");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).not.toContain("-e"); // 复制路径默认纯文本
+  expect(cap[cap.indexOf("-S") + 1]).toBe("13"); // cursor_y 20 - back 7
   srv.stop();
 });
 

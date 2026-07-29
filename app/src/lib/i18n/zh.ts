@@ -207,10 +207,15 @@ export default {
   copymode: {
     title: "复制模式",
     hint: "长按选中文本",
-    selectAll: "全选",
+    loading: "读取中…",
+    selectAll: "全选已载",
     copy: "复制选中",
     done: "完成",
     empty: "无可复制内容",
+    loadingMore: "载入更早…",
+    scrollUpForMore: "向上滚动载入更早内容",
+    noMore: "已到最早",
+    loadedRows: "已载入 {n} 行",
   },
   tasks: {
     state: {

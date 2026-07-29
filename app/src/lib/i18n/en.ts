@@ -207,10 +207,15 @@ export default {
   copymode: {
     title: "Copy mode",
     hint: "Long-press to select",
-    selectAll: "All",
+    loading: "Loading…",
+    selectAll: "Select loaded",
     copy: "Copy",
     done: "Done",
     empty: "Nothing to copy",
+    loadingMore: "Loading earlier…",
+    scrollUpForMore: "Scroll up to load earlier output",
+    noMore: "Start of history",
+    loadedRows: "{n} rows loaded",
   },
   tasks: {
     state: {

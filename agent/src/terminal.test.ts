@@ -73,7 +73,7 @@ test("rename() renames a foreign (non-owned) session instead of no-op", () => {
   expect(calls).toContainEqual(["rename-session", "-t", "old", "shiny"]);
 });
 
-test("history() exports full pane scrollback + visible area with colours (base64)", () => {
+test("history() exports full pane scrollback + visible area with colours (base64)", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => {
@@ -83,18 +83,257 @@ test("history() exports full pane scrollback + visible area with colours (base64
       return ok();
     },
   });
-  const r = term.history("work");
+  const r = await term.history("work", 0);
   expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("\x1b[36mLINE_1\x1b[39m\nLINE_2");
   const cap = calls.find((a) => a.includes("capture-pane"))!;
   expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
   term.dispose();
 });
 
-test("history() captures the pane even when alternate_on is set", () => {
+test("history() 透传调用方给的 seq，并保持 capture 参数不变", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("capture-pane")) return ok("\x1b[36mLINE_1\x1b[39m\nLINE_2");
+      return ok();
+    },
+  });
+  const r = await term.history("work", 42);
+  expect(r.seq).toBe(42);
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("\x1b[36mLINE_1\x1b[39m\nLINE_2");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("history() 在 capture 失败时仍返回完整形状（seq 不丢）", async () => {
+  // seq 丢了会让前端 attach(undefined) 退化成 attach(0)，把整个 replay 缓冲
+  // 重放一遍——正是这次要消灭的双重渲染。所以失败路径也必须带上 seq。
+  const term = new TerminalService({ tmux: () => fail() });
+  expect(await term.history("gone", 7)).toEqual({ data: "", seq: 7 });
+  term.dispose();
+});
+
+test("history() captures the pane even when alternate_on is set", async () => {
   const term = new TerminalService({
     tmux: (args) => (args.includes("capture-pane") ? ok("ALT_LINE") : ok("1")),
   });
-  expect(term.history("vim").data).toBe(Buffer.from("ALT_LINE").toString("base64"));
+  expect((await term.history("vim", 0)).data).toBe(Buffer.from("ALT_LINE").toString("base64"));
+  term.dispose();
+});
+
+// ---- capture(): 复制路径用的纯文本导出（任务2/3）----
+// 实测（tmux 3.6b）：capture-pane 不带 -e 输出就是干净纯文本，一个 SGR 转义
+// 都没有；带 -e 才有颜色。复制要的是可粘贴的文本，所以走不带 -e 的那条。
+
+test("capture() 默认不带 -e —— 复制路径要纯文本，不能夹 SGR 转义", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("PLAIN_1\nPLAIN_2"); },
+  });
+  const r = await term.capture("work");
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("PLAIN_1\nPLAIN_2");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).not.toContain("-e");
+  expect(cap).toEqual(["-u", "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("capture({colors:true}) 才加 -e —— 首屏 seed 仍要颜色", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("X"); },
+  });
+  await term.capture("work", { colors: true });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+// back 是「光标往上第几行」，由 tmux 自己的 #{cursor_y} 解析成 -S。
+// 不能让前端直接传绝对行号：xterm 的 baseY 与 tmux 的可见区顶行不同源
+// （实测同一个 pane，xterm cursorY=23 而 tmux cursor_y=3），绝对行号会切错段。
+test("capture({back}) 用 tmux 自己的 cursor_y 解析成 -S（cursor_y - back）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("23\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 41 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-18"); // 23 - 41
+  term.dispose();
+});
+
+test("capture({back}) 屏幕没滚动时得到 0 或正数（不是所有情况都为负）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("3\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 3 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("0");
+  term.dispose();
+});
+
+test("capture({back}) 在 cursor_y 查询失败时退回全量（不瞎猜行号）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return fail();
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 5 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  term.dispose();
+});
+
+test("capture({back}) 非整数/负数/越界一律退回全量 -S -（不把垃圾拼进 argv）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("10\n") : ok("OUT"); },
+  });
+  await term.capture("work", { back: Number.NaN });
+  await term.capture("work", { back: 1.5 });
+  await term.capture("work", { back: -1 });
+  await term.capture("work", { back: Number.POSITIVE_INFINITY });
+  await term.capture("work", { back: 9e9 });
+  for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
+    expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  }
+  term.dispose();
+});
+
+test("capture() 不给 back 时不去查 cursor_y（少一次 spawn）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("OUT"); },
+  });
+  await term.capture("work");
+  expect(calls.some((a) => a[0] === "display-message")).toBe(false);
+  term.dispose();
+});
+
+test("capture() 失败返回空 data 而不是抛", async () => {
+  const term = new TerminalService({ tmux: () => fail() });
+  expect(await term.capture("gone")).toEqual({ data: "", atTop: true });
+  term.dispose();
+});
+
+// ---- capture({back, endBack}): 复制模式的「上翻分页」----
+// 实测 tmux 3.6b：`-S -50 -E -41` 恰好 10 行，`-S -100 -E -91` 是更早的 10 行，
+// 两段无重叠可无缝拼接。endBack 与 back 同源（都是「光标往上第几行」），
+// 区间闭合：覆盖 back - endBack + 1 行。
+
+test("capture({back, endBack}) 把区间两端都解析成 -S/-E（不再固定 -E -）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("23|500\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 400, endBack: 201 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-377"); // 23 - 400
+  expect(cap[cap.indexOf("-E") + 1]).toBe("-178"); // 23 - 201
+  term.dispose();
+});
+
+test("capture() 不给 endBack 时 -E 仍是 -（底部）—— 老调用方不回归", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("23|500\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 41 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-E") + 1]).toBe("-");
+  term.dispose();
+});
+
+// atTop 必须由后端算：tmux 的 `-J` 会把折行接成一行，返回的**行数少于请求的行数**
+// （实测 40 列 pane 请求 6 行、-J 后只有 4 行），所以前端无法用「行数不足 200」
+// 判断到顶。越过顶部时 tmux 也不报错、不返回空行，而是**钳位重发最老那一行**
+// （实测 hist=379 时 -S -900 与 -S -379 返回同一行），前端据此判断会拿到重复内容。
+test("capture() 用 history_size 判定是否已到历史顶部（前端无法从行数推断）", async () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("23|379\n") : ok("OUT")),
+  });
+  // -S = 23 - 300 = -277，比最老行 -379 新 → 还有更早的
+  expect((await term.capture("work", { back: 300, endBack: 101 })).atTop).toBe(false);
+  // -S = 23 - 402 = -379，正好是最老一行 → 到顶
+  expect((await term.capture("work", { back: 402, endBack: 203 })).atTop).toBe(true);
+  term.dispose();
+});
+
+test("capture() 整段都在历史顶部之外时返回空，不让 tmux 钳位出重复行", async () => {
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("23|379\n") : ok("OLDEST_LINE")),
+  });
+  // -E = 23 - 500 = -477，已在最老行 -379 之上 → 整段不存在
+  const r = await term.capture("work", { back: 699, endBack: 500 });
+  expect(r).toEqual({ data: "", atTop: true });
+  term.dispose();
+});
+
+test("capture() 全量（不给 back）就是到顶的定义 —— atTop 为真", async () => {
+  const term = new TerminalService({ tmux: () => ok("OUT") });
+  expect((await term.capture("work")).atTop).toBe(true);
+  term.dispose();
+});
+
+test("capture({endBack}) 非法值（非整数/负数/大于 back）退化为 -E -，不拼垃圾进 argv", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("23|500\n") : ok("OUT"); },
+  });
+  await term.capture("work", { back: 100, endBack: Number.NaN });
+  await term.capture("work", { back: 100, endBack: 1.5 });
+  await term.capture("work", { back: 100, endBack: -1 });
+  await term.capture("work", { back: 100, endBack: 101 }); // 终点比起点还早
+  for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
+    expect(cap[cap.indexOf("-E") + 1]).toBe("-");
+  }
+  term.dispose();
+});
+
+test("capture({endBack}) 在 back 无效时一并忽略（区间无起点就没有区间）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("23|500\n") : ok("OUT"); },
+  });
+  await term.capture("work", { back: -5, endBack: 10 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  expect(cap[cap.indexOf("-E") + 1]).toBe("-");
+  term.dispose();
+});
+
+test("history() 仍是带颜色的全量 capture（委托 capture 后行为不变）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return ok("H"); },
+  });
+  const r = await term.history("work", 9);
+  expect(r.seq).toBe(9);
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
   term.dispose();
 });
 

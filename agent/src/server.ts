@@ -415,7 +415,7 @@ export function startServer(deps: Deps = {}) {
     for (const chunk of chunkRpcPayload(id, payload)) sendSecure(conn, chunk);
   };
 
-  const handleClient = (conn: Conn, raw: string) => {
+  const handleClient = async (conn: Conn, raw: string) => {
     let msg;
     try { msg = decodeClient(raw); }
     catch { sendSecure(conn, { type: "error", code: "bad_json", message: "malformed message" }); return; }
@@ -599,7 +599,29 @@ export function startServer(deps: Deps = {}) {
             case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
             case "git.branches": result = gitBranches(String(p.cwd)); break;
             case "git.status": result = gitStatus(String(p.cwd)); break;
-            case "term.history": result = shell.has(String(p.session)) ? { data: "" } : terminal.history(String(p.session)); break;
+            // 先取号、后快照：capture 期间新到的输出必然拿到 > seq 的序号，
+            // 前端 attach(seq) 会把它们补上。顺序反过来会丢字节。
+            case "term.history": {
+              const sid = String(p.session);
+              const seq = replay.latestSeq(sid);
+              result = shell.has(sid) ? { data: "", seq } : await terminal.history(sid, seq);
+              break;
+            }
+            // 复制路径专用：默认纯文本（无 SGR），可给 back（光标往上第几行）
+            // 只取某一轮命令的输出，再给 endBack 就是一个闭区间（复制模式上翻
+            // 分页靠它，否则每页都要重传底部已有内容）。不取 seq —— 它不接管
+            // 实时流。shell 会话没有 tmux pane，与 term.history 一样退化为空。
+            case "term.capture": {
+              const sid = String(p.session);
+              result = shell.has(sid)
+                ? { data: "", atTop: true }
+                : await terminal.capture(sid, {
+                    colors: !!p.colors,
+                    back: p.back == null ? undefined : Number(p.back),
+                    endBack: p.endBack == null ? undefined : Number(p.endBack),
+                  });
+              break;
+            }
             case "term.paneInfo": result = shell.has(String(p.session)) ? { currentCommand: "", alternateOn: false, isShell: true } : terminal.paneInfo(String(p.session)); break;
             case "term.redraw": result = shell.has(String(p.session)) ? { ok: true } : terminal.redraw(String(p.session)); break;
             case "terminal.pwd": result = shell.has(String(p.session)) ? { pwd: "" } : terminal.pwd(String(p.session)); break;
@@ -633,13 +655,13 @@ export function startServer(deps: Deps = {}) {
               return;
             }
             case "update.check": {
-              // The switch(method) block above this line is synchronous end to
-              // end, but checkLatest() needs to await a network call. Rather
-              // than promote handleClient/onMessage to async (touching every
-              // other case's control flow), this case sends its own response
-              // from an async IIFE and returns immediately — mirroring the
-              // `default:` branch below, which already returns early to bypass
-              // the post-switch sendRpcResult(...) call.
+              // checkLatest() needs to await a network call. This case sends its
+              // own response from an async IIFE and returns immediately —
+              // mirroring the `default:` branch below, which already returns
+              // early to bypass the post-switch sendRpcResult(...) call.
+              // (handleClient is async since term.history moved to tmuxAsync, so
+              // the IIFE is no longer strictly required here; it is kept because
+              // returning early also skips the shared post-switch send path.)
               const force = !!p.force;
               void (async () => {
                 try {
@@ -749,7 +771,17 @@ export function startServer(deps: Deps = {}) {
       }
       return;
     }
-    handleClient(conn, text);
+    // handleClient 是 async（term.history 走 tmuxAsync），而它的 switch 主体不在
+    // 总 try/catch 里：一次 reject（tmux 缺失、spawn 失败）会变成未处理的 Promise
+    // rejection 直接掀掉进程，而不是像同步时代那样被这里兜住。回一条 rpc 风格的
+    // error 帧让客户端能自愈，不静默吞掉。
+    void handleClient(conn, text).catch((e) => {
+      try {
+        sendSecure(conn, { type: "error", code: "internal", message: String(e) });
+      } catch {
+        // 连回错都失败（信道已废）——放弃，别再抛
+      }
+    });
   };
 
   const onlineIpByPub = () => {
