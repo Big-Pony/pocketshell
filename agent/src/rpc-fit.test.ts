@@ -285,19 +285,23 @@ test("rpc term.history with an oversize scrollback arrives COMPLETE via rpcChunk
   srv.stop();
 });
 
-test("rpc term.capture 把 colors/start 透传给 tmux，并走同一条分片通道", async () => {
+test("rpc term.capture 把 colors/back 透传给 tmux，并走同一条分片通道", async () => {
   const calls: string[][] = [];
   const terminal = new TerminalService({
-    tmux: (args) => { calls.push(args); return ok("PLAIN"); },
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("20\n");
+      return ok("PLAIN");
+    },
   });
   const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
-  const frames = await rpcFramesAsync(srv, "c1", "term.capture", { session: "work", start: 7 });
+  const frames = await rpcFramesAsync(srv, "c1", "term.capture", { session: "work", back: 7 });
   const reply = decodeServer(Buffer.from(frames[0]).toString("utf8"));
   if (reply.type !== "response" || !reply.ok) throw new Error("expected ok response");
   expect(Buffer.from((reply.result as any).data, "base64").toString("utf8")).toBe("PLAIN");
   const cap = calls.find((a) => a.includes("capture-pane"))!;
   expect(cap).not.toContain("-e"); // 复制路径默认纯文本
-  expect(cap[cap.indexOf("-S") + 1]).toBe("7");
+  expect(cap[cap.indexOf("-S") + 1]).toBe("13"); // cursor_y 20 - back 7
   srv.stop();
 });
 

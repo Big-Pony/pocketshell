@@ -115,10 +115,13 @@ export interface TermHistoryResult {
 
 // term.capture 的 rpc 响应体。与 term.history 的区别是**给人看/给剪贴板**而不是
 // 给 xterm 看：默认不带颜色（`-e` 关掉后 tmux 输出即纯文本，实测 3.6b 一个 SGR
-// 都没有），可选 `start` 指定起始行（复制某一轮命令的输出）。没有 seq——它不接管
-// 实时流，纯粹是一次性取文本。
+// 都没有）。没有 seq——它不接管实时流，纯粹是一次性取文本。
 //
-// 请求参数：{ session: string; colors?: boolean; start?: number }
+// 请求参数：{ session: string; colors?: boolean; back?: number }
+//   back = 「从光标往上数几行开始取」。**是相对光标的距离，不是绝对行号**：
+//   前端 xterm 的行坐标与 tmux 的可见区顶行不同源（实测同一 pane，xterm
+//   cursorY=23 而 tmux cursor_y=3），传绝对行号会切错段。后端用 tmux 自己的
+//   `#{cursor_y}` 把它解析成 `-S`。
 export interface TermCaptureResult {
   data: string; // base64 的 capture-pane 字节；colors 未开时为纯文本
 }

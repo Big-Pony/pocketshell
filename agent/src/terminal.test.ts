@@ -151,27 +151,77 @@ test("capture({colors:true}) 才加 -e —— 首屏 seed 仍要颜色", async (
   term.dispose();
 });
 
-test("capture({start}) 把起点行号传给 -S（任务3 的回车锚点）", async () => {
+// back 是「光标往上第几行」，由 tmux 自己的 #{cursor_y} 解析成 -S。
+// 不能让前端直接传绝对行号：xterm 的 baseY 与 tmux 的可见区顶行不同源
+// （实测同一个 pane，xterm cursorY=23 而 tmux cursor_y=3），绝对行号会切错段。
+test("capture({back}) 用 tmux 自己的 cursor_y 解析成 -S（cursor_y - back）", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
-    tmux: (args) => { calls.push(args); return ok("OUT"); },
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("23\n");
+      return ok("OUT");
+    },
   });
-  await term.capture("work", { start: 12 });
+  await term.capture("work", { back: 41 });
   const cap = calls.find((a) => a.includes("capture-pane"))!;
-  expect(cap).toEqual(["-u", "capture-pane", "-p", "-J", "-S", "12", "-E", "-", "-t", "work"]);
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-18"); // 23 - 41
   term.dispose();
 });
 
-test("capture({start}) 非整数/负数一律退回全量 -S -（不把垃圾拼进 argv）", async () => {
+test("capture({back}) 屏幕没滚动时得到 0 或正数（不是所有情况都为负）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("3\n");
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 3 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("0");
+  term.dispose();
+});
+
+test("capture({back}) 在 cursor_y 查询失败时退回全量（不瞎猜行号）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return fail();
+      return ok("OUT");
+    },
+  });
+  await term.capture("work", { back: 5 });
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  term.dispose();
+});
+
+test("capture({back}) 非整数/负数/越界一律退回全量 -S -（不把垃圾拼进 argv）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("10\n") : ok("OUT"); },
+  });
+  await term.capture("work", { back: Number.NaN });
+  await term.capture("work", { back: 1.5 });
+  await term.capture("work", { back: -1 });
+  await term.capture("work", { back: Number.POSITIVE_INFINITY });
+  await term.capture("work", { back: 9e9 });
+  for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
+    expect(cap[cap.indexOf("-S") + 1]).toBe("-");
+  }
+  term.dispose();
+});
+
+test("capture() 不给 back 时不去查 cursor_y（少一次 spawn）", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => { calls.push(args); return ok("OUT"); },
   });
-  await term.capture("work", { start: -5 });
-  await term.capture("work", { start: Number.NaN });
-  for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
-    expect(cap[cap.indexOf("-S") + 1]).toBe("-");
-  }
+  await term.capture("work");
+  expect(calls.some((a) => a[0] === "display-message")).toBe(false);
   term.dispose();
 });
 

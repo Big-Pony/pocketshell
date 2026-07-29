@@ -616,7 +616,7 @@ export function startServer(deps: Deps = {}) {
                 ? { data: "" }
                 : await terminal.capture(sid, {
                     colors: !!p.colors,
-                    start: p.start == null ? undefined : Number(p.start),
+                    back: p.back == null ? undefined : Number(p.back),
                   });
               break;
             }

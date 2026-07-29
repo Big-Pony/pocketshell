@@ -56,7 +56,11 @@ type SessionsCb = (sessions: SessionMeta[]) => void;
 type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
-type InputCb = (sessionId: string) => void;
+// The bytes are handed to listeners as well as the session id: "the user just
+// typed" is not enough for a listener that needs to know WHAT was typed (the
+// copy-output anchor only moves on a Return). Purely additive — existing
+// listeners that take one argument keep working.
+type InputCb = (sessionId: string, data: Uint8Array) => void;
 type UpdateCb = (u: { phase: string; pct?: number; message?: string; version?: string }) => void;
 type NotificationCb = (m: { sessionId: string; title: string; body: string; ts: number }) => void;
 
@@ -543,7 +547,7 @@ export class Connection {
     // this is the single place a listener can hook "the user just typed" —
     // e.g. Terminal re-classifies the pane right away instead of waiting for
     // the next 2s poll (fast alt-screen entry for `vim x<CR>`).
-    for (const cb of this.inputCbs) cb(sessionId);
+    for (const cb of this.inputCbs) cb(sessionId, data);
   }
   resize(sessionId: string, cols: number, rows: number): void {
     this.send({ type: "resize", sessionId, cols, rows });

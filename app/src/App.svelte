@@ -34,7 +34,10 @@
   import { shouldSyncRoot } from "./lib/root-follow";
   import { defaultAgentUrl } from "./lib/agent-url";
   import { sessionFromUrl } from "./lib/notify";
-  import { lastOutput } from "./lib/terminal-output";
+  import { lastOutput, PROMPT_RE } from "./lib/terminal-output";
+  import { OutputAnchors, rowsBack, trimTrailingPrompt } from "./lib/output-anchor";
+  import type { TermCaptureResult } from "./lib/protocol";
+  import { fromB64 } from "./lib/bytes";
   import { fullscreenAction } from "./lib/fullscreen";
   import { emptyCmdLine, feed, type CmdLineState } from "./lib/command-line";
   import { suggest, delta } from "./lib/command-suggest";
@@ -250,6 +253,15 @@
     if (!activeId) activeId = sessions.find((s) => s.attached && !s.closed)?.name ?? "";
   });
   conn.onExit((f) => { sessions = tombstone(sessions, f.sessionId); });
+
+  // 「复制输出」的起点锚：sendInput 是所有输入的唯一收口，所以发出带回车的
+  // 那一刻记下该会话的缓冲行号，就是本轮输出的起点——不用再猜提示符长什么样。
+  // 只对在 App 里敲的命令有效；用户直接在电脑上敲的那轮我们看不到，copyVisible
+  // 会退回提示符正则。
+  const anchors = new OutputAnchors();
+  conn.onInput((sid, data) => {
+    anchors.record(sid, data, terms.get(sid)?.buffer.active);
+  });
   conn.onResync(() => {
     flash = tr("app.notice.historyLost");
     setTimeout(() => (flash = ""), 4000);
@@ -399,6 +411,7 @@
     conn.detach(name);
     sessions = closeTabFn(sessions, name);
     terms.delete(name);
+    anchors.clear(name); // the xterm buffer it referenced is gone
     if (activeId === name) activeId = topSessions[0]?.name ?? "";
   }
   function copyOutput(name: string) {
@@ -495,6 +508,7 @@
       conn.kill(id);
       sessions = closeTabFn(sessions, id);
       terms.delete(id);
+      anchors.clear(id);
       tabOrder = removeOrder(tabOrder, id);
       if (activeId === id) activeId = topSessions.filter((x) => x.name !== id)[0]?.name ?? "";
       if (activeTop === id) activeTop = "";
@@ -581,6 +595,44 @@
     else showToast(tr("app.toast.clipboardDenied"));
   }
 
+  // 「复制输出」：优先走回车锚点向 tmux 要那一段纯文本。
+  //
+  // 为什么不再只靠 lastOutput()：它从光标往上找**长得像提示符**的行来切段，
+  // 主题化提示符、多行提示符、或输出里恰好有个 `$ ` 都会切错。锚点是我们发出
+  // 回车那一刻记下的真实行号，不用猜。
+  //
+  // 走 tmux 而不是前端 buffer 还有两个好处：不受 xterm scrollback 上限截断，
+  // 且 `-J` 会把 tmux 折行还原成原始长行（前端 buffer 里它们已经被按当前宽度
+  // 硬折过了，复制出来是断的）。
+  //
+  // 三层兜底，任何一层出问题都还能复制到东西：
+  //   1. 有锚点 + tmux 返回非空 → 用它；
+  //   2. 没锚点（用户直接在电脑上敲的那轮，前端看不见）或 tmux 空/失败
+  //      → 退回原来的提示符正则 lastOutput()；
+  //   3. 都空 → 明确提示无输出，不往剪贴板写空串。
+  async function copyLastOutput(sessionId: string, term: Terminal) {
+    const fallback = () => {
+      const text = lastOutput(term.buffer.active, term.rows);
+      if (!text.trim()) { showToast(tr("app.toast.noOutput")); return; }
+      writeClip(text, tr("app.toast.copiedOutput"));
+    };
+    const anchor = anchors.get(sessionId);
+    if (anchor === undefined) { fallback(); return; }
+    try {
+      const buf = term.buffer.active;
+      const r = (await conn.rpc("term.capture", {
+        session: sessionId,
+        back: rowsBack(anchor, buf.baseY + buf.cursorY),
+      })) as TermCaptureResult;
+      const raw = r?.data ? new TextDecoder().decode(fromB64(r.data)) : "";
+      const text = trimTrailingPrompt(raw, PROMPT_RE);
+      if (!text.trim()) { fallback(); return; }
+      writeClip(text, tr("app.toast.copiedOutput"));
+    } catch {
+      fallback(); // 断线/超时：本地 buffer 里还有东西可复制
+    }
+  }
+
   function copyTabPath(id: string) {
     const path = filePathFromTabId(fileTabs, id);
     if (!path) return;
@@ -602,9 +654,7 @@
       case "toggleFullscreen": cancelSelection(); copyMode = false; fullscreen = !fullscreen; break;
       case "copyVisible": {
         const t = activeTerm(); if (!t) { showToast(tr("app.toast.noTerminal")); break; }
-        const text = lastOutput(t.buffer.active, t.rows);
-        if (!text.trim()) { showToast(tr("app.toast.noOutput")); break; }
-        writeClip(text, tr("app.toast.copiedOutput"));
+        void copyLastOutput(activeId, t);
         break;
       }
       case "renameSession": {
@@ -648,9 +698,7 @@
         const t = activeTerm(); if (!t) { showToast(tr("app.toast.noTerminal")); break; }
         const kb = t.getSelection();
         if (kb) { writeClip(kb, tr("app.toast.copiedSelection")); cancelSelection(); break; }
-        const text = lastOutput(t.buffer.active, t.rows);
-        if (!text.trim()) { showToast(tr("app.toast.noOutput")); break; }
-        writeClip(text, tr("app.toast.copiedOutput"));
+        void copyLastOutput(activeId, t); // 与「复制输出」同一条锚点链路
         break;
       }
     }

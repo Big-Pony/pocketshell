@@ -7,6 +7,11 @@ import { toB64 } from "./bytes";
 import { cjkFallbackLang } from "./pty-env";
 import type { SessionMeta, TermHistoryResult } from "./protocol";
 
+// Sanity bound for capture()'s `back`. Generous next to tmux's default
+// history-limit (2000) so a legitimate anchor is never rejected, small enough
+// that a corrupt value can't become a silly argv token.
+export const CAPTURE_BACK_LIMIT = 1_000_000;
+
 interface Live {
   pty: PtyHandle;
   meta: SessionMeta;
@@ -219,23 +224,49 @@ export class TerminalService {
   //   colors — OFF by default. Verified on tmux 3.6b: WITHOUT `-e` the output
   //     carries not a single SGR escape, so it is directly pasteable. `-e` is
   //     only for the on-screen seed, where xterm re-interprets the colours.
-  //   start  — first line to capture, passed straight to `-S`. Negative indices
-  //     are tmux's scrollback coordinates and 0 is the top visible row, so a
-  //     caller that knows where the current command began (the frontend records
-  //     the buffer row when it sends a Return) gets exactly that command's
-  //     output instead of guessing at prompt regexes. Omitted → `-S -` (all).
+  //   back   — how many rows ABOVE the cursor to start from, i.e. "the last N
+  //     rows of the session". Resolved here into `-S` against tmux's own
+  //     `#{cursor_y}`:
   //
-  // `start` is validated here rather than trusted: it crosses the wire from the
-  // client, and a NaN/negative would either be pasted into argv as garbage or
-  // silently reinterpreted by tmux as a scrollback offset (returning far MORE
-  // than asked for). Anything not a non-negative integer degrades to the full
-  // capture — the caller's fallback path, not an error.
+  //         -S = cursor_y - back
+  //
+  //     Verified on tmux 3.6b: `-S 0` is the top of the VISIBLE screen and
+  //     negative values count up into scrollback, so this yields 0-or-positive
+  //     while the screen is not yet full and goes negative once the start has
+  //     scrolled off — measured correct in both regimes plus the mixed case.
+  //
+  //     Why cursor-RELATIVE instead of an absolute row from the client: the
+  //     frontend's xterm and this tmux pane do NOT share a row origin. xterm's
+  //     `baseY` counts its own scrollback, and after a history seed its cursor
+  //     can sit at the bottom of the screen while tmux's real cursor is still
+  //     near the top (tmux pads the pane with blank rows that the seed does not
+  //     reproduce as cursor movement). Measured: xterm cursorY=23 against tmux
+  //     cursor_y=3 for the same pane. A distance above the cursor is invariant
+  //     to that skew; an absolute row is not, and silently copied the wrong
+  //     slice. The frontend therefore sends a distance and tmux resolves it.
+  //
+  // `back` is validated rather than trusted: it crosses the wire, and a NaN or a
+  // float would be pasted into argv as garbage. Anything rejected degrades to
+  // the full capture — strictly more data, never an error.
+  //
+  // Overshoot (measured, both directions): a `-S` far more negative than the
+  // real history clamps to the whole history, exit 0. Overshooting POSITIVE
+  // (past the bottom) yields an EMPTY capture, also exit 0 — so a stale anchor
+  // degrades to "nothing to copy" rather than the wrong text.
   //
   // Async for the same reason history() is: a large capture through the SYNC
   // runner blocks Bun's event loop and freezes output for every other session.
-  async capture(name: string, opts?: { colors?: boolean; start?: number }): Promise<{ data: string }> {
-    const s = opts?.start;
-    const from = typeof s === "number" && Number.isInteger(s) && s >= 0 ? String(s) : "-";
+  async capture(name: string, opts?: { colors?: boolean; back?: number }): Promise<{ data: string }> {
+    const b = opts?.back;
+    const wants = typeof b === "number" && Number.isInteger(b) && b >= 0 && b <= CAPTURE_BACK_LIMIT;
+    let from = "-";
+    if (wants) {
+      // tmux is the only authority on where its cursor is; ask it, and fall back
+      // to the full capture if the query fails (dead pane, missing tmux).
+      const cy = await this.tmuxAsync(["display-message", "-p", "-t", name, "#{cursor_y}"]);
+      const y = Number(new TextDecoder().decode(cy.stdout).trim());
+      if (cy.exitCode === 0 && Number.isFinite(y)) from = String(y - (b as number));
+    }
     const args = ["-u", "capture-pane"];
     if (opts?.colors) args.push("-e");
     args.push("-p", "-J", "-S", from, "-E", "-", "-t", name);
