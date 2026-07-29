@@ -280,12 +280,29 @@
     //
     // 失败也必须 attach —— 否则首屏空白之外连实时输出都收不到。此时退回
     // attach(0)（不带 seed），走原来的 replay 重放路径兜底。
+    // TEMP-PERF: 临时计时，验收后删除（计划 Task 7 Step 6）。
+    // rpc / write 的分解直接决定要不要缩 tmux history-limit：
+    //   瓶颈在 write → WebGL 已解决，历史无需缩减
+    //   瓶颈在 rpc   → 是数据量问题，缩 history-limit 才有效
     const seedFromHistory = async () => {
+      const t0 = performance.now();
       try {
         const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
-        if (h?.data) term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
+        const t1 = performance.now();
+        if (h?.data) {
+          const text = new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n");
+          term.write(text, () => {
+            const t2 = performance.now();
+            console.log(
+              `[perf] ${sessionId} bytes=${h.data.length} rpc=${(t1 - t0).toFixed(0)}ms write=${(t2 - t1).toFixed(0)}ms total=${(t2 - t0).toFixed(0)}ms`,
+            );
+          });
+        } else {
+          console.log(`[perf] ${sessionId} bytes=0 rpc=${(t1 - t0).toFixed(0)}ms write=0ms total=${(t1 - t0).toFixed(0)}ms`);
+        }
         conn.attach(sessionId, h?.seq ?? 0, { seed: true });
-      } catch {
+      } catch (e) {
+        console.log(`[perf] ${sessionId} FAILED after ${(performance.now() - t0).toFixed(0)}ms: ${String(e)}`);
         conn.attach(sessionId);
       }
     };
