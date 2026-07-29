@@ -87,3 +87,14 @@ export function decodeServer(raw: string): ServerMsg {
 export function decodeClient(raw: string): ClientMsg {
   return JSON.parse(raw) as ClientMsg;
 }
+
+// term.history 的 rpc 响应体。rpc 信封的 result 是 unknown，两端各自 cast 时
+// 引用这个类型，避免字段名漂移。
+//
+// seq 是快照那一刻 replay 的 latestSeq：前端写完 data 后用 attach(seq) 只订阅
+// 之后的增量，从而不重不丢地接上实时流。取号必须在 capture 之前（见
+// terminal.ts 的 history 实现注释）。
+export interface TermHistoryResult {
+  data: string; // base64 的 capture-pane 原始字节（含 SGR）
+  seq: number; // 快照时的 replay latestSeq；无输出记录时为 0
+}
