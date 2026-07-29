@@ -73,7 +73,7 @@ test("rename() renames a foreign (non-owned) session instead of no-op", () => {
   expect(calls).toContainEqual(["rename-session", "-t", "old", "shiny"]);
 });
 
-test("history() exports full pane scrollback + visible area with colours (base64)", () => {
+test("history() exports full pane scrollback + visible area with colours (base64)", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => {
@@ -83,18 +83,43 @@ test("history() exports full pane scrollback + visible area with colours (base64
       return ok();
     },
   });
-  const r = term.history("work");
+  const r = await term.history("work", 0);
   expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("\x1b[36mLINE_1\x1b[39m\nLINE_2");
   const cap = calls.find((a) => a.includes("capture-pane"))!;
   expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
   term.dispose();
 });
 
-test("history() captures the pane even when alternate_on is set", () => {
+test("history() 透传调用方给的 seq，并保持 capture 参数不变", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("capture-pane")) return ok("\x1b[36mLINE_1\x1b[39m\nLINE_2");
+      return ok();
+    },
+  });
+  const r = await term.history("work", 42);
+  expect(r.seq).toBe(42);
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("\x1b[36mLINE_1\x1b[39m\nLINE_2");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("history() 在 capture 失败时仍返回完整形状（seq 不丢）", async () => {
+  // seq 丢了会让前端 attach(undefined) 退化成 attach(0)，把整个 replay 缓冲
+  // 重放一遍——正是这次要消灭的双重渲染。所以失败路径也必须带上 seq。
+  const term = new TerminalService({ tmux: () => fail() });
+  expect(await term.history("gone", 7)).toEqual({ data: "", seq: 7 });
+  term.dispose();
+});
+
+test("history() captures the pane even when alternate_on is set", async () => {
   const term = new TerminalService({
     tmux: (args) => (args.includes("capture-pane") ? ok("ALT_LINE") : ok("1")),
   });
-  expect(term.history("vim").data).toBe(Buffer.from("ALT_LINE").toString("base64"));
+  expect((await term.history("vim", 0)).data).toBe(Buffer.from("ALT_LINE").toString("base64"));
   term.dispose();
 });
 

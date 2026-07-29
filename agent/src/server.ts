@@ -415,7 +415,7 @@ export function startServer(deps: Deps = {}) {
     for (const chunk of chunkRpcPayload(id, payload)) sendSecure(conn, chunk);
   };
 
-  const handleClient = (conn: Conn, raw: string) => {
+  const handleClient = async (conn: Conn, raw: string) => {
     let msg;
     try { msg = decodeClient(raw); }
     catch { sendSecure(conn, { type: "error", code: "bad_json", message: "malformed message" }); return; }
@@ -599,7 +599,14 @@ export function startServer(deps: Deps = {}) {
             case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
             case "git.branches": result = gitBranches(String(p.cwd)); break;
             case "git.status": result = gitStatus(String(p.cwd)); break;
-            case "term.history": result = shell.has(String(p.session)) ? { data: "" } : terminal.history(String(p.session)); break;
+            // 先取号、后快照：capture 期间新到的输出必然拿到 > seq 的序号，
+            // 前端 attach(seq) 会把它们补上。顺序反过来会丢字节。
+            case "term.history": {
+              const sid = String(p.session);
+              const seq = replay.latestSeq(sid);
+              result = shell.has(sid) ? { data: "", seq } : await terminal.history(sid, seq);
+              break;
+            }
             case "term.paneInfo": result = shell.has(String(p.session)) ? { currentCommand: "", alternateOn: false, isShell: true } : terminal.paneInfo(String(p.session)); break;
             case "term.redraw": result = shell.has(String(p.session)) ? { ok: true } : terminal.redraw(String(p.session)); break;
             case "terminal.pwd": result = shell.has(String(p.session)) ? { pwd: "" } : terminal.pwd(String(p.session)); break;

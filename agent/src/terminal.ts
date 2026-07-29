@@ -5,7 +5,7 @@ import { spawnPty, type PtyHandle } from "./pty";
 import { inferState, StateHysteresis } from "./state";
 import { toB64 } from "./bytes";
 import { cjkFallbackLang } from "./pty-env";
-import type { SessionMeta } from "./protocol";
+import type { SessionMeta, TermHistoryResult } from "./protocol";
 
 interface Live {
   pty: PtyHandle;
@@ -196,10 +196,22 @@ export class TerminalService {
   // A full 2000-line scrollback (~200KB of SGR) does not fit one Noise frame;
   // the rpc layer chunks oversize responses (WP-6), so this always returns the
   // complete capture — the WP-1 halving-retry shrink is gone.
-  history(name: string): { data: string } {
-    const res = this.tmux(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", name]);
-    if (res.exitCode !== 0) return { data: "" };
-    return { data: toB64(res.stdout) };
+  //
+  // ASYNC on purpose: a 200KB capture through the SYNC runner blocks Bun's
+  // event loop, freezing output for EVERY other session for the duration.
+  // captureLastLine() above already uses tmuxAsync for the same reason.
+  //
+  // `seq` is passed in rather than read here: TerminalService owns no
+  // ReplayService reference (they only meet in server.ts), and injecting one
+  // would couple a plain tmux wrapper to replay bookkeeping. The caller takes
+  // the number BEFORE awaiting this capture — see the server.ts call site.
+  // It is echoed back unchanged, including on failure: dropping it would make
+  // the frontend fall back to attach(0) and replay the whole ring buffer,
+  // which is exactly the double-render this change removes.
+  async history(name: string, seq: number): Promise<TermHistoryResult> {
+    const res = await this.tmuxAsync(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", name]);
+    if (res.exitCode !== 0) return { data: "", seq };
+    return { data: toB64(res.stdout), seq };
   }
 
   // Snapshot of the tmux pane's current state. Used by the frontend to decide
