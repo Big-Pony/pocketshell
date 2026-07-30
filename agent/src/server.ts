@@ -1011,7 +1011,15 @@ async function runCliDevices(argv: string[]): Promise<number> {
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
   const cliArgv = process.argv.slice(2);
-  if (cliArgv[0] === "notify") {
+  if (cliArgv[0] === "install" || cliArgv[0] === "uninstall") {
+    // Service install/uninstall never boots the server (same shape as the
+    // devices/pair branch below).
+    void (async () => {
+      const { runInstall, runUninstall } = await import("./install-runner");
+      const code = cliArgv[0] === "install" ? await runInstall(cliArgv) : await runUninstall();
+      process.exit(code);
+    })();
+  } else if (cliArgv[0] === "notify") {
     void (async () => {
       try {
         const { parseNotifyPayload } = await import("./notify-subcommand");
