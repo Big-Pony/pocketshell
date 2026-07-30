@@ -11,6 +11,7 @@ import { createRateLimiter, type RateLimiter } from "./rate-limit";
 import { createAudit, fileAuditWriter, type Audit } from "./audit";
 import { openSnippetStore, type SnippetStore } from "./snippet-store";
 import { openHintStore, type HintStore } from "./hint-store";
+import { normalizeInstanceName } from "./instance-brand";
 
 export interface AgentConfig {
   listen: { host: string; port: number };
@@ -30,6 +31,8 @@ export interface AgentConfig {
   hints: HintStore;
   tmpDir: string;
   adminEnabled: boolean;
+  /** 部署时传入的实例名（已归一化）。未设即不做 PWA 品牌化。 */
+  instanceName?: string;
   update: { enabled: boolean; repo: string | null };
   notifyToken: string;
 }
@@ -85,6 +88,7 @@ interface AgentFileConfig {
   tls?: boolean;
   tlsCert?: string;
   tlsKey?: string;
+  instanceName?: string;
 }
 
 function loadAgentJson(keyDir: string): AgentFileConfig {
@@ -142,6 +146,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     env.POCKETSHELL_TLS === "0" ? false :
     (file.tls ?? false);
   const adminEnabled = env.POCKETSHELL_ADMIN === "0" ? false : true;
+  // 读 agent.json 是为了让运维手工编辑该文件；**不写回**（见 persistAgentJson
+  // 附近的 toWrite）——把 env 传入的值落盘会让「下次不传 env」时名字仍生效，
+  // 破坏「不设即现状」的约束。
+  const instanceName = normalizeInstanceName(env.POCKETSHELL_INSTANCE_NAME ?? file.instanceName);
   const tls = {
     enabled: tlsEnabled,
     cert: env.POCKETSHELL_TLS_CERT ?? file.tlsCert,
@@ -189,6 +197,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     hints,
     tmpDir,
     adminEnabled,
+    instanceName,
     update,
     notifyToken,
   };

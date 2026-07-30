@@ -20,6 +20,7 @@ export default {
       body: "点右上角 ＋ 新建 tmux / shell 窗口 · 双击上方标签页关闭窗口 · 键盘 Fn + n 也能快捷新建",
     },
     topAria: "终端与文件预览",
+    instanceName: "服务器实例：{name}",
     fullscreen: {
       enter: "全屏",
       exit: "退出全屏",

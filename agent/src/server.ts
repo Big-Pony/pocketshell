@@ -17,6 +17,7 @@ import { sessionListsEqual } from "./sessions-diff";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
 import { resolveStatic, contentEtag, isNotModified } from "./static-serve";
+import { brandManifest, brandHtml } from "./instance-brand";
 import { ASSETS } from "./embedded-manifest";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 import { buildReadiness, isNonLocalBind } from "./readiness";
@@ -108,6 +109,8 @@ export function startServer(deps: Deps = {}) {
   // Content-addressed validators: hash each served file once (lazily), then
   // reuse for If-None-Match checks. The hashed body is the served variant
   // itself, so .br/.gz variants get their own ETags automatically.
+  // 需要按实例名改写的两个文件。其余静态资源走原路径。
+  const BRANDED_ASSETS = new Set(["/manifest.webmanifest", "/index.html"]);
   const etagCache = new Map<string, string>();
   const etagFor = async (assetKey: string): Promise<string> => {
     let etag = etagCache.get(assetKey);
@@ -633,6 +636,9 @@ export function startServer(deps: Deps = {}) {
               result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
               break;
             }
+            // 实例身份：只读，走通用 RPC 信封（不需要新增 protocol 消息类型）。
+            // 天然只在 Noise 握手成功后可得 —— 未配对设备看不到实例名。
+            case "agent.info": result = { instanceName: config.instanceName ?? null }; break;
             case "notify.getConfig": result = notify.config(); break;
             case "notify.setConfig": notify.setConfig(p.config); result = { ok: true }; break;
             case "notify.getVapidPublicKey": result = { publicKey: notify.vapidPublicKey() }; break;
@@ -851,6 +857,40 @@ export function startServer(deps: Deps = {}) {
         assetKeys,
         req.headers.get("accept-encoding") ?? "",
       );
+      // 实例身份：manifest 与 index.html 的名称字段按 instanceName 改写。**只有
+      // 设了实例名才走这条分支** —— 不设时必须原样落到下面那条 Bun.file 路径，
+      // 否则 content-type 会从 Bun 的推断值漂到这里手写的 MIME（html 那条差一个
+      // 空格），破坏「不设即与改动前逐字节相同」的约束。
+      // ETag 必须按改写后的 body 算：用磁盘文件内容算会让改名后客户端拿 304 旧值。
+      // 这两个文件都是 no-cache（非 /assets/ 下的 content-hash 资源），改写成本可忽略。
+      // 2026-07-30 实测：compress-dist.ts 的阈值是 10 KB，index.html(4.2 KB) 与
+      // manifest(676 B) 都不到，不生成 .br/.gz，所以 r.assetKey 就是未压缩键。
+      // 若哪天 index.html 涨过 10 KB，resolveStatic 会把 assetKey 指向 .br，
+      // BRANDED_ASSETS 不再命中 —— 那时改成按 url.pathname 判定并始终读原文件。
+      if (
+        config.instanceName &&
+        r.status === 200 &&
+        r.assetKey &&
+        BRANDED_ASSETS.has(r.assetKey) &&
+        !r.headers["Content-Encoding"]
+      ) {
+        const raw = await Bun.file(assets[r.assetKey]).text();
+        const body =
+          r.assetKey === "/manifest.webmanifest"
+            ? brandManifest(raw, { name: config.instanceName })
+            : brandHtml(raw, { name: config.instanceName });
+        const bytes = new TextEncoder().encode(body);
+        const etag = contentEtag(bytes);
+        if (isNotModified(req.headers.get("if-none-match"), etag)) {
+          return new Response(null, { status: 304, headers: { ...r.headers, ETag: etag } });
+        }
+        const headers: Record<string, string> = { ...r.headers, ETag: etag };
+        headers["content-type"] =
+          r.assetKey === "/manifest.webmanifest"
+            ? "application/manifest+json"
+            : "text/html; charset=utf-8";
+        return new Response(bytes, { headers });
+      }
       if (r.status === 200 && r.assetKey) {
         const etag = await etagFor(r.assetKey);
         if (isNotModified(req.headers.get("if-none-match"), etag)) {

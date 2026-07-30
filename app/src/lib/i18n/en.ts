@@ -20,6 +20,7 @@ export default {
       body: "Tap ＋ top-right to open a tmux / shell window · double-tap a top tab to close it · or press Fn + n on the keyboard",
     },
     topAria: "Terminal and file preview",
+    instanceName: "Server instance: {name}",
     fullscreen: {
       enter: "Fullscreen",
       exit: "Exit fullscreen",

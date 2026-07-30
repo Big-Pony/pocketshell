@@ -195,3 +195,47 @@ test("custom repo honored", () => {
   const c = loadConfig(envWith({ POCKETSHELL_UPDATE_REPO: "me/fork" }));
   expect(c.update.repo).toBe("me/fork");
 });
+
+test("loadConfig reads POCKETSHELL_INSTANCE_NAME from env", () => {
+  const keyDir = tmpKeyDir();
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_INSTANCE_NAME: "开发" });
+  expect(cfg.instanceName).toBe("开发");
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("loadConfig leaves instanceName undefined when the env var is absent", () => {
+  const keyDir = tmpKeyDir();
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  expect(cfg.instanceName).toBeUndefined();
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("loadConfig treats a blank POCKETSHELL_INSTANCE_NAME as unset", () => {
+  const keyDir = tmpKeyDir();
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_INSTANCE_NAME: "   " });
+  expect(cfg.instanceName).toBeUndefined();
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("loadConfig falls back to agent.json instanceName, and env wins over it", () => {
+  const keyDir = tmpKeyDir();
+  // 先跑一次让 agent.json 落盘，再手写 instanceName 进去
+  loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  const jsonPath = join(keyDir, "agent.json");
+  const j = JSON.parse(_rf(jsonPath, "utf8"));
+  writeFileSync(jsonPath, JSON.stringify({ ...j, instanceName: "文件里的名字" }));
+
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir }).instanceName).toBe("文件里的名字");
+  expect(
+    loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_INSTANCE_NAME: "env的名字" }).instanceName,
+  ).toBe("env的名字");
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+test("loadConfig never writes instanceName back into agent.json", () => {
+  const keyDir = tmpKeyDir();
+  loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_INSTANCE_NAME: "开发" });
+  const j = JSON.parse(_rf(join(keyDir, "agent.json"), "utf8"));
+  expect(j.instanceName).toBeUndefined();
+  rmSync(keyDir, { recursive: true, force: true });
+});
