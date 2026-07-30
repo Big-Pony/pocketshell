@@ -7,7 +7,7 @@
 // heredoc during the 2026-07-30 manual install and still exited 0 — argv arrays
 // make that class of failure impossible.
 import { existsSync, copyFileSync, writeFileSync, readFileSync, mkdirSync, realpathSync, chmodSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import {
   parseInstallArgv, resolvePlan, renderSystemdUnit, renderLaunchdPlist,
   type InstallPlan,
@@ -58,6 +58,22 @@ function tmuxDirOf(): string | null {
   return p ? dirname(p) : null;
 }
 
+// Replaces dst with a copy of src, unlinking dst first.
+//
+// Writing over a file that some process is currently executing fails with
+// ETXTBSY on Linux — which is exactly what a reinstall does, since the running
+// service is executing the target. unlink only detaches the directory entry:
+// the running process keeps the old inode alive until it exits, and the copy
+// lands on a fresh inode. (install.sh has always done this; the TS path
+// regressed on it and died with a raw Bun stack trace during the 2026-07-30
+// acceptance run.)
+export function replaceBinary(src: string, dst: string): void {
+  mkdirSync(dirname(dst), { recursive: true });
+  rmSync(dst, { force: true });
+  copyFileSync(src, dst);
+  chmodSync(dst, 0o755);
+}
+
 /** Copies the running binary into place, skipping a no-op self-copy. */
 function installBinary(plan: InstallPlan): string {
   const src = realpathSync(process.execPath);
@@ -66,9 +82,7 @@ function installBinary(plan: InstallPlan): string {
     // Copying a file onto itself truncates the running binary to 0 bytes.
     return `二进制已在目标位置，跳过复制：${plan.binPath}`;
   }
-  mkdirSync(dirname(plan.binPath), { recursive: true });
-  copyFileSync(src, plan.binPath);
-  chmodSync(plan.binPath, 0o755);
+  replaceBinary(src, plan.binPath);
   return `已安装二进制：${plan.binPath}`;
 }
 
@@ -111,7 +125,7 @@ async function readServiceLog(plan: InstallPlan): Promise<string> {
   try { return await Bun.file(path).text(); } catch { return ""; }
 }
 
-function printSuccess(plan: InstallPlan, pairing: string | null): void {
+function printSuccess(plan: InstallPlan, pairing: string | null, paired: number): void {
   const appUrl = plan.env.POCKETSHELL_ADVERTISE
     .replace(/^wss:\/\//, "https://")
     .replace(/^ws:\/\//, "http://");
@@ -126,6 +140,13 @@ function printSuccess(plan: InstallPlan, pairing: string | null): void {
     console.log(`手机打开上面的地址，粘贴这个配对串（有效期 300 秒）：`);
     console.log("");
     console.log(`  ${pairing}`);
+  } else if (paired > 0) {
+    // Not a failure: the agent deliberately skips minting a boot code when the
+    // registry is non-empty, so no string exists to print. Pointing at the log
+    // here would send the operator hunting for something never written.
+    console.log(`这台机器上已有 ${paired} 台配对过的设备，可以直接用，无需重新配对。`);
+    console.log(`要加一台新手机，运行：`);
+    console.log(`  ${plan.binPath} pair`);
   } else {
     console.log(`服务已启动，但没能自动取到配对串。手动查看：`);
     console.log(plan.platform === "linux"
@@ -195,12 +216,27 @@ export async function runInstall(argv: string[]): Promise<number> {
   // than the in-memory one, and a just-booted agent always holds a live boot
   // code — asking `pair` at this moment produced two bogus bad_code failures
   // during the 2026-07-30 manual install.
-  printSuccess(plan, extractPairingString(await readServiceLog(plan)));
+  printSuccess(plan, extractPairingString(await readServiceLog(plan)), pairedDeviceCount(plan.keyDir));
   return 0;
 }
 
 export function launchdDomain(uid: number): string {
   return `gui/${uid}`;
+}
+
+// How many devices are already paired against this keyDir. Drives the wording
+// after install: config.ts only turns pairingMode on when the registry is
+// empty, so on a machine that already has devices the agent never mints a boot
+// code and no pairing string will ever appear in the log. Telling the operator
+// to go read journalctl there (as the first cut did) sends them looking for
+// something that was never written.
+export function pairedDeviceCount(keyDir: string): number {
+  try {
+    const j = JSON.parse(readFileSync(join(keyDir, "devices.json"), "utf8"));
+    return Array.isArray(j?.devices) ? j.devices.length : 0;
+  } catch {
+    return 0; // missing or corrupt -> treat as a fresh install
+  }
 }
 
 // Recovers the service's real keyDir from the unit about to be removed. Both
@@ -241,7 +277,7 @@ async function bootstrapLaunchd(plan: InstallPlan): Promise<number> {
     console.error(`查看日志：tail -n 30 ${plan.logPath}`);
     return 1;
   }
-  printSuccess(plan, extractPairingString(await readServiceLog(plan)));
+  printSuccess(plan, extractPairingString(await readServiceLog(plan)), pairedDeviceCount(plan.keyDir));
   return 0;
 }
 

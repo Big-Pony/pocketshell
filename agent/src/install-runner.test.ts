@@ -1,4 +1,7 @@
 import { test, expect } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { extractPairingString, backupPath, launchdDomain } from "./install-runner";
 
 test("extractPairingString picks the pairing token out of journal output", () => {
@@ -68,4 +71,84 @@ test("keyDirFromUnit returns null when the key is absent", () => {
   // hint rather than printing a fabricated path.
   expect(keyDirFromUnit("[Service]\nUser=myt\nRestart=always")).toBeNull();
   expect(keyDirFromUnit("")).toBeNull();
+});
+
+// Found during the 2026-07-30 dev-server acceptance run: on a machine that
+// already has paired devices, config.ts sets pairingMode=false, so the agent
+// never mints a boot code and the log holds no pairing string at all. install
+// then printed "没能自动取到配对串，请看 journalctl" — honest, but the hint is
+// useless because the log was never going to contain one. Reinstalling is a
+// common path, so the two cases must read differently.
+import { pairedDeviceCount } from "./install-runner";
+
+test("pairedDeviceCount reads devices.json", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-inst-"));
+  try {
+    expect(pairedDeviceCount(dir)).toBe(0); // no file yet -> fresh install
+    writeFileSync(join(dir, "devices.json"), JSON.stringify({
+      v: 1,
+      devices: [
+        { pubKey: "AAA", name: "phone", addedAt: "2026-07-30T00:00:00Z" },
+        { pubKey: "BBB", name: "tablet", addedAt: "2026-07-30T00:00:00Z" },
+      ],
+    }));
+    expect(pairedDeviceCount(dir)).toBe(2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pairedDeviceCount treats a corrupt or empty registry as zero", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-inst-"));
+  try {
+    writeFileSync(join(dir, "devices.json"), "{ not json");
+    expect(pairedDeviceCount(dir)).toBe(0);
+    writeFileSync(join(dir, "devices.json"), JSON.stringify({ v: 1, devices: [] }));
+    expect(pairedDeviceCount(dir)).toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Found on the 2026-07-30 dev-server acceptance run, reinstall path: copying
+// onto /usr/local/bin/pocketshell-agent while the service was executing it
+// threw ETXTBSY ("text file is busy") and the command died with a raw Bun
+// stack trace. Linux refuses to write a file that is currently being executed.
+// Unlinking first is the standard fix: it only detaches the directory entry,
+// the running process keeps its inode alive, and the copy lands on a brand-new
+// inode. install.sh already did this; the TypeScript path did not.
+import { replaceBinary } from "./install-runner";
+
+test("replaceBinary unlinks an existing target before copying", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
+  try {
+    const src = join(dir, "src-bin");
+    const dst = join(dir, "dst-bin");
+    writeFileSync(src, "NEW", { mode: 0o755 });
+    writeFileSync(dst, "OLD", { mode: 0o755 });
+    const inodeBefore = statSync(dst).ino;
+
+    replaceBinary(src, dst);
+
+    expect(readFileSync(dst, "utf8")).toBe("NEW");
+    // A fresh inode is the whole point: the old one stays alive for whoever is
+    // still executing it.
+    expect(statSync(dst).ino).not.toBe(inodeBefore);
+    expect(statSync(dst).mode & 0o777).toBe(0o755);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("replaceBinary works when the target does not exist yet", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
+  try {
+    const src = join(dir, "src-bin");
+    const dst = join(dir, "sub", "dst-bin");
+    writeFileSync(src, "NEW", { mode: 0o755 });
+    replaceBinary(src, dst);
+    expect(readFileSync(dst, "utf8")).toBe("NEW");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
