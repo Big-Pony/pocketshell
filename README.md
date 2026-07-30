@@ -157,6 +157,8 @@ tar -xzf pocketshell-agent-linux-x64.tar.gz
 
 Optional: verify integrity with the `SHA256SUMS.txt` shipped in the same Release (`shasum -a 256 -c SHA256SUMS.txt`). The target host only needs `tmux`. On macOS, if Gatekeeper blocks the first run, allow it under System Settings → Privacy & Security.
 
+> **That runs it in the foreground**: Ctrl+C or closing your SSH session stops it, and it won't come back after a reboot. Use the command above to confirm it starts and to read the pairing string. **For anything long-lived, install it as a system service** (starts on boot, restarts on crash) — see [deployment guide § Running as a service](./DEPLOYMENT.md#running-as-a-service-systemd--launchd). On Linux that's one `.service` file plus `sudo systemctl enable --now pocketshell`.
+
 **Option C — build the binary from source**
 
 ```bash
@@ -173,6 +175,8 @@ The Agent listens on port **`8722`** by default (change with `POCKETSHELL_PORT`)
 **First pairing**
 
 On first run the Agent prints the App URL, a pasteable **pairing string**, and the Agent public key. Open the App on your phone, paste the pairing string to complete a one-time pairing (default TTL 300s). The device is trusted afterward.
+
+Once installed as a service, that output goes to the log instead — read it with `sudo journalctl -u pocketshell -n 50` on Linux. The pairing code has a 300-second TTL and is minted only at process start; if it expires you don't need to restart the service — open the admin page at `http://127.0.0.1:8722/admin` on the Agent's own machine and generate a new one.
 
 **Common environment variables** (`agent/src/config.ts`; precedence env > `<keyDir>/agent.json` > default)
 

@@ -160,6 +160,8 @@ tar -xzf pocketshell-agent-linux-x64.tar.gz
 
 可选：用同一 Release 附带的 `SHA256SUMS.txt` 校验完整性（`shasum -a 256 -c SHA256SUMS.txt`）。目标机只需 `tmux`。macOS 首次运行若被 Gatekeeper 拦截，在「系统设置 → 隐私与安全性」放行即可。
 
+> **这样跑是前台进程**：Ctrl+C 或关掉 SSH 就停了，开机也不会自动起来。上面这条命令用于首次验证「能跑起来、能看到配对串」。**长期运行请配成系统服务**（开机自启 + 崩溃自动拉起），见 [部署指南 § 常驻运行（systemd / launchd）](./DEPLOYMENT-CN.md#常驻运行systemd--launchd)——Linux 上是一个 `.service` 文件加一句 `sudo systemctl enable --now pocketshell`。
+
 **方式三：从源码构建二进制**
 
 ```bash
@@ -178,6 +180,8 @@ Agent 默认监听 **`8722` 端口**（`POCKETSHELL_PORT` 可改），启动后�
 **首次配对**
 
 Agent 首次运行会打印：App 访问地址、可粘贴的**配对串**、Agent 公钥。手机打开 App → 粘贴配对串完成一次性配对（默认 TTL 300s）。之后该设备即受信。
+
+配成系统服务后这些输出进的是日志，用 `sudo journalctl -u pocketshell -n 50`（Linux）查看。配对码 TTL 300 秒且只在进程启动时生成一次——过期了不用重启服务，在 Agent 所在机器打开管理页 `http://127.0.0.1:8722/admin` 点一下就能生成新的。
 
 **常用环境变量**（`agent/src/config.ts`，优先级 env > `<keyDir>/agent.json` > 默认）
 
