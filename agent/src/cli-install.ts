@@ -110,6 +110,10 @@ export interface InstallPlan {
   home: string;
   keyDir: string;
   binPath: string;
+  /** Linux: the binary's directory is chown'd to this user so OTA can rename over it. */
+  binOwner?: string;
+  /** Linux: symlink on the global PATH pointing at binPath. */
+  symlinkPath?: string;
   unitPath: string;
   /** launchd Label / systemd unit name stem. */
   label: string;
@@ -150,10 +154,23 @@ function buildEnv(opts: InstallOpts, keyDir: string): Record<string, string> {
   return env;
 }
 
+// Where the Linux binary lives. Deliberately NOT /usr/local/bin: in-app OTA
+// updates write `.pocketshell.new` next to the running binary and rename over
+// it (see runApply in server.ts), so the service user needs write access to the
+// *directory*, not just the file. /usr/local/bin is root-owned and chowning it
+// to a normal user is not acceptable — so the binary gets its own directory,
+// owned by whoever the service runs as.
+//
+// A symlink at /usr/local/bin/pocketshell-agent keeps the command on the global
+// PATH, which matters because `sudo pocketshell-agent uninstall` resolves via
+// root's PATH and would otherwise be command-not-found.
+export const LINUX_BIN_DIR = "/opt/pocketshell";
+export const LINUX_SYMLINK = "/usr/local/bin/pocketshell-agent";
+
 export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | { ok: false; message: string } {
   if (i.platform === "linux") {
     if (i.euid !== 0) {
-      return { ok: false, message: "install 需要 root 权限（要写 /etc/systemd/system 与 /usr/local/bin）。\n请改用：sudo pocketshell-agent install …" };
+      return { ok: false, message: `install 需要 root 权限（要写 ${LINUX_BIN_DIR}、/etc/systemd/system 与 ${LINUX_SYMLINK}）。\n请改用：sudo pocketshell-agent install …` };
     }
     const user = i.opts.user ?? i.env.SUDO_USER ?? "root";
     const home = i.homeOf(user);
@@ -168,7 +185,9 @@ export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | 
         user,
         home,
         keyDir,
-        binPath: "/usr/local/bin/pocketshell-agent",
+        binPath: `${LINUX_BIN_DIR}/pocketshell-agent`,
+        binOwner: user,
+        symlinkPath: LINUX_SYMLINK,
         unitPath: `/etc/systemd/system/${SYSTEMD_UNIT_NAME}.service`,
         label: SYSTEMD_UNIT_NAME,
         env: buildEnv(i.opts, keyDir),

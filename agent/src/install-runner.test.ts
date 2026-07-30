@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractPairingString, backupPath, launchdDomain } from "./install-runner";
@@ -151,4 +151,57 @@ test("replaceBinary works when the target does not exist yet", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// v1.6.0 regression: install put the binary in root-owned /usr/local/bin while
+// the service ran as a normal user, so in-app OTA failed with
+// "EACCES: permission denied, copyfile … -> /usr/local/bin/.pocketshell.new".
+// OTA needs write access to the binary's *directory* (it writes a temp file
+// there and renames over the target), so the binary now lives in its own
+// directory owned by the service user, with a symlink keeping the command on
+// the global PATH.
+import { symlinkTargetOk } from "./install-runner";
+
+test("symlinkTargetOk detects a symlink already pointing at the right target", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-link-"));
+  try {
+    const target = join(dir, "real-bin");
+    const link = join(dir, "link-bin");
+    writeFileSync(target, "BIN", { mode: 0o755 });
+    expect(symlinkTargetOk(link, target)).toBe(false);      // absent
+    symlinkSync(target, link);
+    expect(symlinkTargetOk(link, target)).toBe(true);       // correct
+    expect(symlinkTargetOk(link, join(dir, "other"))).toBe(false); // stale
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("symlinkTargetOk returns false for a regular file at the link path", () => {
+  // An older install left a real binary at /usr/local/bin; it must be replaced
+  // by the symlink rather than silently kept (it would shadow the new one on
+  // PATH and never receive OTA updates).
+  const dir = mkdtempSync(join(tmpdir(), "ps-link-"));
+  try {
+    const link = join(dir, "link-bin");
+    writeFileSync(link, "OLD BINARY", { mode: 0o755 });
+    expect(symlinkTargetOk(link, join(dir, "real-bin"))).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// uninstall must know where the binary actually is, for the same reason it must
+// know the keyDir: guessing a path is worse than reading the one the unit
+// records. It also gates symlink removal — we only delete /usr/local/bin/… when
+// it still points at our binary.
+import { execStartFromUnit } from "./install-runner";
+
+test("execStartFromUnit reads the binary path out of a systemd unit", () => {
+  const unit = "[Service]\nUser=myt\nExecStart=/opt/pocketshell/pocketshell-agent\nRestart=always";
+  expect(execStartFromUnit(unit)).toBe("/opt/pocketshell/pocketshell-agent");
+});
+
+test("execStartFromUnit falls back to null when absent", () => {
+  expect(execStartFromUnit("[Service]\nUser=myt")).toBeNull();
 });

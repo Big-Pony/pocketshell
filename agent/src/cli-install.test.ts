@@ -113,9 +113,30 @@ test("linux: SUDO_USER becomes the service user, and keyDir follows its home", (
   expect(p.user).toBe("myt");
   expect(p.home).toBe("/home/myt");
   expect(p.keyDir).toBe("/home/myt/.pocketshell");
-  expect(p.binPath).toBe("/usr/local/bin/pocketshell-agent");
+  // Binary lives in a dedicated directory owned by the service user, NOT in
+  // /usr/local/bin: in-app OTA updates write a temp file next to the binary and
+  // rename over it, which needs write access to the *directory*. Shipping it to
+  // root-owned /usr/local/bin broke OTA with EACCES on the dev server (v1.6.0).
+  expect(p.binPath).toBe("/opt/pocketshell/pocketshell-agent");
+  expect(p.binOwner).toBe("myt");
+  // …while a symlink keeps the command on the global PATH, so
+  // `sudo pocketshell-agent uninstall` still resolves.
+  expect(p.symlinkPath).toBe("/usr/local/bin/pocketshell-agent");
   expect(p.unitPath).toBe("/etc/systemd/system/pocketshell.service");
   expect(p.label).toBe("pocketshell");
+});
+
+test("linux: ExecStart points at the real binary, not the symlink", () => {
+  // systemd resolves ExecStart itself; pointing it at the symlink would make
+  // process.execPath report the symlink and confuse OTA's same-dir rename.
+  const p = plan({ env: { SUDO_USER: "myt" } });
+  expect(renderSystemdUnit(p)).toContain("ExecStart=/opt/pocketshell/pocketshell-agent");
+});
+
+test("linux: the OTA-writable directory is derived from the binary path", () => {
+  const p = plan({ env: { SUDO_USER: "myt" } });
+  // dirname(binPath) is what install chowns to the service user.
+  expect(p.binPath.startsWith("/opt/pocketshell/")).toBe(true);
 });
 
 test("linux: --user overrides SUDO_USER", () => {
@@ -198,7 +219,7 @@ After=network.target
 Type=simple
 User=myt
 WorkingDirectory=/home/myt
-ExecStart=/usr/local/bin/pocketshell-agent
+ExecStart=/opt/pocketshell/pocketshell-agent
 Environment=POCKETSHELL_HOST=127.0.0.1
 Environment=POCKETSHELL_PORT=8722
 Environment=POCKETSHELL_ADVERTISE=wss://x.com

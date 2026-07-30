@@ -6,10 +6,11 @@
 // argv array to Bun.spawn. A `sudo -S` + pipe combination silently swallowed a
 // heredoc during the 2026-07-30 manual install and still exited 0 — argv arrays
 // make that class of failure impossible.
-import { existsSync, copyFileSync, writeFileSync, readFileSync, mkdirSync, realpathSync, chmodSync, rmSync } from "node:fs";
+import { existsSync, copyFileSync, writeFileSync, readFileSync, mkdirSync, realpathSync, chmodSync, rmSync, symlinkSync, lstatSync, readlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   parseInstallArgv, resolvePlan, renderSystemdUnit, renderLaunchdPlist,
+  LINUX_BIN_DIR, LINUX_SYMLINK,
   type InstallPlan,
 } from "./cli-install";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
@@ -74,16 +75,45 @@ export function replaceBinary(src: string, dst: string): void {
   chmodSync(dst, 0o755);
 }
 
+/** True when `link` is a symlink already resolving to `target`. */
+export function symlinkTargetOk(link: string, target: string): boolean {
+  try {
+    return lstatSync(link).isSymbolicLink() && readlinkSync(link) === target;
+  } catch {
+    return false; // absent, or a regular file that must be replaced
+  }
+}
+
 /** Copies the running binary into place, skipping a no-op self-copy. */
-function installBinary(plan: InstallPlan): string {
+function installBinary(plan: InstallPlan): string[] {
+  const lines: string[] = [];
   const src = realpathSync(process.execPath);
   const alreadyThere = existsSync(plan.binPath) && realpathSync(plan.binPath) === src;
   if (alreadyThere) {
     // Copying a file onto itself truncates the running binary to 0 bytes.
-    return `二进制已在目标位置，跳过复制：${plan.binPath}`;
+    lines.push(`二进制已在目标位置，跳过复制：${plan.binPath}`);
+  } else {
+    replaceBinary(src, plan.binPath);
+    lines.push(`已安装二进制：${plan.binPath}`);
   }
-  replaceBinary(src, plan.binPath);
-  return `已安装二进制：${plan.binPath}`;
+  // Hand the binary's directory to the service user: OTA writes a temp file
+  // beside the binary and renames over it, which needs directory write access
+  // (v1.6.0 shipped it root-owned and OTA died with EACCES).
+  if (plan.binOwner) {
+    const dir = dirname(plan.binPath);
+    const r = Bun.spawnSync(["chown", "-R", `${plan.binOwner}:`, dir]);
+    if (r.exitCode === 0) lines.push(`已把 ${dir} 交给 ${plan.binOwner}（应用内更新需要写这个目录）`);
+    else lines.push(`警告：chown ${dir} 失败，应用内更新可能因权限不足而失败`);
+  }
+  // Keep the command on the global PATH — `sudo pocketshell-agent uninstall`
+  // resolves through root's PATH, which does not include the install dir.
+  if (plan.symlinkPath && !symlinkTargetOk(plan.symlinkPath, plan.binPath)) {
+    mkdirSync(dirname(plan.symlinkPath), { recursive: true });
+    rmSync(plan.symlinkPath, { force: true }); // may be a stale real binary
+    symlinkSync(plan.binPath, plan.symlinkPath);
+    lines.push(`已建立命令链接：${plan.symlinkPath} → ${plan.binPath}`);
+  }
+  return lines;
 }
 
 /** Writes the unit, backing up any existing one first. Returns log lines. */
@@ -187,7 +217,7 @@ export async function runInstall(argv: string[]): Promise<number> {
   }
 
   // --- mutating phase ---
-  console.log(installBinary(plan));
+  for (const l of installBinary(plan)) console.log(l);
   for (const l of writeUnit(plan)) console.log(l);
 
   if (plan.platform === "linux") {
@@ -237,6 +267,12 @@ export function pairedDeviceCount(keyDir: string): number {
   } catch {
     return 0; // missing or corrupt -> treat as a fresh install
   }
+}
+
+/** The binary path a systemd unit launches, or null. */
+export function execStartFromUnit(unitText: string): string | null {
+  const m = /^ExecStart=(.+)$/m.exec(unitText);
+  return m ? m[1].trim() : null;
 }
 
 // Recovers the service's real keyDir from the unit about to be removed. Both
@@ -292,12 +328,22 @@ export async function runUninstall(): Promise<number> {
     if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
     // Read the keyDir out before deleting the unit — it is the only record of
     // which user's keys this service was using (see keyDirFromUnit).
-    const keyDir = keyDirFromUnit(readFileSync(unitPath, "utf8"));
+    const unitText = readFileSync(unitPath, "utf8");
+    const keyDir = keyDirFromUnit(unitText);
+    // Fall back to the current default only if the unit predates ExecStart
+    // bookkeeping; never guess a path we then tell the user to delete.
+    const binPath = execStartFromUnit(unitText) ?? `${LINUX_BIN_DIR}/pocketshell-agent`;
     await run(["systemctl", "disable", "--now", "pocketshell"]);
     rmSync(unitPath, { force: true });
     await run(["systemctl", "daemon-reload"]);
     console.log(`已停止并移除服务：${unitPath}`);
-    printKeepNotice("/usr/local/bin/pocketshell-agent", keyDir);
+    // Remove our PATH symlink, but only if it still points at our binary —
+    // never touch an unrelated file someone else put there.
+    if (symlinkTargetOk(LINUX_SYMLINK, binPath)) {
+      rmSync(LINUX_SYMLINK, { force: true });
+      console.log(`已移除命令链接：${LINUX_SYMLINK}`);
+    }
+    printKeepNotice(binPath, keyDir);
     return 0;
   }
   if (platform === "darwin") {

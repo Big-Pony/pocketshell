@@ -288,6 +288,7 @@ tail -f /tmp/pocketshell.out.log                            # 看日志（含首
 Agent 启动时、以及手机端每次连接时，会静默向 GitHub Releases 查询是否有新版本（结果缓存 6 小时，查询失败不影响正常运行）。发现新版本后 App 顶栏品牌旁出现更新徽标，点击打开确认弹窗，点「更新」触发：下载对应平台压缩包 → 按 `SHA256SUMS.txt` 校验完整性 → （仅 macOS）用本机自签名身份重签名 → 原子替换正在运行的二进制 → 重启进程。
 
 - **自重启的前提是进程被 supervisor 托管**：更新落地后 Agent 会尝试自我重启，若当前由 systemd（上文 `Restart=always`）或 launchd（上文 `KeepAlive`）管理，新二进制会被 supervisor 自动拉起；否则退化为「自己 spawn 一个分离子进程再退出」的兜底方式，稳定性不如受 supervisor 托管。**生产部署务必按上文配好 `Restart=always` / `KeepAlive`**，这样应用内更新才能可靠地重启为新版本。
+- **另一个前提：服务用户要能写二进制所在目录。** 更新时会在二进制旁边写一个临时文件再原子替换过去，所以需要的是**目录**的写权限，不只是文件的。用 `install` 子命令装的话这一条自动满足（二进制放在 `/opt/pocketshell/`，该目录归服务用户所有，`/usr/local/bin/pocketshell-agent` 是指过去的符号链接）。若你手工把二进制放在 root 拥有的 `/usr/local/bin` 下、服务却以普通用户运行，应用内更新会报 `EACCES: permission denied`——此时要么改用 `install` 子命令，要么手动升级二进制。
 - **开关与来源**：`POCKETSHELL_UPDATE=0` 整体关闭 OTA（不检查、不可更新）；`POCKETSHELL_UPDATE_REPO` 指定检查更新所用的 GitHub 仓库（默认 `Big-Pony/pocketshell`，设为 `off` 效果等同 `POCKETSHELL_UPDATE=0`，也可指向自己 fork 后的仓库）；检查请求走 `https://api.github.com/repos/<repo>/releases/latest`，遵循进程环境里的 `HTTPS_PROXY`/`HTTP_PROXY`。
 - **macOS：首次 FDA 授权不会因 OTA 丢失。** 新二进制会用本机一份稳定的自签名身份（`PocketShell Self-Signed`）重新签名，签名的 Designated Requirement 不随每次构建变化，系统之前对旧二进制授予的 Full Disk Access 等 TCC 权限在更新后继续生效，不会被重新弹窗要求授权。这份签名身份需要**一次性、交互式**地建立（后台进程无法自动创建/信任证书）——运行 `pocketshell-agent --warmup` 完成；跳过这一步也不影响 OTA 正常更新，只是新二进制不会被签名，届时 TCC 权限可能需要重新授予。
 
