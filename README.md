@@ -11,29 +11,49 @@ A self-hosted, end-to-end-encrypted mobile terminal for CLI/TUI coding agents (C
 
 **English** · [中文](./README-CN.md)
 
+#### One full task — from phone to finished product
+
 <p align="center">
-  <img src="assets/hero-en.gif" width="38%" alt="Backgrounded the app → push notification → session survived on the server → task already finished">
+  <img src="assets/screenshots/01-launch-task.jpg" width="18%" alt="Compose a whole prompt in the IME buffer">
+  <img src="assets/screenshots/02-task-running.jpg" width="18%" alt="Task started, the agent is reading files">
+  <img src="assets/screenshots/03-push-notification.jpg" width="18%" alt="Lock-screen push: Claude is waiting for your input">
+  <img src="assets/screenshots/04-task-done-git.jpg" width="18%" alt="Task done, the Git panel shows the commit">
+  <img src="assets/screenshots/05-fullscreen-preview.jpg" width="18%" alt="Fullscreen preview of the 3D scene the agent wrote">
 </p>
 
-<p align="center"><em>Backgrounded the app · a push notification calls you back · the session survived on the server · the task already finished.</em></p>
+<p align="center"><em>① Compose a whole prompt with the system IME, inject it in one shot · ② The task starts — lock your phone and walk away · ③ A push calls you back when it finishes or needs you · ④ Output is already replayed, the code is committed · ⑤ Run the result fullscreen, right on the phone</em></p>
+
+#### Multi-session and drop protection
 
 <p align="center">
-  <img src="assets/screenshots/1-键盘-全键盘.jpg" width="30%" alt="Keyboard — full keyboard layout">
-  <img src="assets/screenshots/2-键盘-输入法缓冲.jpg" width="30%" alt="Keyboard — IME buffer">
-  <img src="assets/screenshots/3-键盘-快捷操作.jpg" width="30%" alt="Keyboard — quick actions">
+  <img src="assets/screenshots/06-task-panel.jpg" width="32%" alt="Task panel: several tmux sessions with running / waiting / background states">
 </p>
 
-<p align="center">
-  <img src="assets/screenshots/5-文件-菜单面板.jpg" width="30%" alt="Files — action menu">
-  <img src="assets/screenshots/5-文件-目录.jpg" width="30%" alt="Files — directory tree">
-  <img src="assets/screenshots/5-文件-git.jpg" width="30%" alt="Files — Git panel">
-</p>
+<p align="center"><em>Every tmux session on the host shows up here — running / waiting for input / background at a glance, with a last-line preview. Sessions live server-side; the app is just a screen onto them.</em></p>
+
+#### Custom full keyboard
 
 <p align="center">
-  <img src="assets/screenshots/4-任务.jpg" width="25%" alt="Task panel">
-  <img src="assets/screenshots/6-指令.jpg" width="25%" alt="Snippets panel">
-  <img src="assets/screenshots/7-设置.jpg" width="25%" alt="Settings">
-  <img src="assets/screenshots/8-浅色主题.jpg" width="25%" alt="Light theme">
+  <img src="assets/screenshots/07-keyboard-full.jpg" width="30%" alt="Full keyboard — laptop layout">
+  <img src="assets/screenshots/08-keyboard-hints.jpg" width="30%" alt="Full keyboard — smart command-hint bar">
+  <img src="assets/screenshots/09-keyboard-quick.jpg" width="30%" alt="Quick actions — arrows, copy and paste">
+</p>
+
+#### Files, preview and Git
+
+<p align="center">
+  <img src="assets/screenshots/10-markdown-preview.jpg" width="30%" alt="Rendered Markdown preview">
+  <img src="assets/screenshots/11-source-view.jpg" width="30%" alt="Source view with highlighting">
+  <img src="assets/screenshots/12-file-menu.jpg" width="30%" alt="File action menu">
+</p>
+
+#### Snippets, themes and notifications
+
+<p align="center">
+  <img src="assets/screenshots/13-snippets.jpg" width="23%" alt="Snippets panel">
+  <img src="assets/screenshots/14-themes.jpg" width="23%" alt="Six theme palettes">
+  <img src="assets/screenshots/15-light-theme.jpg" width="23%" alt="A light theme in actual use">
+  <img src="assets/screenshots/16-notifications.jpg" width="23%" alt="Notification settings and outbound webhooks">
 </p>
 
 ---

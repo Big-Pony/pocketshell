@@ -11,29 +11,49 @@
 
 [English](./README.md) · **中文**
 
+#### 一次完整的任务：从手机派活到看见成品
+
 <p align="center">
-  <img src="assets/hero-zh.gif" width="38%" alt="切到后台 → 推送通知 → 会话在服务器端存活 → 任务已经跑完">
+  <img src="assets/screenshots/01-launch-task.jpg" width="18%" alt="用输入法缓冲写一整段中文需求">
+  <img src="assets/screenshots/02-task-running.jpg" width="18%" alt="任务已开始，agent 正在读文件">
+  <img src="assets/screenshots/03-push-notification.jpg" width="18%" alt="锁屏推送：Claude 在等你输入">
+  <img src="assets/screenshots/04-task-done-git.jpg" width="18%" alt="任务完成，Git 面板显示已提交">
+  <img src="assets/screenshots/05-fullscreen-preview.jpg" width="18%" alt="全屏预览 agent 写出的 3D 场景">
 </p>
 
-<p align="center"><em>切到后台 · 推送通知把你叫回来 · 会话在服务器端存活 · 任务已经跑完。</em></p>
+<p align="center"><em>① 用系统输入法写一整段中文需求，一次性注入 · ② 任务开始，可以熄屏走开 · ③ 跑完或需要你时推送把你叫回来 · ④ 回来时输出已补齐，代码也提交了 · ⑤ 成品直接在手机上全屏跑起来</em></p>
+
+#### 多会话与断线保护
 
 <p align="center">
-  <img src="assets/screenshots/1-键盘-全键盘.jpg" width="30%" alt="键盘界面 - 全键盘布局">
-  <img src="assets/screenshots/2-键盘-输入法缓冲.jpg" width="30%" alt="键盘界面 - 输入法缓冲">
-  <img src="assets/screenshots/3-键盘-快捷操作.jpg" width="30%" alt="键盘界面 - 快捷操作">
+  <img src="assets/screenshots/06-task-panel.jpg" width="32%" alt="任务面板：多个 tmux 会话，运行中 / 等待输入 / 后台运行三态">
 </p>
 
-<p align="center">
-  <img src="assets/screenshots/5-文件-菜单面板.jpg" width="30%" alt="文件管理 - 菜单面板">
-  <img src="assets/screenshots/5-文件-目录.jpg" width="30%" alt="文件管理 - 目录浏览">
-  <img src="assets/screenshots/5-文件-git.jpg" width="30%" alt="文件管理 - Git 版本控制">
-</p>
+<p align="center"><em>主机上的每个 tmux 会话都在这里——运行中 / 等待输入 / 后台运行三态一目了然，还带最后一行预览。会话全部由服务端托管，App 只是它的一块屏幕。</em></p>
+
+#### 自定义全键盘
 
 <p align="center">
-  <img src="assets/screenshots/4-任务.jpg" width="25%" alt="任务面板">
-  <img src="assets/screenshots/6-指令.jpg" width="25%" alt="指令面板">
-  <img src="assets/screenshots/7-设置.jpg" width="25%" alt="设置界面">
-  <img src="assets/screenshots/8-浅色主题.jpg" width="25%" alt="浅色主题预览">
+  <img src="assets/screenshots/07-keyboard-full.jpg" width="30%" alt="全键盘 - 笔记本布局">
+  <img src="assets/screenshots/08-keyboard-hints.jpg" width="30%" alt="全键盘 - 智能命令提示条">
+  <img src="assets/screenshots/09-keyboard-quick.jpg" width="30%" alt="快捷操作 - 方向键与复制粘贴">
+</p>
+
+#### 文件、预览与 Git
+
+<p align="center">
+  <img src="assets/screenshots/10-markdown-preview.jpg" width="30%" alt="Markdown 渲染预览">
+  <img src="assets/screenshots/11-source-view.jpg" width="30%" alt="源码高亮查看">
+  <img src="assets/screenshots/12-file-menu.jpg" width="30%" alt="文件操作菜单">
+</p>
+
+#### 指令、主题与通知
+
+<p align="center">
+  <img src="assets/screenshots/13-snippets.jpg" width="23%" alt="快捷指令面板">
+  <img src="assets/screenshots/14-themes.jpg" width="23%" alt="六套主题配色">
+  <img src="assets/screenshots/15-light-theme.jpg" width="23%" alt="浅色主题实际界面">
+  <img src="assets/screenshots/16-notifications.jpg" width="23%" alt="通知设置与出站 webhook">
 </p>
 
 ---
