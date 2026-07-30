@@ -219,6 +219,9 @@ User=you
 ExecStart=/usr/local/bin/pocketshell-agent
 Environment=POCKETSHELL_HOST=127.0.0.1
 Environment=POCKETSHELL_ADVERTISE=wss://ps.example.com
+# Running more than one install? Name this one — it shows on the home-screen icon
+# and in the app's top bar (see "Running more than one server" in the README).
+# Environment=POCKETSHELL_INSTANCE_NAME=Dev
 WorkingDirectory=/home/you
 Restart=always
 RestartSec=3

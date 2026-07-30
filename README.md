@@ -53,12 +53,12 @@ One binary = the whole product: the frontend is embedded and served on the same 
 - **Push notifications** — get pinged on your phone the moment an agent finishes a round or waits for input, even backgrounded / locked (Web Push + outbound webhooks: WeCom / Feishu / Slack / Discord); smart do-not-disturb skips the ping when you're already watching that session.
 - **End-to-end encryption & device security** — full Noise **IK** handshake per connection (mutual auth + forward secrecy); one-time in-channel pairing code; persistent device registry with naming / one-click revoke; rate limiting; structured audit log.
 - **Custom full keyboard** — read-only xterm, all input routed; full laptop layout (F1–F12, arrows, sticky modifiers); Fn app-command layer; IME whole-segment input; keyboard-driven selection/copy/paste; smart command-hint bar.
-- **Snippets** — built-in groups (common agent / Git / project commands) plus custom ones, tap to insert, broadcast-synced across devices.
+- **Snippets** — your own custom entries, tap to insert, add/edit/delete, broadcast-synced across devices.
 - **File + Git panel** — lazy tree with inline git markers; code preview (highlight + line numbers) that switches to an editor (CodeMirror 6 — line numbers, find/replace, native IME, chunked save with mtime-based overwrite guard, new files open straight into the editor); **file preview: images / Markdown (rendered, with code highlight + local images) / static HTML (sandboxed iframe that runs JS + relative assets), with a persistent `Preview｜Source｜Edit` header bar + refresh**; working-tree diff; read-only git log/branches/status; file ops (rename/new/delete with confirm); upload/download (multi-file with progress, dir-as-zip, chunked transfer).
 - **Mobile shell** — split top/bottom panes with a draggable divider (double-tap fullscreen); 5-tab bottom bar; unified top tab bar (terminals + files); persisted layout.
-- **Dual themes** — dark IDE / light minimal, switch in settings, applied instantly.
+- **Six themes** — four dark (Graphite Orange / Oscilloscope Cyan / Blackout Silver / Prussian Blue) plus two light (Warm White / Vermilion), switch in settings, applied instantly; can follow the system light/dark setting.
 - **Bilingual** — full i18n (zh/en), follows browser language on first open, switchable in settings.
-- **PWA** — installable on mobile Chrome, standalone launch (zero-cache SW, always latest).
+- **PWA** — installable on mobile Chrome, standalone launch; static assets are cached in a per-version bucket that is dropped wholesale when the version changes, so a second open costs almost no requests and never serves a stale build.
 - **Zero-dependency distribution** — single-file binary (`bun build --compile`, linux/darwin targets); pure-JS crypto, no native addons; cross-compile all targets from one Mac.
 
 > Tuned for full-screen TUI agents (classic-renderer switch, alt-screen scrollback normalization) so long output scrolls without limit and the input line stays pinned to the bottom.
@@ -184,6 +184,28 @@ On first run the Agent prints the App URL, a pasteable **pairing string**, and t
 | `POCKETSHELL_KEY_DIR` | `~/.pocketshell` | keys / devices / audit dir |
 | `POCKETSHELL_TLS` / `_CERT` / `_KEY` | `0` | Agent built-in TLS (bring your own cert) |
 | `POCKETSHELL_ADMIN` | on | local admin page (127.0.0.1 only), `0` to disable |
+| `POCKETSHELL_INSTANCE_NAME` | — | instance label, used to tell multiple installs apart (see below); unset shows the default "PocketShell" |
+
+### Running more than one server
+
+Installing an Agent on several machines works out of the box — they know nothing about each other and share nothing: separate keys and device registries, separate sessions, separate push subscriptions. All you do is give each one its own address, plus a name:
+
+```bash
+# work machine
+POCKETSHELL_ADVERTISE=wss://dev.example.com POCKETSHELL_INSTANCE_NAME=Dev pocketshell-agent
+# home server
+POCKETSHELL_ADVERTISE=wss://home.example.com POCKETSHELL_INSTANCE_NAME=Home pocketshell-agent
+```
+
+With `POCKETSHELL_INSTANCE_NAME` set, the name shows up in three places:
+
+- **The label under the home-screen icon** — shows `Dev` (just the instance name; this is where the OS truncates hardest)
+- **The app name when installing the PWA** — shows `Dev · PocketShell`
+- **The app's top bar** — `Dev ·` in front of the brand name
+
+So you end up with two independent PWAs and two home-screen icons you can tell apart at a glance. Because browsers isolate data per domain, each side keeps its own tabs, project-root bookmark, and push subscription — **notifications from both servers reach you, neither displacing the other** (you cannot get this from a single domain; browsers allow only one push subscription per origin).
+
+> Each instance needs its own domain or address. The app is served over HTTPS, browsers refuse to let an HTTPS page open a plaintext `ws://` connection, and `wss://` needs a certificate — which cannot be issued for a bare IP. So any instance reachable over the internet needs a domain name (a subdomain is enough — see the [deployment guide](./DEPLOYMENT.md)). Direct IP access on a LAN is not affected.
 
 ### Admin page
 

@@ -219,6 +219,8 @@ User=you
 ExecStart=/usr/local/bin/pocketshell-agent
 Environment=POCKETSHELL_HOST=127.0.0.1
 Environment=POCKETSHELL_ADVERTISE=wss://ps.example.com
+# 装了多台时给这台起个名字，手机桌面图标与 App 顶栏都会显示它（见 README「装多台服务器」）
+# Environment=POCKETSHELL_INSTANCE_NAME=开发
 WorkingDirectory=/home/you
 Restart=always
 RestartSec=3
