@@ -6,7 +6,7 @@
 // argv array to Bun.spawn. A `sudo -S` + pipe combination silently swallowed a
 // heredoc during the 2026-07-30 manual install and still exited 0 — argv arrays
 // make that class of failure impossible.
-import { existsSync, copyFileSync, writeFileSync, mkdirSync, realpathSync, chmodSync, rmSync } from "node:fs";
+import { existsSync, copyFileSync, writeFileSync, readFileSync, mkdirSync, realpathSync, chmodSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   parseInstallArgv, resolvePlan, renderSystemdUnit, renderLaunchdPlist,
@@ -203,6 +203,24 @@ export function launchdDomain(uid: number): string {
   return `gui/${uid}`;
 }
 
+// Recovers the service's real keyDir from the unit about to be removed. Both
+// formats are covered: systemd's `Environment=KEY=value` and launchd's
+// `<key>KEY</key><string>value</string>`.
+//
+// Why not just derive it from HOME: uninstall runs under sudo on Linux, so the
+// calling process's HOME is root's while the service runs as someone else. The
+// 2026-07-30 acceptance run printed "密钥目录 /root/.pocketshell" for a service
+// whose keys actually lived in /home/myt/.pocketshell — a path that did not
+// even exist. Returns null when the unit predates this field, so the caller can
+// fall back to a generic hint instead of inventing a path.
+export function keyDirFromUnit(unitText: string): string | null {
+  const systemd = /^Environment=POCKETSHELL_KEY_DIR=(.+)$/m.exec(unitText);
+  if (systemd) return systemd[1].trim();
+  const launchd = /<key>POCKETSHELL_KEY_DIR<\/key>\s*<string>([^<]*)<\/string>/.exec(unitText);
+  if (launchd) return launchd[1].trim();
+  return null;
+}
+
 async function bootstrapLaunchd(plan: InstallPlan): Promise<number> {
   const uid = typeof process.getuid === "function" ? process.getuid() : 0;
   const domain = launchdDomain(uid);
@@ -236,11 +254,14 @@ export async function runUninstall(): Promise<number> {
     }
     const unitPath = "/etc/systemd/system/pocketshell.service";
     if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
+    // Read the keyDir out before deleting the unit — it is the only record of
+    // which user's keys this service was using (see keyDirFromUnit).
+    const keyDir = keyDirFromUnit(readFileSync(unitPath, "utf8"));
     await run(["systemctl", "disable", "--now", "pocketshell"]);
     rmSync(unitPath, { force: true });
     await run(["systemctl", "daemon-reload"]);
     console.log(`已停止并移除服务：${unitPath}`);
-    printKeepNotice("/usr/local/bin/pocketshell-agent");
+    printKeepNotice("/usr/local/bin/pocketshell-agent", keyDir);
     return 0;
   }
   if (platform === "darwin") {
@@ -248,21 +269,26 @@ export async function runUninstall(): Promise<number> {
     const unitPath = `${home}/Library/LaunchAgents/com.pocketshell.agent.plist`;
     if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
     const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+    const keyDir = keyDirFromUnit(readFileSync(unitPath, "utf8"));
     await run(["launchctl", "bootout", `${launchdDomain(uid)}/com.pocketshell.agent`]);
     rmSync(unitPath, { force: true });
     console.log(`已停止并移除服务：${unitPath}`);
-    printKeepNotice(`${home}/.local/bin/pocketshell-agent`);
+    printKeepNotice(`${home}/.local/bin/pocketshell-agent`, keyDir);
     return 0;
   }
   console.error(`不支持的平台：${platform}`);
   return 1;
 }
 
-function printKeepNotice(binPath: string): void {
-  const keyDir = `${process.env.HOME ?? "~"}/.pocketshell`;
+function printKeepNotice(binPath: string, keyDir: string | null): void {
   console.log("");
   console.log("以下内容已保留（里面有密钥与已配对设备，删掉所有手机都要重新配对）：");
-  console.log(`  密钥目录  ${keyDir}`);
+  if (keyDir) {
+    console.log(`  密钥目录  ${keyDir}`);
+  } else {
+    // Never guess: an invented path is worse than admitting we don't know.
+    console.log(`  密钥目录  服务配置里没有记录，通常是服务运行用户 home 下的 .pocketshell`);
+  }
   console.log(`  二进制    ${binPath}`);
   console.log("");
   console.log("确实要彻底清除，手动删除上面两个路径即可。");

@@ -31,3 +31,41 @@ test("launchdDomain targets the invoking user's GUI domain", () => {
   expect(launchdDomain(501)).toBe("gui/501");
   expect(launchdDomain(1000)).toBe("gui/1000");
 });
+
+// Regression for a bug found during the 2026-07-30 dev-server acceptance run:
+// uninstall printed "密钥目录 /root/.pocketshell" because printKeepNotice
+// derived the path from the *calling* process's HOME — which under sudo is
+// root's, not the service user's. The real keyDir was /home/myt/.pocketshell.
+// Pointing the operator at a path that does not exist defeats the entire point
+// of the notice, so the value is now read back out of the unit file that is
+// about to be deleted.
+import { keyDirFromUnit } from "./install-runner";
+
+test("keyDirFromUnit reads POCKETSHELL_KEY_DIR out of a systemd unit", () => {
+  const unit = [
+    "[Service]",
+    "User=myt",
+    "ExecStart=/usr/local/bin/pocketshell-agent",
+    "Environment=POCKETSHELL_HOST=127.0.0.1",
+    "Environment=POCKETSHELL_KEY_DIR=/home/myt/.pocketshell",
+    "Restart=always",
+  ].join("\n");
+  expect(keyDirFromUnit(unit)).toBe("/home/myt/.pocketshell");
+});
+
+test("keyDirFromUnit reads POCKETSHELL_KEY_DIR out of a launchd plist", () => {
+  const plist = [
+    "  <dict>",
+    "    <key>POCKETSHELL_HOST</key><string>127.0.0.1</string>",
+    "    <key>POCKETSHELL_KEY_DIR</key><string>/Users/myt/.pocketshell</string>",
+    "  </dict>",
+  ].join("\n");
+  expect(keyDirFromUnit(plist)).toBe("/Users/myt/.pocketshell");
+});
+
+test("keyDirFromUnit returns null when the key is absent", () => {
+  // A hand-written unit may omit it; the caller then falls back to a generic
+  // hint rather than printing a fabricated path.
+  expect(keyDirFromUnit("[Service]\nUser=myt\nRestart=always")).toBeNull();
+  expect(keyDirFromUnit("")).toBeNull();
+});
