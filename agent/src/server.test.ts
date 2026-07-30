@@ -646,3 +646,37 @@ test("If-None-Match with the branded ETag still yields 304", async () => {
   expect(second.status).toBe(304);
   cleanupBranded(b);
 });
+
+// —— agent.info：照抄上面 `rpc git.status routes through server` 的
+// passthroughResponder + fakeWs + srv.__test.message 往返写法，只是换成需要
+// 一个带 instanceName 的 config。
+function rpcInfoReply(instanceName?: string) {
+  const keyDir = mkdtempSync(join(tmpdir(), "ps-info-key-"));
+  const env: Record<string, string> = { POCKETSHELL_KEY_DIR: keyDir };
+  if (instanceName) env.POCKETSHELL_INSTANCE_NAME = instanceName;
+  const srv = startServer({ port: 0, config: loadConfig(env), channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any); srv.__test.message(ws as any, M1); ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "rpc", id: "i1", method: "agent.info", params: {} })));
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  srv.stop();
+  rmSync(keyDir, { recursive: true, force: true });
+  return reply;
+}
+
+test("agent.info returns the instance name when set", () => {
+  const reply = rpcInfoReply("开发");
+  expect(reply.type).toBe("response");
+  if (reply.type === "response" && reply.ok) {
+    expect(reply.id).toBe("i1");
+    expect(reply.result).toEqual({ instanceName: "开发" });
+  } else { throw new Error("expected an ok response"); }
+});
+
+test("agent.info returns null when no instance name is set", () => {
+  const reply = rpcInfoReply();
+  expect(reply.type).toBe("response");
+  if (reply.type === "response" && reply.ok) {
+    expect(reply.result).toEqual({ instanceName: null });
+  } else { throw new Error("expected an ok response"); }
+});

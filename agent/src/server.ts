@@ -636,6 +636,9 @@ export function startServer(deps: Deps = {}) {
               result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
               break;
             }
+            // 实例身份：只读，走通用 RPC 信封（不需要新增 protocol 消息类型）。
+            // 天然只在 Noise 握手成功后可得 —— 未配对设备看不到实例名。
+            case "agent.info": result = { instanceName: config.instanceName ?? null }; break;
             case "notify.getConfig": result = notify.config(); break;
             case "notify.setConfig": notify.setConfig(p.config); result = { ok: true }; break;
             case "notify.getVapidPublicKey": result = { publicKey: notify.vapidPublicKey() }; break;
