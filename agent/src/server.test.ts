@@ -536,3 +536,113 @@ test("applyGate: starts when repo is set, cache is applicable, and nothing is in
   const out = applyGate("org/repo", { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() }, false);
   expect(out).toEqual({ started: true, latest: "1.1.0" });
 });
+
+// —— 实例身份：serve 层品牌化 ——
+function brandFixtureDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ps-brand-"));
+  writeFileSync(
+    join(dir, "manifest.webmanifest"),
+    JSON.stringify({ name: "PocketShell", short_name: "PocketShell", id: "/", start_url: "/" }),
+  );
+  writeFileSync(
+    join(dir, "index.html"),
+    '<!doctype html><html><head><title>PocketShell</title>' +
+      '<meta name="apple-mobile-web-app-title" content="PocketShell" /></head><body></body></html>',
+  );
+  return dir;
+}
+
+function startBranded(instanceName?: string) {
+  const dir = brandFixtureDir();
+  const keyDir = mkdtempSync(join(tmpdir(), "ps-brandkey-"));
+  const env: Record<string, string> = { POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_PORT: "0" };
+  if (instanceName) env.POCKETSHELL_INSTANCE_NAME = instanceName;
+  const config = loadConfig(env);
+  const srv = startServer({
+    port: 0,
+    config,
+    assets: {
+      "/manifest.webmanifest": join(dir, "manifest.webmanifest"),
+      "/index.html": join(dir, "index.html"),
+    },
+  });
+  return { srv, dir, keyDir };
+}
+
+function cleanupBranded(b: { srv: ReturnType<typeof startServer>; dir: string; keyDir: string }) {
+  b.srv.stop(true);
+  rmSync(b.dir, { recursive: true, force: true });
+  rmSync(b.keyDir, { recursive: true, force: true });
+}
+
+test("manifest is branded when an instance name is set", async () => {
+  const b = startBranded("开发");
+  const res = await fetch(`http://127.0.0.1:${b.srv.port}/manifest.webmanifest`);
+  const j = await res.json();
+  expect(j.name).toBe("开发 · PocketShell");
+  expect(j.short_name).toBe("开发");
+  cleanupBranded(b);
+});
+
+test("index.html title and apple title are branded", async () => {
+  const b = startBranded("开发");
+  const html = await (await fetch(`http://127.0.0.1:${b.srv.port}/index.html`)).text();
+  expect(html).toContain("<title>开发 · PocketShell</title>");
+  expect(html).toContain('content="开发"');
+  cleanupBranded(b);
+});
+
+test("root path / is branded too (it resolves to index.html)", async () => {
+  const b = startBranded("开发");
+  const html = await (await fetch(`http://127.0.0.1:${b.srv.port}/`, {
+    headers: { accept: "text/html" },
+  })).text();
+  expect(html).toContain("<title>开发 · PocketShell</title>");
+  cleanupBranded(b);
+});
+
+test("without an instance name the manifest and html are served verbatim", async () => {
+  const b = startBranded();
+  const res = await fetch(`http://127.0.0.1:${b.srv.port}/manifest.webmanifest`);
+  const j = await res.json();
+  expect(j.name).toBe("PocketShell");
+  expect(j.short_name).toBe("PocketShell");
+  const html = await (await fetch(`http://127.0.0.1:${b.srv.port}/index.html`)).text();
+  expect(html).toContain("<title>PocketShell</title>");
+  cleanupBranded(b);
+});
+
+// 「不设实例名 = 逐字节现状」不只是 body：头也不能漂。未品牌化时必须走原来
+// 那条 Bun.file 路径，content-type 由 Bun 从扩展名推断（注意 html 那条没有
+// 空格：`text/html;charset=utf-8`），品牌化分支手写的 MIME 与之不同。
+test("without an instance name the response headers match Bun's own inference", async () => {
+  const b = startBranded();
+  const m = await fetch(`http://127.0.0.1:${b.srv.port}/manifest.webmanifest`);
+  expect(m.headers.get("content-type")).toBe("application/manifest+json");
+  const h = await fetch(`http://127.0.0.1:${b.srv.port}/index.html`);
+  expect(h.headers.get("content-type")).toBe("text/html;charset=utf-8");
+  cleanupBranded(b);
+});
+
+// 回归：ETag 必须跟着实例名走，否则改名后手机拿 304 还是旧名字
+test("ETag differs between branded and unbranded manifest", async () => {
+  const a = startBranded("开发");
+  const b = startBranded();
+  const ea = (await fetch(`http://127.0.0.1:${a.srv.port}/manifest.webmanifest`)).headers.get("etag");
+  const eb = (await fetch(`http://127.0.0.1:${b.srv.port}/manifest.webmanifest`)).headers.get("etag");
+  expect(ea).toBeTruthy();
+  expect(ea).not.toBe(eb);
+  cleanupBranded(a);
+  cleanupBranded(b);
+});
+
+test("If-None-Match with the branded ETag still yields 304", async () => {
+  const b = startBranded("开发");
+  const first = await fetch(`http://127.0.0.1:${b.srv.port}/manifest.webmanifest`);
+  const etag = first.headers.get("etag")!;
+  const second = await fetch(`http://127.0.0.1:${b.srv.port}/manifest.webmanifest`, {
+    headers: { "if-none-match": etag },
+  });
+  expect(second.status).toBe(304);
+  cleanupBranded(b);
+});
