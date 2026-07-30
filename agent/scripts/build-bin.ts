@@ -10,7 +10,24 @@ const APP = join(AGENT, "../app");
 const OUT = join(AGENT, "dist");
 
 // Required targets; darwin-x64 optional — drop it if you don't ship Intel macs.
-const TARGETS = ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"];
+//
+// linux-x64 uses Bun's `-baseline` variant on purpose. The default x64 target
+// emits AVX2, which any pre-Haswell CPU lacks — a very common VPS situation
+// (e.g. Xeon E5 v1/v2, still widely rented). Those machines die with
+// "Illegal instruction (core dumped)" the moment the binary starts, with
+// nothing in the output pointing at the cause. Baseline only needs SSE4.2.
+//
+// The output FILENAME stays `pocketshell-agent-linux-x64`: OTA resolves release
+// assets from platform+arch (update-core.ts `assetNameForPlatform`), so a
+// separate `-baseline` asset would make old-CPU machines re-download the
+// crashing AVX2 build on every auto-update. One asset that runs everywhere is
+// worth more than the SIMD headroom — this process mostly shuttles PTY bytes.
+const TARGETS = ["bun-linux-x64-baseline", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"];
+
+/** Release asset name for a build target. Baseline ships under the plain x64 name (see above). */
+function outNameFor(target: string): string {
+  return `pocketshell-agent-${target.replace("bun-", "").replace("-baseline", "")}`;
+}
 
 // Stable self-signed identity, same one update-local.sh uses (one-time setup:
 // docs/deploy-info/update-runbook.md). TCC grants bind to the designated
@@ -45,7 +62,7 @@ if (signOptOut) {
 }
 
 for (const t of TARGETS) {
-  const outfile = join(OUT, `pocketshell-agent-${t.replace("bun-", "")}`);
+  const outfile = join(OUT, outNameFor(t));
   console.log(`[build:bin] compiling ${t} -> ${outfile}`);
   await $`cd ${AGENT} && bun build --compile --target=${t} src/server.ts --outfile ${outfile}`;
   if (canSign && t.startsWith("bun-darwin")) {
