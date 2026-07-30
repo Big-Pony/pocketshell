@@ -44,7 +44,16 @@ export function createPairing(opts: { code?: string; ttlMs?: number; maxAttempts
 // req 7-1: a pending pairing minted by the CLI (`pocketshell-agent pair`) is
 // persisted here so an already-running agent can adopt it (server.ts reads it
 // in authorize()). File lives beside devices.json; 0600 like other keyDir state.
-export interface PendingPairingRecord { code: string; expiresAt: number; maxAttempts: number; }
+// mintedAt lets the server tell a *newer* disk code from the in-memory one it
+// minted at boot — without it, a code minted while the boot code is still live
+// is silently ignored and the user sees a misleading bad_code.
+export interface PendingPairingRecord {
+  code: string;
+  expiresAt: number;
+  maxAttempts: number;
+  /** Wall-clock ms when the CLI minted this code. Legacy records lack it -> 0. */
+  mintedAt?: number;
+}
 
 const PENDING_FILE = "pairing.pending.json";
 
@@ -60,7 +69,9 @@ export function readPendingPairing(keyDir: string, now: number): PendingPairingR
     const rec = JSON.parse(readFileSync(join(keyDir, PENDING_FILE), "utf8")) as PendingPairingRecord;
     if (!rec || typeof rec.code !== "string" || typeof rec.expiresAt !== "number") return null;
     if (now > rec.expiresAt) return null;
-    return rec;
+    // Legacy records (written before mintedAt existed) read as 0, which keeps
+    // the old "only adopt once the in-memory code is dead" behaviour for them.
+    return { ...rec, mintedAt: typeof rec.mintedAt === "number" ? rec.mintedAt : 0 };
   } catch {
     return null; // missing or corrupt — treat as no pending pairing
   }
@@ -68,4 +79,20 @@ export function readPendingPairing(keyDir: string, now: number): PendingPairingR
 
 export function clearPendingPairing(keyDir: string): void {
   try { unlinkSync(join(keyDir, PENDING_FILE)); } catch { /* absent is fine */ }
+}
+
+// Decides whether a disk-minted pending code should replace the one the agent
+// minted in memory at boot. Pure so the rule is unit-tested rather than buried
+// in server.ts wiring.
+//
+// Both codes are same-origin (writing pairing.pending.json needs write access
+// to keyDir, i.e. local privilege), so preferring the newer one does not widen
+// the attack surface; brute force stays bounded by rate-limit.ts at handshake.
+export function shouldAdoptDiskPairing(i: {
+  memoryLive: boolean;
+  memoryMintedAt: number;
+  diskMintedAt: number;
+}): boolean {
+  if (!i.memoryLive) return true;             // nothing live to protect
+  return i.diskMintedAt > i.memoryMintedAt;   // a newer explicit mint wins
 }

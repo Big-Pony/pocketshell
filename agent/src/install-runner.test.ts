@@ -1,0 +1,154 @@
+import { test, expect } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { extractPairingString, backupPath, launchdDomain } from "./install-runner";
+
+test("extractPairingString picks the pairing token out of journal output", () => {
+  const log = [
+    "Jul 30 12:17:37 host pocketshell-agent[1]: [pocketshell] listening on 127.0.0.1:8722 (TLS off)",
+    "Jul 30 12:17:37 host pocketshell-agent[1]: [pocketshell] pairing string (paste into the app to connect):",
+    "Jul 30 12:17:37 host pocketshell-agent[1]:   pocketshell-pair:eyJ2IjoxLCJwdWIiOiJhYmMifQ",
+    "Jul 30 12:17:37 host pocketshell-agent[1]: [pocketshell] pairing code valid for ~300s",
+  ].join("\n");
+  expect(extractPairingString(log)).toBe("pocketshell-pair:eyJ2IjoxLCJwdWIiOiJhYmMifQ");
+});
+
+test("extractPairingString returns the LAST token when the log has several", () => {
+  // A restarted service leaves older codes above; only the newest one is live.
+  const log = "pocketshell-pair:OLDoldOLD\nnoise\npocketshell-pair:NEWnewNEW";
+  expect(extractPairingString(log)).toBe("pocketshell-pair:NEWnewNEW");
+});
+
+test("extractPairingString returns null when absent", () => {
+  expect(extractPairingString("[pocketshell] listening on 127.0.0.1:8722")).toBeNull();
+  expect(extractPairingString("")).toBeNull();
+});
+
+test("backupPath appends .bak.<stamp>", () => {
+  expect(backupPath("/etc/systemd/system/pocketshell.service", "20260730-121551"))
+    .toBe("/etc/systemd/system/pocketshell.service.bak.20260730-121551");
+});
+
+test("launchdDomain targets the invoking user's GUI domain", () => {
+  expect(launchdDomain(501)).toBe("gui/501");
+  expect(launchdDomain(1000)).toBe("gui/1000");
+});
+
+// Regression for a bug found during the 2026-07-30 dev-server acceptance run:
+// uninstall printed "密钥目录 /root/.pocketshell" because printKeepNotice
+// derived the path from the *calling* process's HOME — which under sudo is
+// root's, not the service user's. The real keyDir was /home/myt/.pocketshell.
+// Pointing the operator at a path that does not exist defeats the entire point
+// of the notice, so the value is now read back out of the unit file that is
+// about to be deleted.
+import { keyDirFromUnit } from "./install-runner";
+
+test("keyDirFromUnit reads POCKETSHELL_KEY_DIR out of a systemd unit", () => {
+  const unit = [
+    "[Service]",
+    "User=myt",
+    "ExecStart=/usr/local/bin/pocketshell-agent",
+    "Environment=POCKETSHELL_HOST=127.0.0.1",
+    "Environment=POCKETSHELL_KEY_DIR=/home/myt/.pocketshell",
+    "Restart=always",
+  ].join("\n");
+  expect(keyDirFromUnit(unit)).toBe("/home/myt/.pocketshell");
+});
+
+test("keyDirFromUnit reads POCKETSHELL_KEY_DIR out of a launchd plist", () => {
+  const plist = [
+    "  <dict>",
+    "    <key>POCKETSHELL_HOST</key><string>127.0.0.1</string>",
+    "    <key>POCKETSHELL_KEY_DIR</key><string>/Users/myt/.pocketshell</string>",
+    "  </dict>",
+  ].join("\n");
+  expect(keyDirFromUnit(plist)).toBe("/Users/myt/.pocketshell");
+});
+
+test("keyDirFromUnit returns null when the key is absent", () => {
+  // A hand-written unit may omit it; the caller then falls back to a generic
+  // hint rather than printing a fabricated path.
+  expect(keyDirFromUnit("[Service]\nUser=myt\nRestart=always")).toBeNull();
+  expect(keyDirFromUnit("")).toBeNull();
+});
+
+// Found during the 2026-07-30 dev-server acceptance run: on a machine that
+// already has paired devices, config.ts sets pairingMode=false, so the agent
+// never mints a boot code and the log holds no pairing string at all. install
+// then printed "没能自动取到配对串，请看 journalctl" — honest, but the hint is
+// useless because the log was never going to contain one. Reinstalling is a
+// common path, so the two cases must read differently.
+import { pairedDeviceCount } from "./install-runner";
+
+test("pairedDeviceCount reads devices.json", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-inst-"));
+  try {
+    expect(pairedDeviceCount(dir)).toBe(0); // no file yet -> fresh install
+    writeFileSync(join(dir, "devices.json"), JSON.stringify({
+      v: 1,
+      devices: [
+        { pubKey: "AAA", name: "phone", addedAt: "2026-07-30T00:00:00Z" },
+        { pubKey: "BBB", name: "tablet", addedAt: "2026-07-30T00:00:00Z" },
+      ],
+    }));
+    expect(pairedDeviceCount(dir)).toBe(2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pairedDeviceCount treats a corrupt or empty registry as zero", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-inst-"));
+  try {
+    writeFileSync(join(dir, "devices.json"), "{ not json");
+    expect(pairedDeviceCount(dir)).toBe(0);
+    writeFileSync(join(dir, "devices.json"), JSON.stringify({ v: 1, devices: [] }));
+    expect(pairedDeviceCount(dir)).toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Found on the 2026-07-30 dev-server acceptance run, reinstall path: copying
+// onto /usr/local/bin/pocketshell-agent while the service was executing it
+// threw ETXTBSY ("text file is busy") and the command died with a raw Bun
+// stack trace. Linux refuses to write a file that is currently being executed.
+// Unlinking first is the standard fix: it only detaches the directory entry,
+// the running process keeps its inode alive, and the copy lands on a brand-new
+// inode. install.sh already did this; the TypeScript path did not.
+import { replaceBinary } from "./install-runner";
+
+test("replaceBinary unlinks an existing target before copying", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
+  try {
+    const src = join(dir, "src-bin");
+    const dst = join(dir, "dst-bin");
+    writeFileSync(src, "NEW", { mode: 0o755 });
+    writeFileSync(dst, "OLD", { mode: 0o755 });
+    const inodeBefore = statSync(dst).ino;
+
+    replaceBinary(src, dst);
+
+    expect(readFileSync(dst, "utf8")).toBe("NEW");
+    // A fresh inode is the whole point: the old one stays alive for whoever is
+    // still executing it.
+    expect(statSync(dst).ino).not.toBe(inodeBefore);
+    expect(statSync(dst).mode & 0o777).toBe(0o755);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("replaceBinary works when the target does not exist yet", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
+  try {
+    const src = join(dir, "src-bin");
+    const dst = join(dir, "sub", "dst-bin");
+    writeFileSync(src, "NEW", { mode: 0o755 });
+    replaceBinary(src, dst);
+    expect(readFileSync(dst, "utf8")).toBe("NEW");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

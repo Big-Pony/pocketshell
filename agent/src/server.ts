@@ -22,7 +22,7 @@ import { ASSETS } from "./embedded-manifest";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 import { buildReadiness, isNonLocalBind } from "./readiness";
 import { runWarmup } from "./warmup";
-import { createPairing, generatePairingCode, readPendingPairing, writePendingPairing, clearPendingPairing } from "./pairing";
+import { createPairing, generatePairingCode, readPendingPairing, writePendingPairing, clearPendingPairing, shouldAdoptDiskPairing } from "./pairing";
 import { parseArgv, formatDeviceList, matchDevice, fingerprint } from "./cli-devices";
 import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
 import { PreviewTokens } from "./preview-service";
@@ -73,13 +73,24 @@ export function startServer(deps: Deps = {}) {
   const replay = deps.replay ?? new ReplayService(config.replayBufferBytes);
 
   const envKeys = new Set(config.authorizedKeys);
+  // Tracks when the currently-held pairing code was minted, so a newer
+  // disk-minted code (from `pocketshell-agent pair`) can preempt it. The boot
+  // code is minted inside loadConfig(), i.e. just before startServer() runs.
+  let pairingMintedAt = Date.now();
   const adoptDiskPairing = () => {
     // req 7-1: a CLI-minted pending pairing (pairing.pending.json) lets an
-    // already-running agent accept a code it didn't mint itself. Only adopt
-    // when our in-memory pairing isn't live; brute force is still bounded by
-    // rate-limit.ts at the handshake layer.
+    // already-running agent accept a code it didn't mint itself. Adopt when our
+    // in-memory pairing isn't live, OR when the disk code was minted later than
+    // ours — without the latter, `pair` is silently a no-op for the first 300s
+    // after boot and the operator sees a misleading bad_code (field bug,
+    // 2026-07-30). Brute force is still bounded by rate-limit.ts at handshake.
     const rec = readPendingPairing(config.keyDir, Date.now());
     if (!rec) return;
+    if (!shouldAdoptDiskPairing({
+      memoryLive: config.pairing?.isLive() ?? false,
+      memoryMintedAt: pairingMintedAt,
+      diskMintedAt: rec.mintedAt ?? 0,
+    })) return;
     config.pairing = createPairing({
       code: rec.code,
       ttlMs: Math.max(0, rec.expiresAt - Date.now()),
@@ -87,6 +98,7 @@ export function startServer(deps: Deps = {}) {
       now: () => Date.now(),
     });
     config.pairingMode = true;
+    pairingMintedAt = rec.mintedAt ?? Date.now();
   };
   const authorize = (pub: string): "authorized" | "pending" | "reject" => {
     if (config.registry.has(pub) || envKeys.has(pub)) return "authorized";
@@ -94,7 +106,7 @@ export function startServer(deps: Deps = {}) {
     // code is still live (not consumed/expired). Once spent, unregistered peers
     // are rejected at the handshake rather than kept admissible for the whole
     // process lifetime.
-    if (!config.pairing?.isLive()) adoptDiskPairing();
+    adoptDiskPairing();
     if (config.pairingMode && config.pairing?.isLive()) return "pending";
     return "reject";
   };
@@ -989,7 +1001,7 @@ async function runCliDevices(argv: string[]): Promise<number> {
   // action.cmd === "pair"
   const now = Date.now();
   const code = generatePairingCode();
-  writePendingPairing(cfg.keyDir, { code, expiresAt: now + 300_000, maxAttempts: 5 });
+  writePendingPairing(cfg.keyDir, { code, expiresAt: now + 300_000, maxAttempts: 5, mintedAt: now });
   const advertise = resolveAdvertise(cfg);
   console.log(buildPairingString(cfg.identity.publicKey, advertise, code));
   console.log("\nPairing code valid for 300s. Paste the string above into the app; a running agent picks it up automatically.");
@@ -999,7 +1011,15 @@ async function runCliDevices(argv: string[]): Promise<number> {
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
 if (import.meta.main) {
   const cliArgv = process.argv.slice(2);
-  if (cliArgv[0] === "notify") {
+  if (cliArgv[0] === "install" || cliArgv[0] === "uninstall") {
+    // Service install/uninstall never boots the server (same shape as the
+    // devices/pair branch below).
+    void (async () => {
+      const { runInstall, runUninstall } = await import("./install-runner");
+      const code = cliArgv[0] === "install" ? await runInstall(cliArgv) : await runUninstall();
+      process.exit(code);
+    })();
+  } else if (cliArgv[0] === "notify") {
     void (async () => {
       try {
         const { parseNotifyPayload } = await import("./notify-subcommand");

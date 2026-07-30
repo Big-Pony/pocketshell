@@ -207,6 +207,19 @@ POCKETSHELL_ADVERTISE=wss://ps.example.com \
 
 ### 常驻运行（systemd / launchd）
 
+**推荐：用 `install` 子命令自动完成**
+
+```bash
+# Linux
+sudo pocketshell-agent install --advertise wss://ps.example.com --name 我的服务器
+# macOS（不要加 sudo，LaunchAgent 属于用户域）
+pocketshell-agent install --advertise wss://ps.example.com --name 我的Mac
+```
+
+它会生成下面这份配置、注册开机自启、启动服务，并在**首次安装时**把配对串打印出来。重装或改参数直接重跑即可（原配置会先备份），密钥目录不受影响——也正因如此，重装时不会再打印配对串（这台机器上已配对的手机继续可用；要加新手机跑 `pocketshell-agent pair`）。卸载：`pocketshell-agent uninstall`（保留密钥目录与二进制）。
+
+下面的手写配置供了解细节或需要定制时参考。
+
 **Linux（systemd）** — `/etc/systemd/system/pocketshell.service`：
 
 ```ini
@@ -318,6 +331,8 @@ pocketshell-agent devices remove <pubkey-or-fingerprint>
 ```
 
 > `pair` 会把待配对码原子写入 `<keyDir>/pairing.pending.json`（0600）；常驻 Agent 在下一次有未授权设备尝试握手时读取并采纳它，配对成功后自动清盘。适合 Linux 无桌面场景，替代仅监听 localhost 的 `/admin` 页。
+
+> （2026-07-30 修复）此前 `pair` 在服务**刚启动的 5 分钟内**会被进程启动时铸的码盖住，用户拿新码配对只会得到误导性的 `bad_code`。现在磁盘上更新的码会抢占仍存活的启动码，任何时刻跑 `pair` 都即刻生效。
 
 ### 常见排查
 

@@ -46,7 +46,7 @@ test("isLive is true while fresh, false once consumed / expired / attempts spent
   expect(spentP.isLive()).toBe(false);
 });
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -59,7 +59,8 @@ test("pending pairing round-trips through disk", () => {
     const now = 1_000_000;
     writePendingPairing(dir, { code: "ABCD2345", expiresAt: now + 300_000, maxAttempts: 5 });
     const r = readPendingPairing(dir, now);
-    expect(r).toEqual({ code: "ABCD2345", expiresAt: now + 300_000, maxAttempts: 5 });
+    // Written without mintedAt (the legacy shape), so it reads back as 0.
+    expect(r).toEqual({ code: "ABCD2345", expiresAt: now + 300_000, maxAttempts: 5, mintedAt: 0 });
     // expired -> null
     expect(readPendingPairing(dir, now + 300_001)).toBeNull();
     // cleared -> null
@@ -74,6 +75,24 @@ test("readPendingPairing tolerates a missing/corrupt file", () => {
   const dir = mkdtempSync(join(tmpdir(), "ps-pair-"));
   try {
     expect(readPendingPairing(dir, 0)).toBeNull(); // missing
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pending pairing carries mintedAt; missing mintedAt reads as 0 (legacy records)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-pair-"));
+  try {
+    const now = 1_000_000;
+    writePendingPairing(dir, { code: "ABCD2345", expiresAt: now + 300_000, maxAttempts: 5, mintedAt: now });
+    expect(readPendingPairing(dir, now)?.mintedAt).toBe(now);
+
+    // A legacy record written by an older build has no mintedAt at all.
+    writeFileSync(
+      join(dir, "pairing.pending.json"),
+      JSON.stringify({ code: "LEGACY22", expiresAt: now + 300_000, maxAttempts: 5 }),
+    );
+    expect(readPendingPairing(dir, now)?.mintedAt).toBe(0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

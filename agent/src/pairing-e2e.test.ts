@@ -14,6 +14,7 @@ import DH from "noise-handshake/dh";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writePendingPairing } from "./pairing";
 
 const PRO = Buffer.from("pocketshell-v1");
 
@@ -124,6 +125,94 @@ test("wrong code is rejected and does not register the device", async () => {
   expect(err.code).toBe("pair_failed");
   expect(cfg.registry.has(c.clientPubB64)).toBe(false);
   c.close();
+
+  srv.stop();
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+// Regression for the 2026-07-30 field bug: `pocketshell-agent pair` was a
+// silent no-op for the first 300s after boot. authorize() only consulted
+// pairing.pending.json once the in-memory boot code had died, so a freshly
+// minted disk code was ignored and the operator got a misleading bad_code —
+// twice in a row during the dev-server install. Drives a real IK handshake so
+// the whole authorize -> adoptDiskPairing -> verify path is covered, not just
+// the pure predicate.
+test("a newer disk-minted code preempts the still-live boot code", async () => {
+  const keyDir = join(mkdtempSync(join(tmpdir(), "ps-e2e-")), "keys");
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  const srv = startServer({ port: 0, config: cfg });
+
+  // The boot code is alive and unspent — exactly the state right after an
+  // `install`, which is when operators reach for `pair`.
+  expect(cfg.pairing!.isLive()).toBe(true);
+  const bootCode = cfg.pairing!.code;
+
+  // What `pocketshell-agent pair` writes (see runCliDevices in server.ts).
+  const diskCode = "ZZZZ7777";
+  expect(diskCode).not.toBe(bootCode);
+  writePendingPairing(keyDir, {
+    code: diskCode,
+    expiresAt: Date.now() + 300_000,
+    maxAttempts: 5,
+    mintedAt: Date.now() + 1_000, // minted after boot
+  });
+
+  const kp = DH.generateKeyPair();
+  const c = connectClient(srv.port, cfg.identity.publicKey, {
+    publicKey: new Uint8Array(kp.publicKey),
+    secretKey: new Uint8Array(kp.secretKey),
+  });
+  await c.open();
+  await c.next(); // established (pending)
+  c.send({ type: "pair", code: diskCode, deviceName: "iPhone" });
+  expect(await c.next()).toEqual({ type: "paired", ok: true });
+  expect(cfg.registry.has(c.clientPubB64)).toBe(true);
+  c.close();
+
+  srv.stop();
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+// The flip side: an OLDER disk record must not resurrect a code the boot
+// process already superseded, or a stale pairing.pending.json left on disk
+// would keep widening the pairing window after every restart.
+test("an older disk-minted code does not displace the live boot code", async () => {
+  const keyDir = join(mkdtempSync(join(tmpdir(), "ps-e2e-")), "keys");
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  const srv = startServer({ port: 0, config: cfg });
+  const bootCode = cfg.pairing!.code;
+
+  writePendingPairing(keyDir, {
+    code: "OLDOLD22",
+    expiresAt: Date.now() + 300_000,
+    maxAttempts: 5,
+    mintedAt: Date.now() - 60_000, // minted a minute before this boot
+  });
+
+  const kp = DH.generateKeyPair();
+  const c = connectClient(srv.port, cfg.identity.publicKey, {
+    publicKey: new Uint8Array(kp.publicKey),
+    secretKey: new Uint8Array(kp.secretKey),
+  });
+  await c.open();
+  await c.next(); // established (pending)
+  c.send({ type: "pair", code: "OLDOLD22", deviceName: "iPhone" });
+  const rejected = await c.next();
+  expect(rejected.type).toBe("error");
+  expect(rejected.code).toBe("pair_failed");
+  c.close();
+
+  // …while the boot code still works for a fresh device.
+  const kp2 = DH.generateKeyPair();
+  const c2 = connectClient(srv.port, cfg.identity.publicKey, {
+    publicKey: new Uint8Array(kp2.publicKey),
+    secretKey: new Uint8Array(kp2.secretKey),
+  });
+  await c2.open();
+  await c2.next();
+  c2.send({ type: "pair", code: bootCode, deviceName: "iPad" });
+  expect(await c2.next()).toEqual({ type: "paired", ok: true });
+  c2.close();
 
   srv.stop();
   rmSync(keyDir, { recursive: true, force: true });
