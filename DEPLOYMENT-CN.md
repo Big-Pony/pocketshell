@@ -216,7 +216,7 @@ sudo pocketshell-agent install --advertise wss://ps.example.com --name 我的服
 pocketshell-agent install --advertise wss://ps.example.com --name 我的Mac
 ```
 
-它会生成下面这份配置、注册开机自启、启动服务，并把配对串打印出来。重装或改参数直接重跑即可（原配置会先备份），密钥目录不受影响。卸载：`pocketshell-agent uninstall`。
+它会生成下面这份配置、注册开机自启、启动服务，并在**首次安装时**把配对串打印出来。重装或改参数直接重跑即可（原配置会先备份），密钥目录不受影响——也正因如此，重装时不会再打印配对串（这台机器上已配对的手机继续可用；要加新手机跑 `pocketshell-agent pair`）。卸载：`pocketshell-agent uninstall`（保留密钥目录与二进制）。
 
 下面的手写配置供了解细节或需要定制时参考。
 

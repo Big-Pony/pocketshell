@@ -157,12 +157,19 @@ curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.s
 脚本会探测平台、下载对应二进制、校验 SHA256 并装到 `/usr/local/bin`（或 `~/.local/bin`）。装完再跑一条命令做成开机自启的服务：
 
 ```bash
+# Linux
 sudo pocketshell-agent install --advertise wss://your.domain --name 我的服务器
+# macOS —— 不要加 sudo，LaunchAgent 属于用户域
+pocketshell-agent install --advertise wss://your.domain --name 我的Mac
 ```
 
-这条命令会：写好 systemd/launchd 服务配置 → 开机自启 + 立刻启动 → **把配对串直接打印出来**。手机打开访问地址粘贴即可。
+这条命令会：写好 systemd/launchd 服务配置 → 开机自启 + 立刻启动 → **首次安装时把配对串直接打印出来**。手机打开访问地址粘贴即可。
 
-想指定版本：`VERSION=1.5.0 curl -fsSL … | sh`。卸载：`pocketshell-agent uninstall`（保留密钥目录）。
+`--advertise` 是必填的，它决定配对串里写的是哪个地址——不填手机拿到也连不上。其余可选：`--name` 实例名（装多台时区分）、`--user` 服务运行用户（默认为 sudo 的发起者）、`--host`（默认 `127.0.0.1`，手机直连局域网填 `0.0.0.0`）、`--port`（默认 `8722`）。
+
+改参数或换版本直接重跑同一条命令即可：原配置会先备份，**密钥目录不动，已配对的手机不受影响**（因此重装时不会再打印配对串——要加新手机跑 `pocketshell-agent pair`）。
+
+想指定版本：`VERSION=1.5.0 curl -fsSL … | sh`。卸载：`pocketshell-agent uninstall`（停服务、删配置，保留密钥目录与二进制）。
 
 **方式三：手动下载二进制**
 

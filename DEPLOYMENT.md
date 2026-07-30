@@ -216,7 +216,7 @@ sudo pocketshell-agent install --advertise wss://ps.example.com --name my-server
 pocketshell-agent install --advertise wss://ps.example.com --name my-mac
 ```
 
-It writes the config shown below, registers it to start on boot, starts the service, and prints the pairing string. Re-run it any time to reinstall or change parameters (the existing config is backed up first); your key directory is left alone. To remove it: `pocketshell-agent uninstall`.
+It writes the config shown below, registers it to start on boot, starts the service, and prints the pairing string **on a first install**. Re-run it any time to reinstall or change parameters (the existing config is backed up first); your key directory is left alone — which is also why a reinstall prints no pairing string, since the phones already paired with this machine keep working. Run `pocketshell-agent pair` to add a new one. To remove it: `pocketshell-agent uninstall` (your key directory and the binary are kept).
 
 The hand-written configs below are there if you want the details or need to customise something.
 

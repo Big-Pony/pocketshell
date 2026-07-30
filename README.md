@@ -154,12 +154,19 @@ curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.s
 The script detects your platform, downloads the matching binary, verifies its SHA256 and installs it into `/usr/local/bin` (or `~/.local/bin`). One more command turns it into a service that starts on boot:
 
 ```bash
+# Linux
 sudo pocketshell-agent install --advertise wss://your.domain --name my-server
+# macOS — no sudo: a LaunchAgent lives in your user domain
+pocketshell-agent install --advertise wss://your.domain --name my-mac
 ```
 
-That writes the systemd/launchd service config → enables it at boot and starts it now → and **prints the pairing string right there**. Open the URL on your phone and paste it.
+That writes the systemd/launchd service config → enables it at boot and starts it now → and **prints the pairing string right there on a first install**. Open the URL on your phone and paste it.
 
-Pin a version with `VERSION=1.5.0 curl -fsSL … | sh`. To remove it: `pocketshell-agent uninstall` (your key directory is left untouched).
+`--advertise` is required: it decides which address goes into the pairing string, and without it your phone has nowhere to connect. The rest are optional — `--name` (an instance name, to tell several machines apart), `--user` (who the service runs as; defaults to whoever invoked sudo), `--host` (`127.0.0.1` by default; use `0.0.0.0` for a phone connecting straight over the LAN) and `--port` (`8722`).
+
+To change a setting or move to a new version, just run the same command again: the old config is backed up first and **your key directory is left alone, so already-paired phones keep working** (which is also why a reinstall won't print a pairing string — run `pocketshell-agent pair` to add a new phone).
+
+Pin a version with `VERSION=1.5.0 curl -fsSL … | sh`. To remove it: `pocketshell-agent uninstall` (stops the service and deletes the config, keeping your key directory and the binary).
 
 **Option C — download the binary manually**
 
