@@ -148,21 +148,36 @@ cd agent && bun install && bun run start
 cd app && bun install && bun run dev      # http://localhost:5173
 ```
 
-**方式二：下载预编译二进制（最快，推荐）**
+**方式二：一行安装（最快，推荐）**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
+```
+
+脚本会探测平台、下载对应二进制、校验 SHA256 并装到 `/usr/local/bin`（或 `~/.local/bin`）。装完再跑一条命令做成开机自启的服务：
+
+```bash
+sudo pocketshell-agent install --advertise wss://your.domain --name 我的服务器
+```
+
+这条命令会：写好 systemd/launchd 服务配置 → 开机自启 + 立刻启动 → **把配对串直接打印出来**。手机打开访问地址粘贴即可。
+
+想指定版本：`VERSION=1.5.0 curl -fsSL … | sh`。卸载：`pocketshell-agent uninstall`（保留密钥目录）。
+
+**方式三：手动下载二进制**
 
 从 [Releases](https://github.com/Big-Pony/pocketshell/releases) 下载对应平台的压缩包（`linux-x64` / `linux-arm64` / `darwin-arm64` / `darwin-x64`），解压后运行：
 
 ```bash
-# 以 Linux x64 为例，其余平台替换文件名即可
 tar -xzf pocketshell-agent-linux-x64.tar.gz
 ./pocketshell-agent-linux-x64
 ```
 
 可选：用同一 Release 附带的 `SHA256SUMS.txt` 校验完整性（`shasum -a 256 -c SHA256SUMS.txt`）。目标机只需 `tmux`。macOS 首次运行若被 Gatekeeper 拦截，在「系统设置 → 隐私与安全性」放行即可。
 
-> **这样跑是前台进程**：Ctrl+C 或关掉 SSH 就停了，开机也不会自动起来。上面这条命令用于首次验证「能跑起来、能看到配对串」。**长期运行请配成系统服务**（开机自启 + 崩溃自动拉起），见 [部署指南 § 常驻运行（systemd / launchd）](./DEPLOYMENT-CN.md#常驻运行systemd--launchd)——Linux 上是一个 `.service` 文件加一句 `sudo systemctl enable --now pocketshell`。
+> **这样直接跑是前台进程**：Ctrl+C 或关掉 SSH 就停了，开机也不会自动起来。长期运行请用上面的 `install` 子命令，或参照 [部署指南 § 常驻运行](./DEPLOYMENT-CN.md#常驻运行systemd--launchd) 手工配置。
 
-**方式三：从源码构建二进制**
+**方式四：从源码构建二进制**
 
 ```bash
 # 先构建前端产物（Agent 会内嵌同端口 serve）

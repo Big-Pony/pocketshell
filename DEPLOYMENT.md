@@ -207,6 +207,19 @@ With `proxyBindAddr = "127.0.0.1"` set, the frps landing port `18092` binds to t
 
 ### Running as a service (systemd / launchd)
 
+**Recommended: let the `install` subcommand do it**
+
+```bash
+# Linux
+sudo pocketshell-agent install --advertise wss://ps.example.com --name my-server
+# macOS (no sudo — a LaunchAgent belongs to your user domain)
+pocketshell-agent install --advertise wss://ps.example.com --name my-mac
+```
+
+It writes the config shown below, registers it to start on boot, starts the service, and prints the pairing string. Re-run it any time to reinstall or change parameters (the existing config is backed up first); your key directory is left alone. To remove it: `pocketshell-agent uninstall`.
+
+The hand-written configs below are there if you want the details or need to customise something.
+
 **Linux (systemd)** — `/etc/systemd/system/pocketshell.service`:
 
 ```ini
@@ -320,6 +333,8 @@ pocketshell-agent devices remove <pubkey-or-fingerprint>
 ```
 
 > `pair` atomically writes the pending code to `<keyDir>/pairing.pending.json` (0600); the resident Agent reads and adopts it the next time an unregistered device attempts the handshake, and clears it on a successful pairing. This suits headless Linux and replaces the localhost-only `/admin` page.
+
+> (Fixed 2026-07-30) Until now, a code minted by `pair` within **the first 5 minutes after the service started** was shadowed by the code minted at process start, so pairing with the fresh code returned a misleading `bad_code`. The newer code on disk now takes over from a still-live startup code, so `pair` takes effect immediately whenever you run it.
 
 ### Troubleshooting
 

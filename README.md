@@ -145,21 +145,36 @@ cd agent && bun install && bun run start     # backend (needs tmux)
 cd app   && bun install && bun run dev        # frontend, http://localhost:5173
 ```
 
-**Option B — download a prebuilt binary (fastest, recommended)**
+**Option B — one-line install (fastest, recommended)**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
+```
+
+The script detects your platform, downloads the matching binary, verifies its SHA256 and installs it into `/usr/local/bin` (or `~/.local/bin`). One more command turns it into a service that starts on boot:
+
+```bash
+sudo pocketshell-agent install --advertise wss://your.domain --name my-server
+```
+
+That writes the systemd/launchd service config → enables it at boot and starts it now → and **prints the pairing string right there**. Open the URL on your phone and paste it.
+
+Pin a version with `VERSION=1.5.0 curl -fsSL … | sh`. To remove it: `pocketshell-agent uninstall` (your key directory is left untouched).
+
+**Option C — download the binary manually**
 
 Grab the archive for your platform (`linux-x64` / `linux-arm64` / `darwin-arm64` / `darwin-x64`) from [Releases](https://github.com/Big-Pony/pocketshell/releases), then extract and run:
 
 ```bash
-# Linux x64 shown; swap the filename for other platforms
 tar -xzf pocketshell-agent-linux-x64.tar.gz
 ./pocketshell-agent-linux-x64
 ```
 
 Optional: verify integrity with the `SHA256SUMS.txt` shipped in the same Release (`shasum -a 256 -c SHA256SUMS.txt`). The target host only needs `tmux`. On macOS, if Gatekeeper blocks the first run, allow it under System Settings → Privacy & Security.
 
-> **That runs it in the foreground**: Ctrl+C or closing your SSH session stops it, and it won't come back after a reboot. Use the command above to confirm it starts and to read the pairing string. **For anything long-lived, install it as a system service** (starts on boot, restarts on crash) — see [deployment guide § Running as a service](./DEPLOYMENT.md#running-as-a-service-systemd--launchd). On Linux that's one `.service` file plus `sudo systemctl enable --now pocketshell`.
+> **Run that way it's a foreground process**: Ctrl+C or closing your SSH session stops it, and it won't come back after a reboot. For anything long-lived, use the `install` subcommand above, or wire it up by hand following [deployment guide § Running as a service](./DEPLOYMENT.md#running-as-a-service-systemd--launchd).
 
-**Option C — build the binary from source**
+**Option D — build the binary from source**
 
 ```bash
 cd app   && bun install && bun run build      # build embedded frontend first
