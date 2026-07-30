@@ -239,3 +239,45 @@ export function renderSystemdUnit(plan: InstallPlan): string {
     "",
   ].join("\n");
 }
+
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Renders the user-domain LaunchAgent. Two details are load-bearing:
+//   PATH      launchd's environment is minimal; without tmux's directory the
+//             agent exits at startup (ensure-tmux.ts fails loud). The directory
+//             is probed at install time rather than hardcoded to
+//             /opt/homebrew/bin, which only holds on Apple Silicon + Homebrew.
+//   KeepAlive the launchd counterpart of Restart=always — OTA self-restart
+//             hands the relaunch to launchd (see self-restart.ts).
+export function renderLaunchdPlist(plan: InstallPlan): string {
+  const path = `${plan.tmuxDir ?? "/usr/local/bin"}:/usr/local/bin:/usr/bin:/bin`;
+  const envEntries = [["PATH", path], ...Object.entries(plan.env)];
+  const envLines = envEntries.map(
+    ([k, v]) => `    <key>${k}</key><string>${xmlEscape(v)}</string>`,
+  );
+  const logOut = plan.logPath ?? `${plan.home}/Library/Logs/pocketshell.out.log`;
+  const logErr = logOut.replace(/\.out\.log$/, ".err.log");
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
+    `<plist version="1.0">`,
+    `<dict>`,
+    `  <key>Label</key><string>${plan.label}</string>`,
+    `  <key>ProgramArguments</key>`,
+    `  <array><string>${xmlEscape(plan.binPath)}</string></array>`,
+    `  <key>EnvironmentVariables</key>`,
+    `  <dict>`,
+    ...envLines,
+    `  </dict>`,
+    `  <key>WorkingDirectory</key><string>${xmlEscape(plan.home)}</string>`,
+    `  <key>RunAtLoad</key><true/>`,
+    `  <key>KeepAlive</key><true/>`,
+    `  <key>StandardOutPath</key><string>${xmlEscape(logOut)}</string>`,
+    `  <key>StandardErrorPath</key><string>${xmlEscape(logErr)}</string>`,
+    `</dict>`,
+    `</plist>`,
+    ``,
+  ].join("\n");
+}

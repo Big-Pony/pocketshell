@@ -240,3 +240,63 @@ test("systemd unit: ends with exactly one trailing newline", () => {
   expect(u.endsWith("WantedBy=multi-user.target\n")).toBe(true);
   expect(u.endsWith("\n\n")).toBe(false);
 });
+
+import { renderLaunchdPlist } from "./cli-install";
+
+const macPlan = (over: Partial<InstallOpts> = {}) =>
+  plan({ platform: "darwin", euid: 501, env: { USER: "myt", HOME: "/Users/myt" }, opts: { ...OPTS, ...over } });
+
+test("launchd plist: full expected text, byte for byte", () => {
+  const p = renderLaunchdPlist(macPlan({ name: "家里" }));
+  expect(p).toBe(
+`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pocketshell.agent</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/myt/.local/bin/pocketshell-agent</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>POCKETSHELL_HOST</key><string>127.0.0.1</string>
+    <key>POCKETSHELL_PORT</key><string>8722</string>
+    <key>POCKETSHELL_ADVERTISE</key><string>wss://x.com</string>
+    <key>POCKETSHELL_KEY_DIR</key><string>/Users/myt/.pocketshell</string>
+    <key>POCKETSHELL_INSTANCE_NAME</key><string>家里</string>
+  </dict>
+  <key>WorkingDirectory</key><string>/Users/myt</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/myt/Library/Logs/pocketshell.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/myt/Library/Logs/pocketshell.err.log</string>
+</dict>
+</plist>
+`);
+});
+
+test("launchd plist: KeepAlive is present (OTA self-restart depends on it)", () => {
+  expect(renderLaunchdPlist(macPlan())).toContain("<key>KeepAlive</key><true/>");
+});
+
+test("launchd plist: PATH leads with the detected tmux directory, not a hardcoded one", () => {
+  // Intel Macs use /usr/local/bin, MacPorts /opt/local/bin — hardcoding
+  // /opt/homebrew/bin (as the hand-written doc template does) breaks them.
+  const r = resolvePlan({
+    ...BASE, platform: "darwin", euid: 501,
+    env: { USER: "myt", HOME: "/Users/myt" },
+    tmuxDir: () => "/opt/local/bin",
+  });
+  if (!r.ok) throw new Error(r.message);
+  expect(renderLaunchdPlist(r.plan)).toContain("<string>/opt/local/bin:/usr/local/bin:/usr/bin:/bin</string>");
+});
+
+test("launchd plist: no INSTANCE_NAME key when --name is absent", () => {
+  expect(renderLaunchdPlist(macPlan())).not.toContain("POCKETSHELL_INSTANCE_NAME");
+});
+
+test("launchd plist: XML-escapes values (instance names may contain & or <)", () => {
+  const p = renderLaunchdPlist(macPlan({ name: "A&B<C>" }));
+  expect(p).toContain("<string>A&amp;B&lt;C&gt;</string>");
+  expect(p).not.toContain("<string>A&B<C></string>");
+});
