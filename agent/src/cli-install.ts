@@ -102,3 +102,111 @@ export function parseInstallArgv(argv: string[]): InstallAction {
     },
   };
 }
+
+export interface InstallPlan {
+  platform: "linux" | "darwin";
+  /** Service runs as this user; the phone gets this user's shell. */
+  user: string;
+  home: string;
+  keyDir: string;
+  binPath: string;
+  unitPath: string;
+  /** launchd Label / systemd unit name stem. */
+  label: string;
+  /** darwin only: StandardOutPath, also where install reads the pairing string. */
+  logPath?: string;
+  env: Record<string, string>;
+  /** darwin only: prepended to the plist PATH so launchd can find tmux. */
+  tmuxDir?: string;
+}
+
+export interface ResolveInput {
+  platform: string;
+  euid: number;
+  env: Record<string, string | undefined>;
+  opts: InstallOpts;
+  /** null when the user does not exist on this system. */
+  homeOf: (user: string) => string | null;
+  /** dirname of the tmux binary, or null when tmux is absent. */
+  tmuxDir: () => string | null;
+}
+
+export const LAUNCHD_LABEL = "com.pocketshell.agent";
+export const SYSTEMD_UNIT_NAME = "pocketshell";
+
+function buildEnv(opts: InstallOpts, keyDir: string): Record<string, string> {
+  const env: Record<string, string> = {
+    POCKETSHELL_HOST: opts.host,
+    POCKETSHELL_PORT: String(opts.port),
+    POCKETSHELL_ADVERTISE: opts.advertise,
+    // Written explicitly rather than left to the supervisor's HOME: it makes the
+    // "install runs as root, service runs as <user>" split visible in the unit
+    // file instead of hiding it in systemd's HOME derivation.
+    POCKETSHELL_KEY_DIR: keyDir,
+  };
+  // Absent --name must produce NO key at all (project constraint: unset means
+  // byte-for-byte identical behaviour to before the instance-name feature).
+  if (opts.name) env.POCKETSHELL_INSTANCE_NAME = opts.name;
+  return env;
+}
+
+export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | { ok: false; message: string } {
+  if (i.platform === "linux") {
+    if (i.euid !== 0) {
+      return { ok: false, message: "install 需要 root 权限（要写 /etc/systemd/system 与 /usr/local/bin）。\n请改用：sudo pocketshell-agent install …" };
+    }
+    const user = i.opts.user ?? i.env.SUDO_USER ?? "root";
+    const home = i.homeOf(user);
+    if (!home) {
+      return { ok: false, message: `系统里没有用户「${user}」。请用 --user 指定一个已存在的用户。` };
+    }
+    const keyDir = `${home}/.pocketshell`;
+    return {
+      ok: true,
+      plan: {
+        platform: "linux",
+        user,
+        home,
+        keyDir,
+        binPath: "/usr/local/bin/pocketshell-agent",
+        unitPath: `/etc/systemd/system/${SYSTEMD_UNIT_NAME}.service`,
+        label: SYSTEMD_UNIT_NAME,
+        env: buildEnv(i.opts, keyDir),
+      },
+    };
+  }
+
+  if (i.platform === "darwin") {
+    if (i.env.SUDO_USER || i.euid === 0) {
+      // `launchctl bootstrap gui/$(id -u)` under sudo targets uid 0's GUI domain.
+      return { ok: false, message: "macOS 上请不要用 sudo —— LaunchAgent 属于用户域，加 sudo 会装到 root 的会话里（你看不见也用不上）。\n请去掉 sudo 重新运行：pocketshell-agent install …" };
+    }
+    const user = i.opts.user ?? i.env.USER ?? "";
+    const home = i.opts.user ? i.homeOf(i.opts.user) : (i.env.HOME ?? null);
+    if (!user || !home) {
+      return { ok: false, message: `无法确定 home 目录${i.opts.user ? `（--user ${i.opts.user}）` : ""}。` };
+    }
+    const dir = i.tmuxDir();
+    if (!dir) {
+      return { ok: false, message: "找不到 tmux。launchd 的 PATH 极简，必须把 tmux 所在目录写进服务配置，所以安装前 tmux 必须已就位。\n请先安装：brew install tmux" };
+    }
+    const keyDir = `${home}/.pocketshell`;
+    return {
+      ok: true,
+      plan: {
+        platform: "darwin",
+        user,
+        home,
+        keyDir,
+        binPath: `${home}/.local/bin/pocketshell-agent`,
+        unitPath: `${home}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist`,
+        label: LAUNCHD_LABEL,
+        logPath: `${home}/Library/Logs/pocketshell.out.log`,
+        env: buildEnv(i.opts, keyDir),
+        tmuxDir: dir,
+      },
+    };
+  }
+
+  return { ok: false, message: `不支持的平台：${i.platform}。install 目前只支持 Linux（systemd）与 macOS（launchd）。` };
+}

@@ -82,3 +82,102 @@ test("validateEnvValue rejects control characters", () => {
   expect(validateEnvValue("a\x00b")).toBe(false);
   expect(validateEnvValue("a\x7fb")).toBe(false);
 });
+
+import { resolvePlan } from "./cli-install";
+import type { InstallOpts, ResolveInput } from "./cli-install";
+
+const OPTS: InstallOpts = { advertise: "wss://x.com", host: "127.0.0.1", port: 8722 };
+const HOMES: Record<string, string> = { myt: "/home/myt", root: "/root", alice: "/home/alice" };
+const BASE: ResolveInput = {
+  platform: "linux",
+  euid: 0,
+  env: {},
+  opts: OPTS,
+  homeOf: (u: string) => HOMES[u] ?? null,
+  tmuxDir: () => "/opt/homebrew/bin",
+};
+const plan = (i: Partial<ResolveInput>) => {
+  const r = resolvePlan({ ...BASE, ...i });
+  if (!r.ok) throw new Error(`expected ok, got: ${r.message}`);
+  return r.plan;
+};
+const planErr = (i: Partial<ResolveInput>) => {
+  const r = resolvePlan({ ...BASE, ...i });
+  if (r.ok) throw new Error("expected error");
+  return r.message;
+};
+
+test("linux: SUDO_USER becomes the service user, and keyDir follows its home", () => {
+  // The phone gets THIS user's shell — dotfiles, claude/codex config, ssh keys.
+  const p = plan({ env: { SUDO_USER: "myt" } });
+  expect(p.user).toBe("myt");
+  expect(p.home).toBe("/home/myt");
+  expect(p.keyDir).toBe("/home/myt/.pocketshell");
+  expect(p.binPath).toBe("/usr/local/bin/pocketshell-agent");
+  expect(p.unitPath).toBe("/etc/systemd/system/pocketshell.service");
+  expect(p.label).toBe("pocketshell");
+});
+
+test("linux: --user overrides SUDO_USER", () => {
+  expect(plan({ env: { SUDO_USER: "myt" }, opts: { ...OPTS, user: "alice" } }).user).toBe("alice");
+});
+
+test("linux: direct root login (no SUDO_USER) falls back to root", () => {
+  const p = plan({ env: {} });
+  expect(p.user).toBe("root");
+  expect(p.keyDir).toBe("/root/.pocketshell");
+});
+
+test("linux: non-root is rejected with a sudo hint", () => {
+  expect(planErr({ euid: 1000, env: { SUDO_USER: "myt" } })).toContain("sudo");
+});
+
+test("linux: unknown --user is rejected before anything is written", () => {
+  // systemd would fail with 217/USER, which means nothing to a user.
+  expect(planErr({ env: {}, opts: { ...OPTS, user: "ghost" } })).toContain("ghost");
+});
+
+test("darwin: user-domain LaunchAgent under the invoking user's home", () => {
+  const p = plan({ platform: "darwin", euid: 501, env: { USER: "myt", HOME: "/Users/myt" } });
+  expect(p.user).toBe("myt");
+  expect(p.binPath).toBe("/Users/myt/.local/bin/pocketshell-agent");
+  expect(p.unitPath).toBe("/Users/myt/Library/LaunchAgents/com.pocketshell.agent.plist");
+  expect(p.label).toBe("com.pocketshell.agent");
+  expect(p.logPath).toBe("/Users/myt/Library/Logs/pocketshell.out.log");
+  expect(p.tmuxDir).toBe("/opt/homebrew/bin");
+});
+
+test("darwin: running under sudo is refused", () => {
+  // `launchctl bootstrap gui/$(id -u)` under sudo resolves to uid 0 — it would
+  // either fail or install into a domain the user never sees.
+  const m = planErr({ platform: "darwin", euid: 0, env: { SUDO_USER: "myt", USER: "root", HOME: "/var/root" } });
+  expect(m).toContain("sudo");
+});
+
+test("darwin: missing tmux directory is reported (launchd PATH is minimal)", () => {
+  const m = planErr({ platform: "darwin", euid: 501, env: { USER: "myt", HOME: "/Users/myt" }, tmuxDir: () => null });
+  expect(m).toContain("tmux");
+});
+
+test("unsupported platform is refused", () => {
+  expect(planErr({ platform: "win32" })).toContain("Linux");
+});
+
+test("env map carries exactly the POCKETSHELL_* the unit needs", () => {
+  const p = plan({ env: { SUDO_USER: "myt" }, opts: { ...OPTS, name: "开发", host: "0.0.0.0", port: 9001 } });
+  expect(p.env).toEqual({
+    POCKETSHELL_HOST: "0.0.0.0",
+    POCKETSHELL_PORT: "9001",
+    POCKETSHELL_ADVERTISE: "wss://x.com",
+    POCKETSHELL_KEY_DIR: "/home/myt/.pocketshell",
+    POCKETSHELL_INSTANCE_NAME: "开发",
+  });
+});
+
+test("env map omits INSTANCE_NAME entirely when --name is absent", () => {
+  // "不设即维持现状" is a standing project constraint: no name -> no key at all,
+  // not an empty string.
+  const p = plan({ env: { SUDO_USER: "myt" } });
+  expect(p.env.POCKETSHELL_INSTANCE_NAME).toBeUndefined();
+  expect(Object.keys(p.env)).not.toContain("POCKETSHELL_INSTANCE_NAME");
+});
