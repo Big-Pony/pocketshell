@@ -23,6 +23,7 @@
   import type { CheckResult } from "./lib/update";
   import { shouldReloadAfterUpdate } from "./lib/update";
   import { hardReset } from "./lib/cache-admin";
+  import { brandPrefix } from "./lib/instance-name";
   import type { AppCommand } from "./lib/input-router";
   import { reset, type SelState } from "./lib/terminal-select";
   import { makeSwipeTracker } from "./lib/swipe";
@@ -120,6 +121,13 @@
   async function refreshUpdate(force = false) {
     try { updInfo = (await conn.checkUpdate(force)) as CheckResult; } catch { /* silent */ }
   }
+  // 实例身份：服务端配置的自由文本，连上后取一次显示在顶栏。未设时为 null，
+  // brandPrefix 返回空串 —— 顶栏与加此特性前完全一致。
+  let instanceName = $state<string | null>(null);
+  async function loadAgentInfo() {
+    try { instanceName = (await conn.agentInfo()).instanceName; }
+    catch { /* 断线时保持现状，不清空已显示的名字 */ }
+  }
   const terms = new Map<string, Terminal>();
   const cmdLines = new Map<string, CmdLineState>();
   let hints = $state<string[]>([]);
@@ -192,6 +200,7 @@
       reportPresence();
       void refreshGitBranch();   // 重连后补一次，分割条左侧才不会一直空着
       void reloadCustomHints();  // 需求 5：连上/重连后拉一次自定义联想库
+      void loadAgentInfo();      // 实例身份：顶栏要显示是哪台服务器
       // Fresh connect (incl. reconnect after a self-restart update): re-check.
       // If we were mid-update and the reconnect shows we're now current, the
       // restart finished successfully — clear the in-progress UI + badge and
@@ -769,7 +778,7 @@
 
 <div class="shell">
   <div class="topbar">
-    <span class="brand mono">pocket<b>shell</b></span>
+    <span class="brand mono" title={instanceName ? $t('app.instanceName', { values: { name: instanceName } }) : undefined}>{brandPrefix(instanceName)}pocket<b>shell</b></span>
     <span class="version mono">v{updInfo?.current ?? ""}</span>
     {#if updInfo?.hasUpdate}
       <button class="upd-badge" onclick={() => (updOpen = true)} aria-label={$t('update.badge')} title={$t('update.badge')}><span class="upd-dot">●</span>{$t('update.badge')}</button>
