@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { extractPairingString, backupPath } from "./install-runner";
+import { extractPairingString, backupPath, launchdDomain } from "./install-runner";
 
 test("extractPairingString picks the pairing token out of journal output", () => {
   const log = [
@@ -25,4 +25,9 @@ test("extractPairingString returns null when absent", () => {
 test("backupPath appends .bak.<stamp>", () => {
   expect(backupPath("/etc/systemd/system/pocketshell.service", "20260730-121551"))
     .toBe("/etc/systemd/system/pocketshell.service.bak.20260730-121551");
+});
+
+test("launchdDomain targets the invoking user's GUI domain", () => {
+  expect(launchdDomain(501)).toBe("gui/501");
+  expect(launchdDomain(1000)).toBe("gui/1000");
 });

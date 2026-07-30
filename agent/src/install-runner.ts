@@ -6,7 +6,7 @@
 // argv array to Bun.spawn. A `sudo -S` + pipe combination silently swallowed a
 // heredoc during the 2026-07-30 manual install and still exited 0 — argv arrays
 // make that class of failure impossible.
-import { existsSync, copyFileSync, writeFileSync, mkdirSync, realpathSync, chmodSync } from "node:fs";
+import { existsSync, copyFileSync, writeFileSync, mkdirSync, realpathSync, chmodSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   parseInstallArgv, resolvePlan, renderSystemdUnit, renderLaunchdPlist,
@@ -199,12 +199,71 @@ export async function runInstall(argv: string[]): Promise<number> {
   return 0;
 }
 
-async function bootstrapLaunchd(_plan: InstallPlan): Promise<number> {
-  console.error("macOS 支持在 Task 7 实现");
-  return 1;
+export function launchdDomain(uid: number): string {
+  return `gui/${uid}`;
+}
+
+async function bootstrapLaunchd(plan: InstallPlan): Promise<number> {
+  const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+  const domain = launchdDomain(uid);
+  mkdirSync(dirname(plan.logPath!), { recursive: true });
+  // bootout first so a re-install picks up the new plist; a missing service is
+  // not an error here (exit code ignored on purpose).
+  await run(["launchctl", "bootout", `${domain}/${plan.label}`]);
+  const boot = await run(["launchctl", "bootstrap", domain, plan.unitPath]);
+  if (boot.code !== 0) {
+    console.error(`launchctl bootstrap 失败：\n${boot.stderr || boot.stdout}`);
+    return 1;
+  }
+  console.log(`已注册并启动服务：${plan.label}`);
+
+  const ready = await waitReady(plan.env.POCKETSHELL_HOST, Number(plan.env.POCKETSHELL_PORT));
+  if (!ready) {
+    console.error(`服务已注册，但 15 秒内没能在 ${plan.env.POCKETSHELL_HOST}:${plan.env.POCKETSHELL_PORT} 上响应。`);
+    console.error(`查看日志：tail -n 30 ${plan.logPath}`);
+    return 1;
+  }
+  printSuccess(plan, extractPairingString(await readServiceLog(plan)));
+  return 0;
 }
 
 export async function runUninstall(): Promise<number> {
-  console.error("uninstall 在 Task 7 实现");
+  const platform = process.platform;
+  if (platform === "linux") {
+    if (typeof process.geteuid === "function" && process.geteuid() !== 0) {
+      console.error("uninstall 需要 root 权限。请改用：sudo pocketshell-agent uninstall");
+      return 1;
+    }
+    const unitPath = "/etc/systemd/system/pocketshell.service";
+    if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
+    await run(["systemctl", "disable", "--now", "pocketshell"]);
+    rmSync(unitPath, { force: true });
+    await run(["systemctl", "daemon-reload"]);
+    console.log(`已停止并移除服务：${unitPath}`);
+    printKeepNotice("/usr/local/bin/pocketshell-agent");
+    return 0;
+  }
+  if (platform === "darwin") {
+    const home = process.env.HOME ?? "";
+    const unitPath = `${home}/Library/LaunchAgents/com.pocketshell.agent.plist`;
+    if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
+    const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+    await run(["launchctl", "bootout", `${launchdDomain(uid)}/com.pocketshell.agent`]);
+    rmSync(unitPath, { force: true });
+    console.log(`已停止并移除服务：${unitPath}`);
+    printKeepNotice(`${home}/.local/bin/pocketshell-agent`);
+    return 0;
+  }
+  console.error(`不支持的平台：${platform}`);
   return 1;
+}
+
+function printKeepNotice(binPath: string): void {
+  const keyDir = `${process.env.HOME ?? "~"}/.pocketshell`;
+  console.log("");
+  console.log("以下内容已保留（里面有密钥与已配对设备，删掉所有手机都要重新配对）：");
+  console.log(`  密钥目录  ${keyDir}`);
+  console.log(`  二进制    ${binPath}`);
+  console.log("");
+  console.log("确实要彻底清除，手动删除上面两个路径即可。");
 }
