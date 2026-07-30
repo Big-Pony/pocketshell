@@ -181,3 +181,62 @@ test("env map omits INSTANCE_NAME entirely when --name is absent", () => {
   expect(p.env.POCKETSHELL_INSTANCE_NAME).toBeUndefined();
   expect(Object.keys(p.env)).not.toContain("POCKETSHELL_INSTANCE_NAME");
 });
+
+import { renderSystemdUnit } from "./cli-install";
+
+const linuxPlan = (over: Partial<InstallOpts> = {}) =>
+  plan({ env: { SUDO_USER: "myt" }, opts: { ...OPTS, ...over } });
+
+test("systemd unit: full expected text, byte for byte", () => {
+  const unit = renderSystemdUnit(linuxPlan({ name: "开发" }));
+  expect(unit).toBe(
+`[Unit]
+Description=PocketShell Agent
+After=network.target
+
+[Service]
+Type=simple
+User=myt
+WorkingDirectory=/home/myt
+ExecStart=/usr/local/bin/pocketshell-agent
+Environment=POCKETSHELL_HOST=127.0.0.1
+Environment=POCKETSHELL_PORT=8722
+Environment=POCKETSHELL_ADVERTISE=wss://x.com
+Environment=POCKETSHELL_KEY_DIR=/home/myt/.pocketshell
+Environment=POCKETSHELL_INSTANCE_NAME=开发
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+`);
+});
+
+test("systemd unit: Restart=always is present (OTA self-restart depends on it)", () => {
+  // self-restart.ts detects systemd via INVOCATION_ID and exits, trusting the
+  // supervisor to bring the new binary back up. Without Restart=always an
+  // in-app update would simply stop the agent.
+  expect(renderSystemdUnit(linuxPlan())).toContain("Restart=always");
+});
+
+test("systemd unit: no INSTANCE_NAME line when --name is absent", () => {
+  expect(renderSystemdUnit(linuxPlan())).not.toContain("POCKETSHELL_INSTANCE_NAME");
+});
+
+test("systemd unit: honours --host/--port/--user overrides", () => {
+  const u = renderSystemdUnit(plan({
+    env: { SUDO_USER: "myt" },
+    opts: { ...OPTS, user: "alice", host: "0.0.0.0", port: 9001 },
+  }));
+  expect(u).toContain("User=alice");
+  expect(u).toContain("WorkingDirectory=/home/alice");
+  expect(u).toContain("Environment=POCKETSHELL_HOST=0.0.0.0");
+  expect(u).toContain("Environment=POCKETSHELL_PORT=9001");
+  expect(u).toContain("Environment=POCKETSHELL_KEY_DIR=/home/alice/.pocketshell");
+});
+
+test("systemd unit: ends with exactly one trailing newline", () => {
+  const u = renderSystemdUnit(linuxPlan());
+  expect(u.endsWith("WantedBy=multi-user.target\n")).toBe(true);
+  expect(u.endsWith("\n\n")).toBe(false);
+});

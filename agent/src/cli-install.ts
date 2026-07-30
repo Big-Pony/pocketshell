@@ -210,3 +210,32 @@ export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | 
 
   return { ok: false, message: `不支持的平台：${i.platform}。install 目前只支持 Linux（systemd）与 macOS（launchd）。` };
 }
+
+// Renders the system-level unit. System level (not user level) is deliberate:
+// a user unit dies when the ssh session ends unless lingering is enabled, and
+// Linger=no is the default on stock Ubuntu (verified on the dev server).
+//
+// Restart=always is load-bearing, not boilerplate: self-restart.ts hands OTA
+// restarts to the supervisor, so without it an in-app update just stops the
+// agent instead of coming back on the new binary.
+export function renderSystemdUnit(plan: InstallPlan): string {
+  const envLines = Object.entries(plan.env).map(([k, v]) => `Environment=${k}=${v}`);
+  return [
+    "[Unit]",
+    "Description=PocketShell Agent",
+    "After=network.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    `User=${plan.user}`,
+    `WorkingDirectory=${plan.home}`,
+    `ExecStart=${plan.binPath}`,
+    ...envLines,
+    "Restart=always",
+    "RestartSec=3",
+    "",
+    "[Install]",
+    "WantedBy=multi-user.target",
+    "",
+  ].join("\n");
+}
