@@ -374,6 +374,8 @@
   const topSessions = $derived(
     sessions.filter((s) => !backgrounded.has(s.name) && (s.attached || s.closed))
   );
+  // 当前聚焦会话的元数据 —— 分割条的 token 显示跟着它走。
+  const activeSessionMeta = $derived(sessions.find((s) => s.name === activeId));
   const topOrder = $derived.by(() => {
     const base = visibleOrder(
       tabOrder,
@@ -851,6 +853,7 @@
       branch={gitBranch} dirty={gitDirty}
       latency={metrics.latency} rxBytes={metrics.rxBytes} elapsedMs={metrics.elapsedMs}
       online={status === "online"}
+      ctxUsed={activeSessionMeta?.ctxUsed} ctxTotal={activeSessionMeta?.ctxTotal}
       onDown={onDividerDown} onMove={onDividerMove} onUp={onDividerUp} />
   {/if}
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">

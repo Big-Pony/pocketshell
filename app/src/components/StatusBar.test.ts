@@ -118,3 +118,37 @@ test("dismissing the tip with × does not start a drag", async () => {
   expect(downs).toBe(0);
   expect(c.container.querySelector(".tip")).toBeNull();
 });
+
+// ---- AI 上下文用量（跑 AI 时右组换成 token） ----
+
+test("有 token 数据时显示 token，隐藏延迟与吞吐", () => {
+  const c = mount({
+    branch: "main", latency: 38, rxBytes: 1024, elapsedMs: 1000, online: true,
+    ctxUsed: 142000, ctxTotal: 1000000,
+  });
+  expect(c.container.textContent).toContain("142k/1M · 14%");
+  expect(c.container.textContent).not.toContain("38ms");
+  expect(c.container.textContent).not.toContain("KB/s");
+});
+
+test("无 token 数据时维持原有的延迟与吞吐显示", () => {
+  const c = mount({
+    branch: "main", latency: 38, rxBytes: 1024, elapsedMs: 1000, online: true,
+  });
+  expect(c.container.textContent).toContain("38ms");
+  expect(c.container.textContent).not.toContain("·");
+});
+
+test("断线时不显示 token（与延迟吞吐同规则）", () => {
+  const c = mount({
+    branch: "main", latency: 38, rxBytes: 0, elapsedMs: 1000, online: false,
+    ctxUsed: 142000, ctxTotal: 1000000,
+  });
+  expect(c.container.textContent).not.toContain("142k");
+});
+
+test("只有已用没有总量时也显示（claude 未接 statusLine 的路径）", () => {
+  const c = mount({ latency: 38, rxBytes: 1024, elapsedMs: 1000, online: true, ctxUsed: 63476 });
+  expect(c.container.textContent).toContain("63k");
+  expect(c.container.textContent).not.toContain("38ms");
+});

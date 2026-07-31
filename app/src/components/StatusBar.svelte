@@ -10,7 +10,7 @@
      一律不显示，不留 `--` 占位符。 -->
 <script lang="ts">
   import { t } from "svelte-i18n";
-  import { formatLatency, formatRate, formatBranch } from "../lib/status-bar";
+  import { formatLatency, formatRate, formatBranch, formatContext } from "../lib/status-bar";
   import { loadTipSeen, saveTipSeen } from "../lib/status-bar-tip";
 
   let {
@@ -20,6 +20,8 @@
     rxBytes = 0,
     elapsedMs = 0,
     online = true,
+    ctxUsed = undefined,
+    ctxTotal = undefined,
     onDown,
     onMove,
     onUp,
@@ -30,6 +32,8 @@
     rxBytes?: number;
     elapsedMs?: number;
     online?: boolean;
+    ctxUsed?: number;
+    ctxTotal?: number;
     onDown: (e: PointerEvent) => void;
     onMove: (e: PointerEvent) => void;
     onUp: (e: PointerEvent) => void;
@@ -39,6 +43,9 @@
   // 断线时延迟与吞吐都不显示（不是显示 0）——连接指标在没有连接时没有意义。
   const latencyText = $derived(online ? formatLatency(latency) : "");
   const rateText = $derived(online ? formatRate(rxBytes, elapsedMs) : "");
+  // 跑着 AI 时右组换成上下文用量：手机 390px 宽放不下三项，且需求要的
+  // 就是「改为显示」。没有 token 数据时原样显示延迟与吞吐。
+  const ctxText = $derived(online ? formatContext(ctxUsed, ctxTotal) : "");
 
   // 首次使用给一次「双击全屏」微提示，用过或点掉即不再出现。
   let tipOpen = $state(!loadTipSeen());
@@ -78,8 +85,14 @@
   <div class="grip"></div>
 
   <div class="grp r">
-    {#if latencyText}<span class="s mono">{latencyText}</span>{/if}
-    {#if rateText}<span class="s mono">↓{rateText}</span>{/if}
+    {#if ctxText}
+      <!-- 前缀用 ⊙ 而不是计划里的 ⌁：U+2301 不在 public/fonts 的 JetBrains Mono
+           子集里，会掉进系统回退字体，Android 上是 tofu 方块。U+2299 在子集内。 -->
+      <span class="s mono">⊙{ctxText}</span>
+    {:else}
+      {#if latencyText}<span class="s mono">{latencyText}</span>{/if}
+      {#if rateText}<span class="s mono">↓{rateText}</span>{/if}
+    {/if}
   </div>
 </div>
 
