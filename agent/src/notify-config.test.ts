@@ -66,3 +66,12 @@ test("sanitize 对缺失的 kimi 字段回落为 false", () => {
   const c = sanitizeNotifyConfig({ tools: { claude: true } });
   expect(c.tools.kimi).toBe(false);
 });
+
+test("默认配置含 contextStatusline 且为关", () => {
+  expect(defaultNotifyConfig().contextStatusline).toBe(false);
+});
+
+test("sanitize 保留 contextStatusline", () => {
+  expect(sanitizeNotifyConfig({ contextStatusline: true }).contextStatusline).toBe(true);
+  expect(sanitizeNotifyConfig({}).contextStatusline).toBe(false);
+});

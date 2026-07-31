@@ -104,6 +104,17 @@
     await persistCfg();
   }
 
+  // 需求 5：接管 CC 的 statusLine 取上下文用量。单独一个开关而不是并进
+  // 工具列表——它不产生通知，混在一起用户会以为开了就能收推送。
+  let contextError = $state<string | null>(null);
+  async function toggleContext(on: boolean) {
+    const r = on ? await conn.contextWire() : await conn.contextUnwire();
+    if (!r.ok) { contextError = reasonText(r.reason, r.detail); return; }
+    contextError = null;
+    cfg = { ...cfg, contextStatusline: on };
+    await persistCfg();
+  }
+
   async function toggleWebPush(on: boolean) {
     if (!on) {
       await conn.notifyUnsubscribe();
@@ -326,6 +337,19 @@
       </div>
     {/each}
     <p class="nt-hint">{$t('notify.rewireHint')}</p>
+
+    <div class="nsub">{$t('notify.contextTitle')}</div>
+    <div class="set">
+      <div class="grow">
+        <div class="label">{$t('notify.contextLabel')}</div>
+        {#if contextError}<div class="err">{contextError}</div>{/if}
+      </div>
+      <div class="seg">
+        <button class:on={!cfg.contextStatusline} onclick={() => toggleContext(false)}>{$t('notify.off')}</button>
+        <button class:on={cfg.contextStatusline} onclick={() => toggleContext(true)}>{$t('notify.on')}</button>
+      </div>
+    </div>
+    <p class="nt-hint">{$t('notify.contextDesc')}</p>
 
     <div class="nsub">{$t('notify.delivery')}</div>
     <div class="set">

@@ -476,6 +476,9 @@ export default {
       kimi: "Kimi Code",
     },
     rewireHint: "Create a new session for this to take effect — existing sessions cannot see the injected environment variables",
+    contextTitle: "Context usage",
+    contextLabel: "Claude Code context",
+    contextDesc: "Show used/total context on the divider. This takes over Claude Code's status line config; an existing custom status line is chained through and stays visible.",
     delivery: "Delivery",
     webpush: {
       label: "Web Push",

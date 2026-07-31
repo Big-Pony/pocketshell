@@ -476,6 +476,9 @@ export default {
       kimi: "Kimi Code",
     },
     rewireHint: "接线后需重建会话才生效（已开着的会话读不到注入的环境变量）",
+    contextTitle: "上下文用量",
+    contextLabel: "Claude Code 上下文",
+    contextDesc: "在分割条显示已用/总上下文。开启会接管 Claude Code 的状态栏配置；已有自定义状态栏时自动链式包装，界面不受影响。",
     delivery: "送达方式",
     webpush: {
       label: "Web Push",

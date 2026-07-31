@@ -40,7 +40,7 @@ import { AI_TOOLS, type AiTool } from "./ai-context";
 
 function isAiTool(t: string): t is AiTool { return (AI_TOOLS as readonly string[]).includes(t); }
 import { parseStatuslinePayload } from "./statusline-payload";
-import { chainPathOf, readChain } from "./statusline-wire";
+import { chainPathOf, readChain, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
@@ -674,6 +674,22 @@ export function startServer(deps: Deps = {}) {
               result = { ok: true }; break;
             case "notify.wire": result = doWire(p.tool, true); break;
             case "notify.unwire": result = doWire(p.tool, false); break;
+            // 需求 5：接管 CC 的 statusLine 取上下文用量。与 notify.wire 分开
+            // 是因为它不产生通知，只取数字；混进工具列表会让用户以为开了它
+            // 就能收到推送。
+            case "context.wire":
+            case "context.unwire": {
+              const on = method === "context.wire";
+              // chain 路径与 statusline 子命令的读取端同源（chainPathOf），
+              // 两边各写各的会导致解除接线时还原不回用户原来的状态栏。
+              const chainPath = chainPathOf(process.env);
+              const r = on
+                ? wireStatusline(toolPaths.claude, chainPath, agentBin)
+                : unwireStatusline(toolPaths.claude, chainPath, agentBin);
+              if (r.ok) { const c = notify.config(); c.contextStatusline = on; notify.setConfig(c); }
+              result = r;
+              break;
+            }
             case "notify.testWebhook": {
               // async self-answer, same pattern as update.check/update.apply
               // above: sends its own response and returns early rather than

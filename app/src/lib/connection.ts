@@ -656,6 +656,10 @@ export class Connection {
   notifyTestWebhook(id: string): Promise<{ ok: boolean; error?: string }> { return this.rpc("notify.testWebhook", { id }) as Promise<{ ok: boolean; error?: string }>; }
   notifyWire(tool: string): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("notify.wire", { tool }) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
   notifyUnwire(tool: string): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("notify.unwire", { tool }) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
+  // 需求 5：接管 Claude Code 的 statusLine 取上下文用量。与 notify.* 分开，
+  // 因为它不产生通知，只取数字。
+  contextWire(): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("context.wire", {}) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
+  contextUnwire(): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("context.unwire", {}) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
   onOutput(cb: OutputCb): () => void {
     this.outputCbs.push(cb);
     return () => {
