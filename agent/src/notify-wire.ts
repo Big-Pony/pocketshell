@@ -102,3 +102,69 @@ export function unwireOpencode(pluginDir: string): WireResult {
   catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
   return { ok: true };
 }
+
+// ---- kimi-cli ----
+// 配置在 ~/.kimi/config.toml 的 [[hooks]] 数组表。
+//
+// 三处与直觉不符、来自本机 1.49.0 源码实证的事实：
+//   1) 路径是 ~/.kimi 而非官方文档写的 ~/.kimi-code —— 见 share.py 的
+//      get_share_dir() = Path.home()/".kimi"（KIMI_SHARE_DIR 可覆盖）。
+//      文档与实现不一致，以实现为准；kimi 若改了这里需要跟进。
+//   2) 用 Stop 事件而不是 Notification —— kimi 的 Notification 只在后台任务
+//      状态变化时触发，日常回合结束不触发；Stop 才对应「一轮跑完」，语义上
+//      等同 claude 的 Notification。
+//   3) 只写 event 和 command 两个字段 —— hooks/config.py 的 HookDef 是
+//      pydantic 模型，多写任何字段会让整个 config.toml 加载失败（kimi 起不来）。
+//      matcher/timeout 一律不写，用默认值。
+//
+// [[hooks]] 是数组表，追加不与用户已有条目冲突（与 codex 的单键 notify=
+// 不同），所以没有 conflict 分支。用标记注释锚定我们这块以便精确移除。
+const KIMI_MARK = "# pocketshell-notify";
+const kimiBlock = (agentBin: string) =>
+  `${KIMI_MARK}\n[[hooks]]\nevent = "Stop"\ncommand = "${agentBin} notify"\n`;
+
+export function wireKimi(configPath: string, agentBin: string): WireResult {
+  // 判定 kimi 是否安装：配置目录存在即可。不存在就不建 —— 与 opencode 的
+  // opencode_not_found 同款保守策略，别给没装的工具留下一棵孤儿目录树。
+  if (!existsSync(dirname(configPath))) {
+    return { ok: false, reason: "kimi_not_found", detail: dirname(configPath) };
+  }
+  let text = "";
+  if (existsSync(configPath)) {
+    try { text = readFileSync(configPath, "utf8"); }
+    catch (e) { return { ok: false, reason: "read_error", detail: String(e) }; }
+  }
+  if (text.includes(KIMI_MARK)) return { ok: true }; // 幂等
+  const next = text.endsWith("\n") || text === "" ? text + kimiBlock(agentBin)
+                                                  : text + "\n" + kimiBlock(agentBin);
+  try { writeFileSync(configPath, next); }
+  catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
+  return { ok: true };
+}
+
+export function unwireKimi(configPath: string): WireResult {
+  if (!existsSync(configPath)) return { ok: true };
+  let text: string;
+  try { text = readFileSync(configPath, "utf8"); }
+  catch (e) { return { ok: false, reason: "read_error", detail: String(e) }; }
+  try { writeFileSync(configPath, stripKimiBlock(text)); }
+  catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
+  return { ok: true };
+}
+
+// 从标记注释删到该块结束：跳过标记行本身、随后的 [[hooks]] 行，以及其下的
+// 键值行，直到遇到下一个表头（[ 开头）或文件结束。只删我们自己的块，用户
+// 写在前后的任何东西原样保留。
+export function stripKimiBlock(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() !== KIMI_MARK) { out.push(lines[i]); i++; continue; }
+    i++;                                             // 跳过标记行
+    if (i < lines.length && lines[i].trim() === "[[hooks]]") i++;  // 跳过表头
+    while (i < lines.length && !lines[i].trimStart().startsWith("[") && lines[i].trim() !== "") i++;
+    while (i < lines.length && lines[i].trim() === "") i++;        // 吞掉块后空行
+  }
+  return out.join("\n");
+}

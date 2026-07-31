@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode } from "./notify-wire";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi } from "./notify-wire";
 
 const bin = "/usr/local/bin/pocketshell-agent";
 const cmd = `${bin} notify`;
@@ -112,4 +112,102 @@ test("opencode unwire deletes plugin file", () => {
   const pluginDir = join(dir, "plugin");
   wireOpencode(pluginDir); unwireOpencode(pluginDir);
   expect(existsSync(join(pluginDir, "pocketshell-notify.js"))).toBe(false);
+});
+
+// kimi 的接线判定「已安装」的依据是 configPath 的父目录（~/.kimi）存在，
+// 与 opencode 的 opencode_not_found 同款保守策略：不给未装的工具建目录。
+function kimiFx(seed?: string) {
+  const home = mkdtempSync(join(tmpdir(), "km-"));
+  const kimiDir = join(home, ".kimi");
+  mkdirSync(kimiDir, { recursive: true });
+  const f = join(kimiDir, "config.toml");
+  if (seed !== undefined) writeFileSync(f, seed);
+  return f;
+}
+
+test("kimi wire 写入 Stop hook", () => {
+  const f = kimiFx("");
+  const r = wireKimi(f, bin);
+  expect(r.ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain("# pocketshell-notify");
+  expect(txt).toContain("[[hooks]]");
+  expect(txt).toContain(`event = "Stop"`);
+  expect(txt).toContain(`command = "${bin} notify"`);
+});
+
+test("kimi wire 只写 event 和 command 两个字段（多写会让 kimi 启动失败）", () => {
+  const f = kimiFx("");
+  wireKimi(f, bin);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).not.toContain("matcher");
+  expect(txt).not.toContain("timeout");
+});
+
+test("kimi wire 幂等", () => {
+  const f = kimiFx("");
+  wireKimi(f, bin); wireKimi(f, bin); wireKimi(f, bin);
+  const n = readFileSync(f, "utf8").split("# pocketshell-notify").length - 1;
+  expect(n).toBe(1);
+});
+
+test("kimi wire 保留用户已有配置与 hooks", () => {
+  const f = kimiFx(`default_model = "kimi-code/k3"\ntheme = "dark"\n\n[[hooks]]\nevent = "PreToolUse"\ncommand = "my-check.sh"\n`);
+  const r = wireKimi(f, bin);
+  expect(r.ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain(`default_model = "kimi-code/k3"`);
+  expect(txt).toContain(`theme = "dark"`);
+  expect(txt).toContain(`command = "my-check.sh"`);
+  expect(txt).toContain(`command = "${bin} notify"`);
+});
+
+test("kimi unwire 只删我们那块，保留用户 hooks", () => {
+  const f = kimiFx(`[[hooks]]\nevent = "PreToolUse"\ncommand = "my-check.sh"\n`);
+  wireKimi(f, bin);
+  const r = unwireKimi(f);
+  expect(r.ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain(`command = "my-check.sh"`);
+  expect(txt).toContain(`event = "PreToolUse"`);
+  expect(txt).not.toContain("# pocketshell-notify");
+  expect(txt).not.toContain(`${bin} notify`);
+});
+
+test("kimi unwire 后用户在我们块之后的配置仍在", () => {
+  const f = kimiFx("");
+  wireKimi(f, bin);
+  // 用户之后又手动加了一段
+  writeFileSync(f, readFileSync(f, "utf8") + `\n[[hooks]]\nevent = "SessionStart"\ncommand = "hello.sh"\n`);
+  unwireKimi(f);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain(`command = "hello.sh"`);
+  expect(txt).not.toContain(`${bin} notify`);
+});
+
+test("kimi unwire 幂等（未接线时不报错）", () => {
+  const f = kimiFx(`theme = "dark"\n`);
+  expect(unwireKimi(f).ok).toBe(true);
+  expect(readFileSync(f, "utf8")).toContain(`theme = "dark"`);
+});
+
+test("kimi 未安装（~/.kimi 不存在）返回 kimi_not_found", () => {
+  const home = mkdtempSync(join(tmpdir(), "km-"));
+  const f = join(home, ".kimi", "config.toml"); // 目录刻意不建
+  const r = wireKimi(f, bin);
+  expect(r.ok).toBe(false);
+  expect(r.reason).toBe("kimi_not_found");
+});
+
+test("kimi 配置文件不存在但目录在时可创建", () => {
+  const f = kimiFx(); // 不 seed，文件不存在
+  expect(existsSync(f)).toBe(false);
+  const r = wireKimi(f, bin);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(f, "utf8")).toContain(`event = "Stop"`);
+});
+
+test("kimi unwire 文件不存在时直接成功", () => {
+  const f = kimiFx();
+  expect(unwireKimi(f).ok).toBe(true);
 });
