@@ -38,6 +38,7 @@
   let initialViewSet = $state(false);
   let enterView = $state<"render" | "source">("source");
   let imgSrc = $state("");
+  let videoSrc = $state("");
   let htmlSrc = $state("");
   let MarkdownComp = $state<any>(null);
   let mdToken = $state(""); // one token per md render, reused for all local images
@@ -66,6 +67,10 @@
   async function loadImage() {
     try { imgSrc = await mintUrl(relFromBase(scope, path)); }
     catch { notice = tr("preview.imageFailed"); }
+  }
+  async function loadVideo() {
+    try { videoSrc = await mintUrl(relFromBase(scope, path)); }
+    catch { notice = tr("preview.videoFailed"); }
   }
 
   // md images are relative to the md file's dir, but the token base is `scope`
@@ -102,6 +107,7 @@
       return;
     }
     if (kind === "image") { view = "render"; await loadImage(); return; }
+    if (kind === "video") { view = "render"; await loadVideo(); return; }
     if (!initialViewSet) {
       view = kind === "markdown" || kind === "html" ? "render" : "source";
       initialViewSet = true;
@@ -162,6 +168,7 @@
   // session change) and external edits (terminal / Claude touched the file).
   async function refresh() {
     if (kind === "image") { await loadImage(); return; }
+    if (kind === "video") { await loadVideo(); return; }
     loaded = ""; // force re-read/re-render on next $effect tick
   }
 
@@ -204,13 +211,15 @@
           </div>
         {:else if kind === "image"}
           <span class="pv-label">{$t('preview.imageLabel')}</span>
+        {:else if kind === "video"}
+          <span class="pv-label">{$t('preview.videoLabel')}</span>
         {/if}
         <span class="sp"></span>
         {#if previewFullscreen}
           <button class="pv-btn" onclick={() => (drawerOpen = !drawerOpen)}>{$t('preview.dir')}</button>
           <button class="pv-btn" onclick={() => { previewFullscreen = false; drawerOpen = false; }}>{$t('preview.exitFullscreen')}</button>
         {:else}
-          {#if kind !== "image" && canEdit}
+          {#if kind !== "image" && kind !== "video" && canEdit}
             <button class="pv-btn" onclick={startEdit}>{$t('editor.edit')}</button>
           {/if}
           <button class="pv-btn" aria-label={$t('preview.fullscreen')} onclick={enterFullscreen}>⛶</button>
@@ -224,6 +233,17 @@
     <div class="pv-content" data-view={view}>
       {#if kind === "image"}
         <div class="img-wrap">{#if imgSrc}<img src={imgSrc} alt={path} />{/if}</div>
+      {:else if kind === "video"}
+        <div class="video-wrap">
+          {#if videoSrc}
+            <!-- playsinline 阻止 iOS 强制全屏接管；preload=metadata 只取时长
+                 与首帧，不预下整个文件（手机流量场景） -->
+            <video src={videoSrc} controls playsinline preload="metadata">
+              <track kind="captions" />
+              {$t('preview.videoUnsupported')}
+            </video>
+          {/if}
+        </div>
       {:else if kind === "markdown" && view === "render" && MarkdownComp}
         <MarkdownComp source={raw} mdFileDir={dirOf(path)}
           buildImageUrl={mdImageUrl}
@@ -275,6 +295,16 @@
   .pv-label { font-size: 0.72rem; color: var(--dim); }
   .img-wrap { display: flex; justify-content: center; padding: 12px; }
   .img-wrap img { max-width: 100%; height: auto; }
+  .video-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+    background: var(--code-bg);
+  }
+  .video-wrap video { max-width: 100%; max-height: 100%; }
   .pv-notice { font-size: 0.7rem; color: var(--amber); padding: 6px 10px; }
   .codewrap { display: flex; align-items: flex-start; padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
   .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--code-gutter); user-select: none; }

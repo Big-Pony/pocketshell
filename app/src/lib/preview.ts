@@ -1,8 +1,10 @@
 // Pure preview helpers: file-type classification, the agent HTTP origin for
 // the token /preview route, URL assembly, and markdown local-image path math.
-export type PreviewKind = "image" | "markdown" | "html" | "code";
+export type PreviewKind = "image" | "markdown" | "html" | "video" | "code";
 
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg"]);
+// 音频（mp3/wav）刻意不列：本期只做视频，音频没有对应的渲染分支。
+const VIDEO_EXT = new Set(["mp4", "m4v", "webm", "mov", "ogv"]);
 
 function ext(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
@@ -15,6 +17,7 @@ export function previewKind(path: string): PreviewKind {
   if (IMAGE_EXT.has(e)) return "image";
   if (e === "md" || e === "markdown") return "markdown";
   if (e === "html" || e === "htm") return "html";
+  if (VIDEO_EXT.has(e)) return "video";
   return "code";
 }
 

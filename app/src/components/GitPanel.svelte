@@ -14,6 +14,7 @@
   let limit = $state(30);
   let notice = $state("");
   let expanded = $state<string | null>(null);
+  let refreshing = $state(false);
 
   async function loadAll() {
     if (noRoot) return;
@@ -35,6 +36,14 @@
   }
   async function loadMore() { limit += 30; await loadAll(); }
 
+  // 刷新整个面板（分支 + 历史 + 变更三项）。按钮位于分支行，但用户对
+  // 「刷新」的预期是整块更新，不只是分支名。
+  async function refresh() {
+    if (refreshing) return;
+    refreshing = true;
+    try { await loadAll(); } finally { refreshing = false; }
+  }
+
   // Load once on mount. Guarding on `!commits.length && !notice` would re-fire
   // forever on a repo with zero commits / a clean tree (loadAll succeeds but
   // leaves commits=[] and notice=""), producing an unbounded git.* rpc storm.
@@ -49,7 +58,10 @@
   {:else}
     {#if notice}<div class="gn">{notice}</div>{/if}
     <div class="sec">
-      <div class="st">{$t('git.branches')}</div>
+      <div class="st-row">
+        <span class="st">{$t('git.branches')}</span>
+        <button class="rf" aria-label={$t('git.refresh')} disabled={refreshing} onclick={refresh}>⟳</button>
+      </div>
       <div class="cur mono">● {branches.current}</div>
       <div class="brs">{#each branches.branches as b}<span class="br mono" class:on={b === branches.current}>{b}</span>{/each}</div>
       <div class="tip">{$t('git.branchTip')}</div>
@@ -84,6 +96,18 @@
   .hint, .empty, .gn { color: var(--dim); padding: 10px; }
   .gn { color: var(--amber); }
   .sec { margin-bottom: 12px; }
+  .st-row { display: flex; align-items: center; justify-content: space-between; }
+  .rf {
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    min-width: 28px;
+    height: 24px;
+    font-size: 0.72rem;
+    line-height: 1;
+  }
+  .rf:disabled { opacity: 0.45; }
   /* 分区标题走共同设计语言：mono 大写小标题 */
   .st {
     font-family: "JetBrains Mono", ui-monospace, monospace;

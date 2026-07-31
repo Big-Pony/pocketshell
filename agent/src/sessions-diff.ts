@@ -13,7 +13,12 @@ export function sessionMetasEqual(a: SessionMeta, b: SessionMeta): boolean {
     a.rows === b.rows &&
     a.lastLine === b.lastLine &&
     a.createdAt === b.createdAt &&
-    a.attached === b.attached
+    a.attached === b.attached &&
+    // 必须纳入比较：这三个字段变了却判定相等，广播会被 diff 吃掉，
+    // 分割条上的数字永远不更新（功能静默失效）。
+    a.ctxTool === b.ctxTool &&
+    a.ctxUsed === b.ctxUsed &&
+    a.ctxTotal === b.ctxTotal
   );
 }
 

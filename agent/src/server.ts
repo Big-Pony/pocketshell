@@ -34,7 +34,13 @@ import { downloadAndVerify, type Phase } from "./update-apply";
 import { signBinary, ensureLocalIdentity } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
 import { NotificationService, type DevicePresence } from "./notify-service";
-import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, type WireResult } from "./notify-wire";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi, type WireResult } from "./notify-wire";
+import { ContextStore } from "./context-store";
+import { AI_TOOLS, type AiTool } from "./ai-context";
+
+function isAiTool(t: string): t is AiTool { return (AI_TOOLS as readonly string[]).includes(t); }
+import { parseStatuslinePayload } from "./statusline-payload";
+import { chainPathOf, readChain, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
@@ -71,6 +77,7 @@ export function startServer(deps: Deps = {}) {
   const config = deps.config ?? loadConfig();
   const terminal = deps.terminal ?? new TerminalService();
   const replay = deps.replay ?? new ReplayService(config.replayBufferBytes);
+  const contextStore = new ContextStore();
 
   const envKeys = new Set(config.authorizedKeys);
   // Tracks when the currently-held pairing code was minted, so a newer
@@ -212,6 +219,7 @@ export function startServer(deps: Deps = {}) {
   const onTermOutput = (name: string, chunk: Uint8Array) => batcher.push(name, chunk);
   terminal.onOutput(onTermOutput);
   const onTermExit = (name: string, code: number) => {
+    contextStore.delete(name);
     batcher.flush(name); // deliver the session's tail bytes before the exit notice
     batcher.clear(name);
     for (const conn of conns.values()) {
@@ -242,7 +250,7 @@ export function startServer(deps: Deps = {}) {
       try {
         do {
           pushAgain = false;
-          const sessions = [...(await terminal.list()), ...shell.list()];
+          const sessions = contextStore.decorate([...(await terminal.list()), ...shell.list()]);
           if (lastPushed && sessionListsEqual(lastPushed, sessions)) continue;
           lastPushed = sessions;
           for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions });
@@ -281,11 +289,15 @@ export function startServer(deps: Deps = {}) {
     claude: pathJoin(homedir(), ".claude", "settings.json"),
     codex: pathJoin(homedir(), ".codex", "config.toml"),
     opencode: pathJoin(homedir(), ".config", "opencode", "plugin"),
+    // kimi 的配置在 ~/.kimi/config.toml —— 官方文档写的是 ~/.kimi-code，
+    // 但实现（share.py 的 get_share_dir）用的是 ~/.kimi。以实现为准。
+    kimi: pathJoin(homedir(), ".kimi", "config.toml"),
   };
-  const doWire = (tool: "claude" | "codex" | "opencode", on: boolean): WireResult => {
+  const doWire = (tool: "claude" | "codex" | "opencode" | "kimi", on: boolean): WireResult => {
     let r: WireResult;
     if (tool === "claude") r = on ? wireClaude(toolPaths.claude, agentBin) : unwireClaude(toolPaths.claude, agentBin);
     else if (tool === "codex") r = on ? wireCodex(toolPaths.codex, agentBin) : unwireCodex(toolPaths.codex);
+    else if (tool === "kimi") r = on ? wireKimi(toolPaths.kimi, agentBin) : unwireKimi(toolPaths.kimi);
     else r = on ? wireOpencode(toolPaths.opencode) : unwireOpencode(toolPaths.opencode);
     if (r.ok) { const c = notify.config(); c.tools[tool] = on; notify.setConfig(c); }
     return r;
@@ -464,7 +476,7 @@ export function startServer(deps: Deps = {}) {
         // gated by the push diff cache.
         void terminal
           .list()
-          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: [...sessions, ...shell.list()] }))
+          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: contextStore.decorate([...sessions, ...shell.list()]) }))
           .catch(() => { /* runners are fail-safe; never crash the handler */ });
         break;
       case "renameSession":
@@ -662,6 +674,22 @@ export function startServer(deps: Deps = {}) {
               result = { ok: true }; break;
             case "notify.wire": result = doWire(p.tool, true); break;
             case "notify.unwire": result = doWire(p.tool, false); break;
+            // 需求 5：接管 CC 的 statusLine 取上下文用量。与 notify.wire 分开
+            // 是因为它不产生通知，只取数字；混进工具列表会让用户以为开了它
+            // 就能收到推送。
+            case "context.wire":
+            case "context.unwire": {
+              const on = method === "context.wire";
+              // chain 路径与 statusline 子命令的读取端同源（chainPathOf），
+              // 两边各写各的会导致解除接线时还原不回用户原来的状态栏。
+              const chainPath = chainPathOf(process.env);
+              const r = on
+                ? wireStatusline(toolPaths.claude, chainPath, agentBin)
+                : unwireStatusline(toolPaths.claude, chainPath, agentBin);
+              if (r.ok) { const c = notify.config(); c.contextStatusline = on; notify.setConfig(c); }
+              result = r;
+              break;
+            }
             case "notify.testWebhook": {
               // async self-answer, same pattern as update.check/update.apply
               // above: sends its own response and returns early rather than
@@ -849,13 +877,25 @@ export function startServer(deps: Deps = {}) {
         const ip = srv.requestIP(req)?.address ?? "";
         if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
         if (req.headers.get("authorization") !== `Bearer ${config.notifyToken}`) return new Response("Unauthorized", { status: 401 });
-        const b = (await req.json().catch(() => null)) as { sessionId?: string; title?: string; body?: string } | null;
+        const b = (await req.json().catch(() => null)) as {
+          sessionId?: string; title?: string; body?: string;
+          tool?: string; ctxUsed?: number; ctxTotal?: number; contextOnly?: boolean;
+        } | null;
         if (!b?.sessionId) return new Response("bad", { status: 400 });
-        void notify.dispatch({ sessionId: b.sessionId, title: b.title ?? b.sessionId, body: b.body ?? "" });
+        if (isAiTool(b.tool) && (typeof b.ctxUsed === "number" || typeof b.ctxTotal === "number")) {
+          contextStore.set(b.sessionId, b.tool, {
+            used: typeof b.ctxUsed === "number" ? b.ctxUsed : 0,
+            total: typeof b.ctxTotal === "number" ? b.ctxTotal : undefined,
+          }, Date.now());
+          void pushSessions();
+        }
+        if (!b.contextOnly) {
+          void notify.dispatch({ sessionId: b.sessionId, title: b.title ?? b.sessionId, body: b.body ?? "" });
+        }
         return Response.json({ ok: true });
       }
       if (url.pathname.startsWith("/preview/")) {
-        return buildPreviewResponse(previewTokens, url, Date.now());
+        return buildPreviewResponse(previewTokens, url, Date.now(), req.headers.get("range"));
       }
       if (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin-api/")) {
         if (!config.adminEnabled) return new Response("Not found", { status: 404 });
@@ -1027,7 +1067,7 @@ if (import.meta.main) {
         if (!process.stdin.isTTY) {
           try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
         }
-        const p = parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
+        const p = await parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
         if (!p) { process.exit(0); return; }      // not a PocketShell session
         const url = process.env.POCKETSHELL_NOTIFY_URL;
         const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
@@ -1038,11 +1078,78 @@ if (import.meta.main) {
             await fetch(url, {
               method: "POST",
               headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-              body: JSON.stringify(p),
+              body: JSON.stringify({
+                sessionId: p.sessionId,
+                title: p.title,
+                body: p.body,
+                tool: p.tool,
+                ctxUsed: p.ctx?.used,
+                ctxTotal: p.ctx?.total,
+              }),
               signal: ctl.signal,
             }).catch(() => {});
           } finally {
             clearTimeout(timeoutId);
+          }
+        }
+      } catch { /* never disturb the agent's normal run */ }
+      process.exit(0);
+    })();
+  } else if (cliArgv[0] === "statusline") {
+    void (async () => {
+      try {
+        let stdin = "";
+        if (!process.stdin.isTTY) {
+          try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
+        }
+        const payload = parseStatuslinePayload(stdin);
+        if (payload) {
+          // Claude Code 的 statusLine 是单值字段；我们把用户原命令链式包装后存到
+          // chain 文件，运行时先跑原命令并把它的 stdout 原样打印，保证 CC 界面
+          // 看起来和接线前一样。超时或失败则打印空行，绝不让状态栏挂掉。
+          const chain = readChain(chainPathOf(process.env));
+          if (chain?.command) {
+            try {
+              const proc = Bun.spawn(["/bin/sh", "-c", chain.command], {
+                stdin: new TextEncoder().encode(stdin),
+                stdout: "pipe",
+                stderr: "ignore",
+              });
+              const timeoutId = setTimeout(() => { try { proc.kill(); } catch {} }, 2000);
+              const stdout = await new Response(proc.stdout).text().finally(() => clearTimeout(timeoutId));
+              process.stdout.write(stdout);
+            } catch {
+              process.stdout.write("\n");
+            }
+          } else {
+            process.stdout.write("\n");
+          }
+          const url = process.env.POCKETSHELL_NOTIFY_URL;
+          const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
+          // 上报的 sessionId 必须是 PocketShell 的会话名（tmux 会话名），
+          // 不是 payload.sessionId —— 后者是 Claude Code 自己的 UUID。
+          // ContextStore 按 SessionMeta.name 键控（decorate 用 s.name 查表），
+          // 用 CC 的 UUID 存进去永远查不出来，分割条对 claude 恒不显示。
+          const psSession = process.env.POCKETSHELL_NOTIFY_SESSION;
+          if (url && token && psSession) {
+            const ctl = new AbortController();
+            const timeoutId = setTimeout(() => ctl.abort(), 3000);
+            try {
+              await fetch(url, {
+                method: "POST",
+                headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+                body: JSON.stringify({
+                  sessionId: psSession,
+                  tool: "claude",
+                  ctxUsed: payload.used,
+                  ctxTotal: payload.total,
+                  contextOnly: true,
+                }),
+                signal: ctl.signal,
+              }).catch(() => {});
+            } finally {
+              clearTimeout(timeoutId);
+            }
           }
         }
       } catch { /* never disturb the agent's normal run */ }

@@ -11,12 +11,15 @@ export interface WebhookCfg {
   method?: string; headers?: Record<string, string>; lastError?: string | null;
 }
 export interface NotifyConfig {
-  tools: { claude: boolean; codex: boolean; opencode: boolean };
+  tools: { claude: boolean; codex: boolean; opencode: boolean; kimi: boolean };
   webPush: boolean; includeSummary: boolean; dedupeMs: number; webhooks: WebhookCfg[];
+  /** 需求 5：接管 Claude Code 的 statusLine 以获取上下文用量。与 tools.* 不同
+   *  ——它不产生任何通知，只取数字，所以单列一个字段而不是塞进 tools。 */
+  contextStatusline: boolean;
 }
 
 export function defaultNotifyConfig(): NotifyConfig {
-  return { tools: { claude: false, codex: false, opencode: false }, webPush: false, includeSummary: true, dedupeMs: 10000, webhooks: [] };
+  return { tools: { claude: false, codex: false, opencode: false, kimi: false }, webPush: false, includeSummary: true, dedupeMs: 10000, webhooks: [], contextStatusline: false };
 }
 
 // Validates/coerces an arbitrary parsed value (disk JSON or a client RPC
@@ -30,11 +33,12 @@ export function sanitizeNotifyConfig(raw: unknown): NotifyConfig {
   const tools = j?.tools as Record<string, unknown> | undefined;
   const dedupeMs = typeof j?.dedupeMs === "number" && Number.isFinite(j.dedupeMs) ? j.dedupeMs : d.dedupeMs;
   return {
-    tools: { claude: !!tools?.claude, codex: !!tools?.codex, opencode: !!tools?.opencode },
+    tools: { claude: !!tools?.claude, codex: !!tools?.codex, opencode: !!tools?.opencode, kimi: !!tools?.kimi },
     webPush: !!j?.webPush,
     includeSummary: j?.includeSummary !== false,
     dedupeMs,
     webhooks: Array.isArray(j?.webhooks) ? (j.webhooks as WebhookCfg[]) : [],
+    contextStatusline: !!j?.contextStatusline,
   };
 }
 

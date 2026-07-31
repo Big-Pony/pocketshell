@@ -6,7 +6,7 @@ import { defaultNotifyConfig, loadNotifyConfig, saveNotifyConfig, sanitizeNotify
 
 test("default has all channels off", () => {
   const c = defaultNotifyConfig();
-  expect(c.tools).toEqual({ claude: false, codex: false, opencode: false });
+  expect(c.tools).toEqual({ claude: false, codex: false, opencode: false, kimi: false });
   expect(c.webPush).toBe(false);
   expect(c.includeSummary).toBe(true);
   expect(c.dedupeMs).toBe(10000);
@@ -48,4 +48,30 @@ test("sanitizeNotifyConfig corrects malformed webhooks to empty array", () => {
   const wh = [{ id: "a", name: "n", kind: "slack", url: "https://x", enabled: true }];
   const c4 = sanitizeNotifyConfig({ webhooks: wh });
   expect(c4.webhooks).toEqual(wh);
+});
+
+test("默认配置含 kimi 且为关", () => {
+  const d = defaultNotifyConfig();
+  expect(d.tools.kimi).toBe(false);
+});
+
+test("sanitize 保留 kimi 开关", () => {
+  const c = sanitizeNotifyConfig({ tools: { claude: true, kimi: true } });
+  expect(c.tools.kimi).toBe(true);
+  expect(c.tools.claude).toBe(true);
+  expect(c.tools.codex).toBe(false);
+});
+
+test("sanitize 对缺失的 kimi 字段回落为 false", () => {
+  const c = sanitizeNotifyConfig({ tools: { claude: true } });
+  expect(c.tools.kimi).toBe(false);
+});
+
+test("默认配置含 contextStatusline 且为关", () => {
+  expect(defaultNotifyConfig().contextStatusline).toBe(false);
+});
+
+test("sanitize 保留 contextStatusline", () => {
+  expect(sanitizeNotifyConfig({ contextStatusline: true }).contextStatusline).toBe(true);
+  expect(sanitizeNotifyConfig({}).contextStatusline).toBe(false);
 });

@@ -11,6 +11,21 @@ describe("previewKind", () => {
     expect(previewKind("/x/a.ts")).toBe("code");
     expect(previewKind("/x/Makefile")).toBe("code");
   });
+
+  it("识别视频扩展名", () => {
+    expect(previewKind("/a/clip.mp4")).toBe("video");
+    expect(previewKind("/a/clip.MP4")).toBe("video");
+    expect(previewKind("/a/clip.webm")).toBe("video");
+    expect(previewKind("/a/clip.mov")).toBe("video");
+    expect(previewKind("/a/clip.m4v")).toBe("video");
+    expect(previewKind("/a/clip.ogv")).toBe("video");
+  });
+
+  it("非视频扩展名不误判", () => {
+    expect(previewKind("/a/notes.md")).toBe("markdown");
+    expect(previewKind("/a/mp4")).toBe("code");        // 无扩展名，只是叫 mp4
+    expect(previewKind("/a/x.mp3")).toBe("code");      // 音频不在本期范围
+  });
 });
 
 describe("previewOrigin", () => {

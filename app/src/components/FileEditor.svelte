@@ -141,6 +141,9 @@
       extensions: [
         lineNumbers(), history(), drawSelection(), indentOnInput(), bracketMatching(),
         highlightActiveLine(), indentUnit.of("  "),
+        // 手机端不做横向滚动：长行软换行以适配屏宽。CM6 的 lineNumbers()
+        // 原生处理软换行（一个逻辑行一个行号，续行留空），无需额外对齐处理。
+        EditorView.lineWrapping,
         search({ top: true, createPanel: makeSearchPanel }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         syntaxHighlighting(hl), theme,
