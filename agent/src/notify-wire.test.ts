@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 
 import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi } from "./notify-wire";
 
 const bin = "/usr/local/bin/pocketshell-agent";
-const cmd = `${bin} notify`;
+const cmd = `${bin} notify claude`;
 
 test("wire into empty/missing settings creates Notification hook", () => {
   const dir = mkdtempSync(join(tmpdir(), "cc-"));
@@ -64,7 +64,7 @@ test("codex wire inserts notify as first line", () => {
   const r = wireCodex(f, bin);
   expect(r.ok).toBe(true);
   const txt = readFileSync(f, "utf8");
-  expect(txt.split("\n")[0]).toBe(`notify = ["${bin}", "notify"]`); // before [tui]
+  expect(txt.split("\n")[0]).toBe(`notify = ["${bin}", "notify", "codex"]`); // before [tui]
 });
 
 test("codex wire is idempotent", () => {
@@ -149,7 +149,7 @@ test("kimi wire 写入 Stop hook", () => {
   expect(txt).toContain("# pocketshell-notify");
   expect(txt).toContain("[[hooks]]");
   expect(txt).toContain(`event = "Stop"`);
-  expect(txt).toContain(`command = "${bin} notify"`);
+  expect(txt).toContain(`command = "${bin} notify kimi"`);
 });
 
 test("kimi wire 只写 event 和 command 两个字段（多写会让 kimi 启动失败）", () => {
@@ -175,7 +175,7 @@ test("kimi wire 保留用户已有配置与 hooks", () => {
   expect(txt).toContain(`default_model = "kimi-code/k3"`);
   expect(txt).toContain(`theme = "dark"`);
   expect(txt).toContain(`command = "my-check.sh"`);
-  expect(txt).toContain(`command = "${bin} notify"`);
+  expect(txt).toContain(`command = "${bin} notify kimi"`);
 });
 
 test("kimi unwire 只删我们那块，保留用户 hooks", () => {
