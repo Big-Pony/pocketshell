@@ -57,3 +57,40 @@ const MIME: Record<string, string> = {
 export function contentTypeFor(path: string): string {
   return MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
+
+// HTTP Range 解析（RFC 7233 单区间）。视频拖进度条必须有它——浏览器会对
+// video 源发 Range 请求，不认 206 就没法 seek。
+//
+// 返回值三态，调用方据此分流：
+//   null            → 无 Range / 畸形 / 多区间 → 走完整 200 响应
+//   "unsatisfiable" → 区间越界 → 416
+//   {start, end}    → 闭区间，含端点的字节下标 → 206
+//
+// 多区间（bytes=0-100,200-300）刻意不支持：浏览器的媒体请求从不用它，
+// 支持它要引入 multipart/byteranges 编码，收益为零。
+export function parseRange(
+  header: string | null,
+  fileSize: number,
+): { start: number; end: number } | null | "unsatisfiable" {
+  if (!header) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m) return null;                      // 单位不对 / 多区间 / 完全畸形
+  const [, rawStart, rawEnd] = m;
+  if (rawStart === "" && rawEnd === "") return null;   // "bytes=-" 无意义
+
+  if (rawStart === "") {
+    // 后缀形式 bytes=-N：末尾 N 字节。N 超过文件大小就是整个文件。
+    const suffix = Number(rawEnd);
+    if (!Number.isFinite(suffix) || suffix <= 0) return null;
+    if (fileSize === 0) return "unsatisfiable";
+    return { start: Math.max(0, fileSize - suffix), end: fileSize - 1 };
+  }
+
+  const start = Number(rawStart);
+  if (!Number.isFinite(start)) return null;
+  if (fileSize === 0 || start >= fileSize) return "unsatisfiable";
+  // end 缺省即到末尾；超出末尾则截断（浏览器常发 bytes=0- 或超大 end）
+  const end = rawEnd === "" ? fileSize - 1 : Math.min(Number(rawEnd), fileSize - 1);
+  if (!Number.isFinite(end) || end < start) return "unsatisfiable";
+  return { start, end };
+}
