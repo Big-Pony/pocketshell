@@ -15,6 +15,7 @@
 // 才被检查，通常轮不到。
 
 export type AiTool = "claude" | "kimi" | "codex" | "opencode";
+export const AI_TOOLS: readonly AiTool[] = ["claude", "kimi", "codex", "opencode"];
 
 export interface AiContext {
   used: number;

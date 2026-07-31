@@ -42,3 +42,15 @@ test("order change is a diff (deterministic list order; costs one broadcast)", (
   const other = { ...base, name: "build" };
   expect(sessionListsEqual([base, other], [other, base])).toBe(false);
 });
+
+test("token 字段变化会被判定为不相等（否则广播被 diff 吃掉，功能静默失效）", () => {
+  const bare: SessionMeta = {
+    name: "w", kind: "tmux", state: "run", cols: 80, rows: 24,
+    lastLine: "", createdAt: 0, attached: true,
+  };
+  expect(sessionMetasEqual(bare, { ...bare, ctxUsed: 100 })).toBe(false);
+  expect(sessionMetasEqual({ ...bare, ctxUsed: 100 }, { ...bare, ctxUsed: 200 })).toBe(false);
+  expect(sessionMetasEqual({ ...bare, ctxTotal: 1 }, { ...bare, ctxTotal: 2 })).toBe(false);
+  expect(sessionMetasEqual({ ...bare, ctxTool: "kimi" }, { ...bare, ctxTool: "claude" })).toBe(false);
+  expect(sessionMetasEqual({ ...bare, ctxUsed: 100 }, { ...bare, ctxUsed: 100 })).toBe(true);
+});

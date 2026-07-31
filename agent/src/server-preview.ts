@@ -35,8 +35,15 @@ export function buildPreviewResponse(
   if (!abs) return new Response("forbidden", { status: 403 });
 
   let size: number;
-  try { size = statSync(abs).size; }
-  catch { return new Response("not found", { status: 404 }); }
+  try {
+    const st = statSync(abs);
+    // 目录必须显式挡掉：statSync 对目录是成功的（size 是 inode 大小），
+    // 放过去会给出 200 + 一个读取时才抛 "Directories cannot be read like
+    // files" 的 body。改用 statSync/Bun.file 之前，readFileSync(dir) 抛
+    // EISDIR 被下面的 catch 兜成 404 —— 这条判断把那个行为找回来。
+    if (st.isDirectory()) return new Response("not found", { status: 404 });
+    size = st.size;
+  } catch { return new Response("not found", { status: 404 }); }
 
   const ct = contentTypeFor(abs);
   // Bun.file() is lazy: the body streams from disk instead of being read into

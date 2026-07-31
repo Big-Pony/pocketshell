@@ -11,6 +11,12 @@ export interface SessionMeta {
   lastLine: string;
   createdAt: number;
   attached: boolean; // 本 Agent 是否已挂 PTY 纳管；外部会话为 false
+  // AI 上下文用量（需求 5）。由工具自己的 hook / statusLine 在回合结束时
+  // 推上来，没跑 AI 或还没跑完一轮时三者皆缺省 —— 分割条按「数据缺失即
+  // 整块隐藏」处理，不显示占位符。
+  ctxTool?: string;   // "claude" | "kimi" | "codex" | "opencode"
+  ctxUsed?: number;   // 当前上下文已用 token
+  ctxTotal?: number;  // 上下文窗口总量；claude 未接 statusLine 时缺省
 }
 
 export interface DeviceInfo {

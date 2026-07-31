@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -125,4 +125,17 @@ test("Range 请求仍受 token 与穿越保护约束", () => {
   const tok = pt.mint(dir, "devA", 0);
   expect(buildPreviewResponse(pt, new URL(`http://x/preview/badtoken/v.mp4`), 0, "bytes=0-9").status).toBe(403);
   expect(buildPreviewResponse(pt, new URL(`http://x/preview/${tok}/../etc/passwd`), 0, "bytes=0-9").status).toBe(403);
+});
+
+// 回归防护：改用 statSync + Bun.file() 后，目录曾一度给出 200 + 读 body
+// 时抛 "Directories cannot be read like files"。main 上 readFileSync(dir)
+// 抛 EISDIR 被兜成 404，这条测试确保那个行为不再丢失。
+test("请求目录返回 404，且 body 可安全读取", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pvd-"));
+  mkdirSync(join(dir, "sub"));
+  const pt = new PreviewTokens();
+  const tok = pt.mint(dir, "devA", 0);
+  const res = buildPreviewResponse(pt, new URL(`http://x/preview/${tok}/sub`), 0);
+  expect(res.status).toBe(404);
+  await res.text(); // 不得抛异常
 });
