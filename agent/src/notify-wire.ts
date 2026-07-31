@@ -148,11 +148,29 @@ export function unwireOpencode(pluginDir: string): WireResult {
 //      pydantic 模型，多写任何字段会让整个 config.toml 加载失败（kimi 起不来）。
 //      matcher/timeout 一律不写，用默认值。
 //
-// [[hooks]] 是数组表，追加不与用户已有条目冲突（与 codex 的单键 notify=
-// 不同），所以没有 conflict 分支。用标记注释锚定我们这块以便精确移除。
+// ⚠️ 真机踩坑（2026-07-31，写坏过用户的 kimi）：**不能无脑追加 [[hooks]]**。
+// kimi 生成的默认 config.toml 里带一行 `hooks = []`，此时再追加一个
+// `[[hooks]]` 数组表，TOML 规范判定同一个键被定义两次，kimi 直接拒绝加载：
+//   Invalid TOML: Key "hooks" already exists. at line 95 col 0
+// 于是 kimi 完全起不来——这正是第 3 条注释警告的那类后果，只是触发点在
+// 键的形态而不是字段数量。
+//
+// 因此按现场形态分派（四种都实测过 kimi 能正常加载）：
+//   A. 有 `hooks = [...]`（含空数组）→ 往该数组里插一个**行内表**，不新增表头
+//   B. 没有 hooks 键，但有 `[[hooks]]` 数组表 → 追加一个 [[hooks]] 块
+//   C. 两者都没有 → 追加一个 [[hooks]] 块
+// 标记注释都放在同一行/紧邻行，以便 unwire 精确定位。
 const KIMI_MARK = "# pocketshell-notify";
+const kimiInline = (agentBin: string) =>
+  `{ event = "Stop", command = "${agentBin} notify kimi" }`;
 const kimiBlock = (agentBin: string) =>
   `${KIMI_MARK}\n[[hooks]]\nevent = "Stop"\ncommand = "${agentBin} notify kimi"\n`;
+
+// 找到顶层的 `hooks = [` 那一行（不能匹配 `[mcp]` 段里的同名键，故要求
+// 行首无缩进；kimi 的默认配置就是顶层裸键）。返回行号，找不到返回 -1。
+function findHooksArrayLine(lines: string[]): number {
+  return lines.findIndex((l) => /^hooks\s*=\s*\[/.test(l));
+}
 
 export function wireKimi(configPath: string, agentBin: string): WireResult {
   // 判定 kimi 是否安装：配置目录存在即可。不存在就不建 —— 与 opencode 的
@@ -166,8 +184,33 @@ export function wireKimi(configPath: string, agentBin: string): WireResult {
     catch (e) { return { ok: false, reason: "read_error", detail: String(e) }; }
   }
   if (text.includes(KIMI_MARK)) return { ok: true }; // 幂等
-  const next = text.endsWith("\n") || text === "" ? text + kimiBlock(agentBin)
-                                                  : text + "\n" + kimiBlock(agentBin);
+
+  const lines = text.split("\n");
+  const hooksLine = findHooksArrayLine(lines);
+  let next: string;
+
+  if (hooksLine >= 0) {
+    // 形态 A：已有 hooks 数组。必须往数组里塞行内表——另起 [[hooks]] 会
+    // 撞成 "Key hooks already exists" 让 kimi 整个起不来。
+    const l = lines[hooksLine];
+    const open = l.indexOf("[");
+    const close = l.lastIndexOf("]");
+    // 只处理单行数组（kimi 自己生成的就是单行）。多行数组形态不认识时
+    // 宁可报错也不要瞎改——写坏 config.toml 的代价是 kimi 完全打不开。
+    if (close <= open) {
+      return { ok: false, reason: "conflict", detail: "multi-line hooks array; edit ~/.kimi/config.toml manually" };
+    }
+    const inner = l.slice(open + 1, close).trim();
+    const merged = inner === "" ? kimiInline(agentBin) : `${inner}, ${kimiInline(agentBin)}`;
+    lines[hooksLine] = `hooks = [${merged}]  ${KIMI_MARK}`;
+    next = lines.join("\n");
+  } else {
+    // 形态 B/C：没有 hooks 裸键。追加数组表是安全的——TOML 允许同名
+    // [[hooks]] 多次出现（那正是数组表的语义）。
+    next = text.endsWith("\n") || text === "" ? text + kimiBlock(agentBin)
+                                              : text + "\n" + kimiBlock(agentBin);
+  }
+
   try { writeFileSync(configPath, next); }
   catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
   return { ok: true };
@@ -188,6 +231,18 @@ export function stripKimiBlock(text: string): string {
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
+    // 形态 A 的还原：带标记的 hooks 行内数组，摘掉我们那一项，
+    // 保留用户的其余项；只剩空数组就还原成 `hooks = []`。
+    if (lines[i].includes(KIMI_MARK) && /^hooks\s*=\s*\[/.test(lines[i])) {
+      const l = lines[i];
+      const open = l.indexOf("[");
+      const close = l.lastIndexOf("]");
+      const inner = close > open ? l.slice(open + 1, close) : "";
+      const kept = splitInlineTables(inner).filter((t) => !/pocketshell-agent["']?\s+notify/.test(t) && !t.includes("notify kimi"));
+      out.push(`hooks = [${kept.join(", ")}]`);
+      i++;
+      continue;
+    }
     if (lines[i].trim() !== KIMI_MARK) { out.push(lines[i]); i++; continue; }
     i++;                                             // 跳过标记行
     if (i < lines.length && lines[i].trim() === "[[hooks]]") i++;  // 跳过表头
@@ -195,4 +250,22 @@ export function stripKimiBlock(text: string): string {
     while (i < lines.length && lines[i].trim() === "") i++;        // 吞掉块后空行
   }
   return out.join("\n");
+}
+
+// 把 `{a=1}, {b=2}` 这样的行内表列表按顶层逗号切开（不能直接 split(",")：
+// 表内部也有逗号）。只需处理 `{}` 一层嵌套与引号，kimi 的 hooks 项就这形态。
+function splitInlineTables(inner: string): string[] {
+  const out: string[] = [];
+  let depth = 0, quote = "", cur = "";
+  for (const ch of inner) {
+    if (quote) { cur += ch; if (ch === quote) quote = ""; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+    if (ch === "," && depth === 0) { const t = cur.trim(); if (t) out.push(t); cur = ""; continue; }
+    cur += ch;
+  }
+  const t = cur.trim();
+  if (t) out.push(t);
+  return out;
 }

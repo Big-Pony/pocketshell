@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi } from "./notify-wire";
 
+const KIMI_MARK_LITERAL = "# pocketshell-notify";
 const bin = "/usr/local/bin/pocketshell-agent";
 const cmd = `${bin} notify claude`;
 
@@ -226,4 +227,68 @@ test("kimi 配置文件不存在但目录在时可创建", () => {
 test("kimi unwire 文件不存在时直接成功", () => {
   const f = kimiFx();
   expect(unwireKimi(f).ok).toBe(true);
+});
+
+// ⚠️ 回归防护：这一组对应 2026-07-31 写坏用户 kimi 的真机事故。
+// kimi 默认 config.toml 带一行 `hooks = []`，此时再追加 [[hooks]] 数组表，
+// TOML 判定 "Key hooks already exists"，kimi 完全起不来。
+test("kimi wire: 已有 hooks = [] 时插行内表，不新增 [[hooks]] 表头", () => {
+  const f = kimiFx(`default_model = "k3"\nhooks = []\ntheme = "dark"\n`);
+  const r = wireKimi(f, bin);
+  expect(r.ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  // 关键：不能出现 [[hooks]] 表头，否则与 hooks= 键撞车
+  expect(txt).not.toContain("[[hooks]]");
+  expect(txt).toContain(`hooks = [{ event = "Stop", command = "${bin} notify kimi" }]`);
+  // 用户其余配置原样保留
+  expect(txt).toContain(`default_model = "k3"`);
+  expect(txt).toContain(`theme = "dark"`);
+  // 全文只能有一处 hooks 键定义
+  expect(txt.split("\n").filter((l) => /^hooks\s*=/.test(l)).length).toBe(1);
+});
+
+test("kimi wire: 已有非空 hooks 数组时追加我们那项，保留用户的", () => {
+  const f = kimiFx(`hooks = [{ event = "PreToolUse", command = "mycheck.sh" }]\n`);
+  expect(wireKimi(f, bin).ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain(`event = "PreToolUse"`);
+  expect(txt).toContain(`command = "mycheck.sh"`);
+  expect(txt).toContain(`command = "${bin} notify kimi"`);
+  expect(txt).not.toContain("[[hooks]]");
+});
+
+test("kimi unwire: 行内表形态下摘掉我们那项，保留用户的", () => {
+  const f = kimiFx(`hooks = [{ event = "PreToolUse", command = "mycheck.sh" }]\n`);
+  wireKimi(f, bin);
+  expect(unwireKimi(f).ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain(`command = "mycheck.sh"`);
+  expect(txt).not.toContain("notify kimi");
+  expect(txt).not.toContain(KIMI_MARK_LITERAL);
+});
+
+test("kimi unwire: 原本是空数组的还原成 hooks = []", () => {
+  const f = kimiFx(`hooks = []\n`);
+  wireKimi(f, bin);
+  expect(unwireKimi(f).ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain("hooks = []");
+  expect(txt).not.toContain("notify kimi");
+});
+
+test("kimi wire: 没有 hooks 键时才用 [[hooks]] 数组表", () => {
+  const f = kimiFx(`default_model = "k3"\n`);
+  expect(wireKimi(f, bin).ok).toBe(true);
+  const txt = readFileSync(f, "utf8");
+  expect(txt).toContain("[[hooks]]");
+  expect(txt).toContain(`event = "Stop"`);
+});
+
+test("kimi wire: 多行 hooks 数组不瞎改，报 conflict 让用户手动处理", () => {
+  const f = kimiFx(`hooks = [\n  { event = "PreToolUse", command = "a.sh" },\n]\n`);
+  const r = wireKimi(f, bin);
+  expect(r.ok).toBe(false);
+  expect(r.reason).toBe("conflict");
+  // 用户文件一字未动
+  expect(readFileSync(f, "utf8")).toContain(`command = "a.sh"`);
 });
