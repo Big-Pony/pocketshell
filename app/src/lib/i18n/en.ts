@@ -394,6 +394,7 @@ export default {
     loadFailed: "Failed to load",
     needRoot: "Set a project root in the file tree first",
     branches: "Branches (read-only)",
+    refresh: "Refresh",
     branchTip: "Switch branches from the terminal or Claude",
     changes: "Working tree changes",
     clean: "Working tree clean",

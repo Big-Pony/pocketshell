@@ -394,6 +394,7 @@ export default {
     loadFailed: "加载失败",
     needRoot: "请先在目录树里「设为项目根」",
     branches: "分支（只读）",
+    refresh: "刷新",
     branchTip: "切换分支请在终端 / Claude 里操作",
     changes: "工作区改动",
     clean: "工作区干净",
