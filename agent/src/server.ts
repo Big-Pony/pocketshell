@@ -855,7 +855,7 @@ export function startServer(deps: Deps = {}) {
         return Response.json({ ok: true });
       }
       if (url.pathname.startsWith("/preview/")) {
-        return buildPreviewResponse(previewTokens, url, Date.now());
+        return buildPreviewResponse(previewTokens, url, Date.now(), req.headers.get("range"));
       }
       if (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin-api/")) {
         if (!config.adminEnabled) return new Response("Not found", { status: 404 });

@@ -51,6 +51,8 @@ const MIME: Record<string, string> = {
   ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json", ".wasm": "application/wasm",
   ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
+  ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+  ".mov": "video/quicktime", ".ogv": "video/ogg",
   ".map": "application/json",
 };
 
