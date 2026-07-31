@@ -114,6 +114,22 @@ test("opencode unwire deletes plugin file", () => {
   expect(existsSync(join(pluginDir, "pocketshell-notify.js"))).toBe(false);
 });
 
+test("opencode 插件源码里带上 token 上报字段", () => {
+  const dir = mkdtempSync(join(tmpdir(), "oc-"));
+  const pluginDir = join(dir, "plugin");
+  wireOpencode(pluginDir);
+  const src = readFileSync(join(pluginDir, "pocketshell-notify.js"), "utf8");
+  expect(src).toContain("ctxUsed");
+  expect(src).toContain('tool: "opencode"');
+  // ctxTotal 刻意不带：插件里拿不到当前模型的窗口大小（要查 models.dev
+  // 的 catalog），编造一个假总量比不显示更糟。分割条会退化为只显示已用，
+  // 这是 formatContext 已覆盖的设计路径。
+  expect(src).not.toContain("ctxTotal");
+  // 取不到 token 也必须发通知——token 是搭车的，不能反过来卡住主线
+  expect(src).toContain("session.idle");
+  expect(src).toContain("catch");
+});
+
 // kimi 的接线判定「已安装」的依据是 configPath 的父目录（~/.kimi）存在，
 // 与 opencode 的 opencode_not_found 同款保守策略：不给未装的工具建目录。
 function kimiFx(seed?: string) {
