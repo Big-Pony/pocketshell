@@ -283,6 +283,7 @@ export default {
     pairPh: "Paste a pocketshell-pair:… pairing string",
     namePh: "This device's name, e.g. iPhone",
     pairBtn: "Pair & connect",
+    fromClipboard: "Pairing string detected from clipboard",
     err: {
       noName: "Please enter a name for this device",
     },

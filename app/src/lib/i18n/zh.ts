@@ -283,6 +283,7 @@ export default {
     pairPh: "粘贴 pocketshell-pair:… 配对串",
     namePh: "本设备名称，如 iPhone",
     pairBtn: "配对并连接",
+    fromClipboard: "已从剪贴板识别配对串",
     err: {
       noName: "请填写本设备名称",
     },

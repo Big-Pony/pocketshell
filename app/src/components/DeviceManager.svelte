@@ -7,9 +7,11 @@
   import { parsePairingString } from "../lib/pairing";
   import { applyPairing } from "../lib/keystore";
 
-  let { conn, onClose }: { conn: Connection; onClose: () => void } = $props();
+  let { conn, onClose, prefill = "" }: { conn: Connection; onClose: () => void; prefill?: string } = $props();
 
-  let pasteText = $state("");
+  // svelte-ignore state_referenced_locally
+  let pasteText = $state(prefill);
+  const fromClipboard = prefill !== "";
   let deviceName = $state("");
   let error = $state("");
   let devices = $state<DeviceInfo[]>([]);
@@ -48,6 +50,7 @@
     <section class="dm-pair">
       <h3>{$t('devices.pairTitle')}</h3>
       <textarea bind:value={pasteText} placeholder={$t('devices.pairPh')} rows="3"></textarea>
+      {#if fromClipboard}<p class="dm-hint">{$t('devices.fromClipboard')}</p>{/if}
       <input bind:value={deviceName} placeholder={$t('devices.namePh')} />
       <button class="pair-btn" onclick={submitPairing}>{$t('devices.pairBtn')}</button>
       {#if error}<p class="dm-error">{error}</p>{/if}
@@ -71,6 +74,7 @@
 </div>
 
 <style>
+  .dm-hint { color: var(--ok); font-size: 0.68rem; margin: 2px 0 4px; }
   .dm-overlay {
     position: fixed;
     inset: 0;

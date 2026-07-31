@@ -6,6 +6,7 @@
   import type { Settings } from "../lib/settings";
   import { urlBase64ToUint8Array, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import DeviceManager from "./DeviceManager.svelte";
+  import { detectPairing } from "../lib/pair-detect";
   import HintManager from "./HintManager.svelte";
   import OperationGuide from "./OperationGuide.svelte";
   import { hardReset } from "../lib/cache-admin";
@@ -21,7 +22,22 @@
   }
 
   let showDevices = $state(false);
+  let devicesPrefill = $state("");
   let showHints = $state(false);
+
+  // 剪贴板读取必须在 click handler 的 user gesture 内发起 —— 这是浏览器允许
+  // readText() 的唯一路径（Safari/iOS 无权限降级，Chrome 需已授权+有焦点）。
+  // 失败一律静默：iOS 上用户不点系统「粘贴」菜单就会抛 NotAllowedError，
+  // 那不是错误，手动粘贴即可，弹个报错反而莫名其妙。
+  async function openDevices() {
+    if (showDevices) { showDevices = false; return; }
+    devicesPrefill = "";
+    try {
+      const text = await navigator.clipboard?.readText?.();
+      devicesPrefill = detectPairing(text) ?? "";
+    } catch { /* 静默：见上方注释 */ }
+    showDevices = true;
+  }
   let showGuide = $state(false);
   let checkingUpdate = $state(false);
   async function checkNow() {
@@ -252,7 +268,7 @@
       <div class="label">{$t('settings.devices.label')}</div>
       <div class="desc">{$t('settings.devices.desc')}</div>
     </div>
-    <button class="btn" onclick={() => (showDevices = !showDevices)}>
+    <button class="btn" onclick={openDevices}>
       {showDevices ? $t('settings.devices.close') : $t('settings.devices.manage')}
     </button>
   </div>
@@ -403,7 +419,7 @@
   </div>
 </div>
 {#if showDevices}
-  <DeviceManager {conn} onClose={() => (showDevices = false)} />
+  <DeviceManager {conn} prefill={devicesPrefill} onClose={() => { showDevices = false; devicesPrefill = ""; }} />
 {/if}
 {#if showGuide}
   <OperationGuide onClose={() => (showGuide = false)} />
