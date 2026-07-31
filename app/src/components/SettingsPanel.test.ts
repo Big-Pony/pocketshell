@@ -53,6 +53,7 @@ test("expanding the notifications section shows tool toggles and the webhook add
   expect(getByText("Claude Code")).toBeInTheDocument();
   expect(getByText("Codex")).toBeInTheDocument();
   expect(getByText("opencode")).toBeInTheDocument();
+  expect(getByText("Kimi Code")).toBeInTheDocument();
   expect(getByText("Web Push")).toBeInTheDocument();
   expect(getByText("添加")).toBeInTheDocument();
 });

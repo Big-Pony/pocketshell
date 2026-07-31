@@ -473,7 +473,9 @@ export default {
       claude: "Claude Code",
       codex: "Codex",
       opencode: "opencode",
+      kimi: "Kimi Code",
     },
+    rewireHint: "Create a new session for this to take effect — existing sessions cannot see the injected environment variables",
     delivery: "Delivery",
     webpush: {
       label: "Web Push",
@@ -513,6 +515,7 @@ export default {
       read_error: "Failed to read config",
       conflict: "A conflicting notification hook already exists",
       opencode_not_found: "opencode config directory not found",
+      kimi_not_found: "kimi not found (~/.kimi does not exist)",
     },
   },
   guide: {

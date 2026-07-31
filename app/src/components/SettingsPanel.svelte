@@ -54,14 +54,14 @@
   // Section is collapsed by default (and every channel defaults off in
   // NotifyConfig itself) — nothing here touches the user's environment until
   // they explicitly flip a toggle.
-  const TOOLS: Array<"claude" | "codex" | "opencode"> = ["claude", "codex", "opencode"];
+  const TOOLS: Array<"claude" | "codex" | "opencode" | "kimi"> = ["claude", "codex", "opencode", "kimi"];
   const WEBHOOK_KINDS: WebhookKind[] = ["wecom", "feishu", "slack", "discord", "custom"];
-  const WIRE_REASONS = new Set(["parse_error", "write_error", "read_error", "conflict", "opencode_not_found"]);
+  const WIRE_REASONS = new Set(["parse_error", "write_error", "read_error", "conflict", "opencode_not_found", "kimi_not_found"]);
 
   let notifyOpen = $state(false);
   let notifyLoaded = $state(false);
   let cfg = $state<NotifyConfig>(defaultNotifyConfig());
-  let wireError = $state<Record<string, string | null>>({ claude: null, codex: null, opencode: null });
+  let wireError = $state<Record<string, string | null>>({ claude: null, codex: null, opencode: null, kimi: null });
   let webPushError = $state<string | null>(null);
   let addingWebhook = $state(false);
   let whForm = $state<{ name: string; kind: WebhookKind; url: string; secret: string; template: string }>(
@@ -96,7 +96,7 @@
 
   async function persistCfg() { await conn.notifySetConfig(cfg); }
 
-  async function toggleTool(tool: "claude" | "codex" | "opencode", on: boolean) {
+  async function toggleTool(tool: "claude" | "codex" | "opencode" | "kimi", on: boolean) {
     const r = on ? await conn.notifyWire(tool) : await conn.notifyUnwire(tool);
     if (!r.ok) { wireError = { ...wireError, [tool]: reasonText(r.reason, r.detail) }; return; }
     wireError = { ...wireError, [tool]: null };
@@ -325,6 +325,7 @@
         </div>
       </div>
     {/each}
+    <p class="nt-hint">{$t('notify.rewireHint')}</p>
 
     <div class="nsub">{$t('notify.delivery')}</div>
     <div class="set">
@@ -559,6 +560,7 @@
   .notify-head .label { color: var(--accent); font-weight: 600; }
   .chev { color: var(--dim); font-size: 0.8rem; }
   .err { color: var(--red); font-size: 11px; margin-top: 3px; }
+  .nt-hint { color: var(--dim); font-size: 0.66rem; margin-top: 6px; line-height: 1.5; }
   /* 分区标题走共同设计语言：mono 大写小标题 */
   .nsub {
     color: var(--dimmer);

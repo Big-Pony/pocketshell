@@ -34,7 +34,7 @@ import { downloadAndVerify, type Phase } from "./update-apply";
 import { signBinary, ensureLocalIdentity } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
 import { NotificationService, type DevicePresence } from "./notify-service";
-import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, type WireResult } from "./notify-wire";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi, type WireResult } from "./notify-wire";
 import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
@@ -281,11 +281,15 @@ export function startServer(deps: Deps = {}) {
     claude: pathJoin(homedir(), ".claude", "settings.json"),
     codex: pathJoin(homedir(), ".codex", "config.toml"),
     opencode: pathJoin(homedir(), ".config", "opencode", "plugin"),
+    // kimi 的配置在 ~/.kimi/config.toml —— 官方文档写的是 ~/.kimi-code，
+    // 但实现（share.py 的 get_share_dir）用的是 ~/.kimi。以实现为准。
+    kimi: pathJoin(homedir(), ".kimi", "config.toml"),
   };
-  const doWire = (tool: "claude" | "codex" | "opencode", on: boolean): WireResult => {
+  const doWire = (tool: "claude" | "codex" | "opencode" | "kimi", on: boolean): WireResult => {
     let r: WireResult;
     if (tool === "claude") r = on ? wireClaude(toolPaths.claude, agentBin) : unwireClaude(toolPaths.claude, agentBin);
     else if (tool === "codex") r = on ? wireCodex(toolPaths.codex, agentBin) : unwireCodex(toolPaths.codex);
+    else if (tool === "kimi") r = on ? wireKimi(toolPaths.kimi, agentBin) : unwireKimi(toolPaths.kimi);
     else r = on ? wireOpencode(toolPaths.opencode) : unwireOpencode(toolPaths.opencode);
     if (r.ok) { const c = notify.config(); c.tools[tool] = on; notify.setConfig(c); }
     return r;

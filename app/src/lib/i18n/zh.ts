@@ -473,7 +473,9 @@ export default {
       claude: "Claude Code",
       codex: "Codex",
       opencode: "opencode",
+      kimi: "Kimi Code",
     },
+    rewireHint: "接线后需重建会话才生效（已开着的会话读不到注入的环境变量）",
     delivery: "送达方式",
     webpush: {
       label: "Web Push",
@@ -513,6 +515,7 @@ export default {
       read_error: "读取配置失败",
       conflict: "已存在冲突的通知钩子",
       opencode_not_found: "未找到 opencode 配置目录",
+      kimi_not_found: "未检测到 kimi（~/.kimi 不存在）",
     },
   },
   guide: {

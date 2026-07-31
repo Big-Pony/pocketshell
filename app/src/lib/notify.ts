@@ -23,10 +23,10 @@ export interface WebhookCfg {
   method?: string; headers?: Record<string, string>; lastError?: string | null;
 }
 export interface NotifyConfig {
-  tools: { claude: boolean; codex: boolean; opencode: boolean };
+  tools: { claude: boolean; codex: boolean; opencode: boolean; kimi: boolean };
   webPush: boolean; includeSummary: boolean; dedupeMs: number; webhooks: WebhookCfg[];
 }
 
 export function defaultNotifyConfig(): NotifyConfig {
-  return { tools: { claude: false, codex: false, opencode: false }, webPush: false, includeSummary: true, dedupeMs: 10000, webhooks: [] };
+  return { tools: { claude: false, codex: false, opencode: false, kimi: false }, webPush: false, includeSummary: true, dedupeMs: 10000, webhooks: [] };
 }
