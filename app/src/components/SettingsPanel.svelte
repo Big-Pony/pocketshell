@@ -4,7 +4,7 @@
   import { tr } from "../lib/i18n";
   import type { Connection } from "../lib/connection";
   import type { Settings } from "../lib/settings";
-  import { urlBase64ToUint8Array, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
+  import { urlBase64ToUint8Array, webPushErrorKey, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import DeviceManager from "./DeviceManager.svelte";
   import { detectPairing } from "../lib/pair-detect";
   import HintManager from "./HintManager.svelte";
@@ -134,7 +134,10 @@
       cfg = { ...cfg, webPush: true };
       await persistCfg();
     } catch (e) {
-      webPushError = e instanceof Error ? e.message : String(e);
+      // 认得出的失败给中文解释（最常见：连不上 FCM），认不出的原样显示英文，
+      // 不吞错误。
+      const key = webPushErrorKey(e);
+      webPushError = key ? tr(key) : e instanceof Error ? e.message : String(e);
     }
   }
 

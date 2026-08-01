@@ -8,6 +8,20 @@ export function urlBase64ToUint8Array(base64: string): Uint8Array {
   return out;
 }
 
+// 浏览器订阅失败时抛的是给开发者看的英文原文（Chrome 最典型的一句
+// "Registration failed - push service error"），用户看到只会一脸茫然。这里把
+// 认得出的几种映射成 i18n key，认不出的返回 null 让调用方原样显示错误文本
+// ——宁可露出英文原文，也不吞掉未知错误。
+export function webPushErrorKey(e: unknown): string | null {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  // Chrome 要向 FCM 注册才能拿到订阅端点；国内网络够不着 fcm.googleapis.com
+  // 就是这一句，与 VAPID 密钥、SW、权限都无关（实测：baidu/github 443 通、
+  // fcm.googleapis.com 443 不通时必现）。
+  if (msg.includes("push service error")) return "notify.webpush.err.unreachable";
+  if (msg.includes("no active service worker")) return "notify.webpush.err.noWorker";
+  return null;
+}
+
 export function sessionFromUrl(search: string): string | null {
   const v = new URLSearchParams(search).get("session");
   return v && v.length > 0 ? v : null;

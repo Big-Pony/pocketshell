@@ -483,6 +483,10 @@ export default {
     webpush: {
       label: "Web Push",
       iosHint: "On iOS, add to Home Screen first to enable push",
+      err: {
+        unreachable: "Cannot reach the browser's push service (Chrome uses Google FCM). Not a misconfiguration — check for a firewall or proxy blocking it, a browser without a push backend (e.g. Brave), or a region where FCM needs a VPN.",
+        noWorker: "Service worker not ready. Reload the page and try again; if it persists, use \"Clear cache and reload\" below.",
+      },
     },
     permDenied: "Notification permission denied",
     webhook: {

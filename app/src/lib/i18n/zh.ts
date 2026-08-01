@@ -483,6 +483,10 @@ export default {
     webpush: {
       label: "Web Push",
       iosHint: "iOS 需先“添加到主屏幕”才能开启推送",
+      err: {
+        unreachable: "连不上浏览器的推送服务（Chrome 走 Google FCM）。这不是配置问题——国内网络请开代理/VPN 后重试；也可能是浏览器不带推送后端（如 Brave）或防火墙拦截。",
+        noWorker: "Service Worker 未就绪。请刷新页面后重试；仍失败可在下方「清除缓存并重载」。",
+      },
     },
     permDenied: "通知权限被拒绝",
     webhook: {
