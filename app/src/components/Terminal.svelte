@@ -73,7 +73,8 @@
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
-  import { installWebgl } from "../lib/webgl-renderer";
+  import { installWebgl, type WebglHandle } from "../lib/webgl-renderer";
+  import { snapshotAtlas, formatSnapshot } from "../lib/atlas-probe";
   import { Connection } from "../lib/connection";
   import { fromB64 } from "../lib/bytes";
   import type { TermHistoryResult } from "../lib/protocol";
@@ -103,6 +104,10 @@
   // an input burst, landing reloadHistory mid-typing and nuking any selection).
   // This flag is the reactive "setup complete" signal for that effect.
   let mounted = $state(false);
+
+  // Assigned in onMount; the visibility $effect below drives suspend/resume
+  // through it, so it has to outlive onMount's closure (same reason as refit).
+  let webglHandle: WebglHandle | undefined;
 
   // Assigned in onMount; callable from $effect blocks that react to active/font.
   let refit: () => void = () => {};
@@ -165,6 +170,26 @@
       convertEol: false,
       cursorBlink: true,
       disableStdin: true,
+      // 手机上「看不见输入光标」的修复。这个面板永远拿不到焦点：它是只读的
+      // （disableStdin），且为了压掉手机 IME，xterm 那个隐藏 helper textarea 被设成
+      // readOnly + tabindex=-1 并主动 blur（见下方 IME 段）。xterm 的 isFocused 正是
+      // 从这个 textarea 的 focus/blur 推出来的，所以这里恒为 false —— 渲染器画的
+      // 永远是 cursorInactiveStyle，cursorStyle 根本用不上。
+      //
+      // xterm 默认的 inactive 样式是 "outline"：只有 1 个设备像素宽的空心细框。
+      // 这条在 xterm 5.5 时代就成立，但那时没有 DECSCUSR；6.0 起光标样式改为
+      // `decPrivateModes.cursorStyle ?? options.cursorStyle`，Claude Code 这类 TUI
+      // 发的 `CSI Ps SP q` 会被采纳，叠加上细框后光标在手机上实际不可见。
+      // 要控制这个面板，改的必须是 INACTIVE 那一个。
+      cursorInactiveStyle: "block",
+      // 但只改样式还不够：xterm 默认要等「首次获得焦点或首次键盘输入」才把
+      // isCursorInitialized 置位（CoreBrowserTerminal._showCursor 的三个调用点分别在
+      // textarea focus / keydown / keypress 里），在那之前光标压根不会进渲染模型 ——
+      // 而这三条路本面板一条都走不到。xterm 6.0 新增的 showCursorImmediately 正是
+      // 为这种「外部驱动输入」的只读终端准备的：跳过那道闸，开局就画光标。
+      // 5.5.0 没有这个选项，所以升级前是靠别的路径蒙对的；实测（A/B 对比）只加
+      // cursorInactiveStyle 而不加这条，cursor model 恒为 undefined、屏幕上没有光标。
+      showCursorImmediately: true,
       // 终端区两套主题均为深色。xterm 只吃字面色值、不认 CSS 变量，所以在这里
       // 把 --term-* 读出来喂给它——换肤时改 app.css 一处即可，不会再漏这里。
       theme: termTheme(),
@@ -185,17 +210,53 @@
     //
     // 注意：webglHandle 在 onMount 里赋值，但 teardown 在下面才组装，两者都在
     // 同一个闭包里，所以这里用 let + 后面 dispose 即可。
-    const webglHandle = installWebgl({
+    // 当前挂着的 addon，仅供诊断埋点读取图集状态用（重建时会被换掉，所以不能
+    // 在闭包里存第一次那个）。恢复逻辑本身走 webglHandle，不碰这个引用。
+    let webglAddon: WebglAddon | undefined;
+    webglHandle = installWebgl({
       create: () => {
         const addon = new WebglAddon();
         term.loadAddon(addon);
+        webglAddon = addon;
         return addon;
       },
       // reloadHistory 声明在下面（const 提升到同一函数作用域内的 TDZ 之后才被
       // 调用——上下文丢失最早也要等 3 秒，早已越过 onMount 同步段）。
       reseed: () => { void reloadHistory(); },
       log: (m) => console.warn(m),
-    });
+      // 隐藏挂载的终端一开始就不拿上下文：已经开着几个 tab 时再开一个新会话，
+      // 若隐藏挂载也建上下文，几下就能顶到上限。可见性由下面的 $effect 接管。
+    }, undefined, !(active && !closed));
+
+    // 只有可见的 tab 持有 WebGL 上下文（docs/bug/终端显示异常2）。
+    //
+    // 根因是实测出来的：浏览器对每页存活的 WebGL 上下文数有硬上限，超了就强制
+    // 杀掉最老的那个。Chrome 里第 1..16 个终端全部存活，从第 17 个开始每多一个
+    // 就恰好死掉一个更老的，存活数钉死在 16；手机限额低得多，所以你开几个窗口
+    // 就中招。原来每个 tab 挂一个活的 TerminalView = 每个 tab 一个上下文，于是
+    // 老 tab 的渲染器被浏览器悄悄杀掉——「必须多开才出现」「有的 tab 正常有的
+    // 冻住」「只有关掉全部 tab 才恢复」全都是这一条。
+    //
+    // 隐藏的终端本来就不渲染，占着上下文没有任何收益，却在消耗唯一真正稀缺的
+    // 资源。下面那个 $effect 跟着 active 走：切走就 suspend，切回就 resume。
+    //
+    // 注意这里不再监听 visibilitychange 做纹理重传（旧的 48e1ee1 方案）——那修
+    // 的是错的根因，上下文都被杀了，往死掉的上下文里清纹理没有意义。
+    //
+    // 诊断上报保留：回前台时把图集状态发回 agent 打进日志（launchd 已把 agent
+    // stdout 落到 ~/Library/Logs/pocketshell/agent.out.log）。这个 App 的使用场景
+    // 就是「手边没有电脑」，指望用户在现场连 devtools 抄日志不现实，而 agent 跑
+    // 在用户自己机器上，回到电脑前翻日志就行。上报是尽力而为，链路断了只是少一
+    // 条诊断，绝不能影响任何别的东西。
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const snap = snapshotAtlas(webglAddon, true);
+        console.warn(formatSnapshot(sessionId, snap));
+        void conn.rpc("diag.report", { tag: sessionId, kind: "atlas", ...snap }).catch(() => {});
+      } catch { /* 诊断绝不能影响任何东西 */ }
+    };
+    document.addEventListener("visibilitychange", onVisible);
     // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays
     // editable the phone keyboard pops up (and, because our on-screen keys
     // preventDefault focus-steal, never leaves). xterm is display-only here
@@ -461,6 +522,7 @@
 
     teardown = () => {
       window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onVisible);
       ro?.disconnect();
       themeObs?.disconnect();
       unsubscribeOutput?.();
@@ -469,7 +531,7 @@
       stopPoll(); // also drops a pending input-debounced classify
       // Release the WebGL addon BEFORE the terminal: it also stops any pending
       // context-loss handler from rebuilding a renderer onto a dead terminal.
-      webglHandle.dispose();
+      webglHandle?.dispose();
       term?.dispose();
     };
     mounted = true;
@@ -487,6 +549,27 @@
     } else if (term) {
       stopPoll();
     }
+  });
+
+  // WebGL 上下文跟着可见性走（docs/bug/终端显示异常2 的真正修复）。
+  //
+  // 浏览器每页存活的 WebGL 上下文有硬上限（Chrome 实测 16，手机更低），超限后
+  // 强制杀最老的。每个 tab 一个活上下文时，开几个窗口就会让老 tab 的渲染器被
+  // 悄悄杀掉，表现为部分 tab 花屏/冻结，且只有关掉全部 tab 才恢复。
+  //
+  // 隐藏的终端不渲染，占着上下文毫无收益，所以切走即释放、切回再重建，存活数
+  // 恒为 1，永远碰不到上限。
+  //
+  // closed 的终端是墓碑，不再渲染，也就不必占着上下文。
+  //
+  // mounted 是 $state，onMount 结尾才置 true，所以这个 effect 第一次真正生效时
+  // installWebgl 已经跑完：初始就 active 的终端此时 resume 是 no-op（句柄本来
+  // 就没 suspend），不会把刚建好的上下文拆掉重建。
+  $effect(() => {
+    const visible = active && !closed;
+    if (!mounted || !webglHandle) return;
+    if (visible) webglHandle.resume();
+    else webglHandle.suspend();
   });
 
   // Live-apply font-size changes from settings: update xterm then re-fit + resize PTY.

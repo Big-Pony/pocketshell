@@ -37,6 +37,7 @@ import { NotificationService, type DevicePresence } from "./notify-service";
 import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi, type WireResult } from "./notify-wire";
 import { ContextStore } from "./context-store";
 import { AI_TOOLS, type AiTool } from "./ai-context";
+import { formatDiagReport } from "./diag-report";
 
 function isAiTool(t: string): t is AiTool { return (AI_TOOLS as readonly string[]).includes(t); }
 import { parseStatuslinePayload } from "./statusline-payload";
@@ -663,6 +664,13 @@ export function startServer(deps: Deps = {}) {
             // 实例身份：只读，走通用 RPC 信封（不需要新增 protocol 消息类型）。
             // 天然只在 Noise 握手成功后可得 —— 未配对设备看不到实例名。
             case "agent.info": result = { instanceName: config.instanceName ?? null }; break;
+            // 客户端诊断上报（docs/bug/终端显示异常2）。整屏文字消失只在真机回
+            // 前台时偶现，而那正是「手边没有电脑、连不上 devtools」的场景，所以
+            // 让 App 每次回前台把图集状态发回来，由 agent 打到 stdout —— launchd
+            // 已把 stdout 落到 ~/Library/Logs/pocketshell/agent.out.log，用户零操作。
+            // 内容经 formatDiagReport 白名单化：只留几个计数器，终端内容一律丢弃
+            // （本仓库公开，日志有可能被贴进 issue）。
+            case "diag.report": console.log(formatDiagReport(p)); result = { ok: true }; break;
             case "notify.getConfig": result = notify.config(); break;
             case "notify.setConfig": notify.setConfig(p.config); result = { ok: true }; break;
             case "notify.getVapidPublicKey": result = { publicKey: notify.vapidPublicKey() }; break;

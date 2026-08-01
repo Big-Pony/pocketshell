@@ -31,6 +31,29 @@ export interface WebglAddonLike {
   dispose(): void;
 }
 
+/**
+ * Force a WebGL context to be released now instead of whenever GC runs.
+ *
+ * WebglAddon.dispose() detaches the canvas but never calls loseContext (the
+ * string does not appear anywhere in the addon source), so the context lingers.
+ * Measured in Chrome: switching tabs leaked one live context per switch even
+ * though every addon had been disposed. Since contexts are the capped resource,
+ * "eventually" is not good enough — the cap is what breaks rendering.
+ *
+ * There is no public API for this, so it reaches through the addon's internals
+ * and tolerates every step being absent: a browser without WEBGL_lose_context
+ * just falls back to GC timing, which is the behaviour we already had.
+ */
+function releaseContext(addon: WebglAddonLike, log: (m: string) => void): void {
+  try {
+    const gl = (addon as { _renderer?: { _gl?: { getExtension(n: string): unknown } } })._renderer?._gl;
+    const ext = gl?.getExtension("WEBGL_lose_context") as { loseContext?(): void } | null | undefined;
+    ext?.loseContext?.();
+  } catch (e) {
+    log(`[webgl] loseContext threw: ${String(e)}`);
+  }
+}
+
 export interface WebglHost {
   // Construct + load a fresh addon. May throw (no WebGL2, blocked context, GPU
   // out of memory) — callers treat a throw as "stay on the DOM renderer".
@@ -51,15 +74,45 @@ export interface WebglHandle {
   active(): boolean;
   // Rebuilds performed so far — asserted in tests, useful in the console.
   rebuilds(): number;
+  // Release the GL context while this terminal is off-screen; take a fresh one
+  // when it comes back. Both are safe to call repeatedly.
+  //
+  // Why this exists (docs/bug/终端显示异常2) — MEASURED, not theorised:
+  // browsers cap the number of live WebGL contexts per page and force-lose the
+  // OLDEST once the cap is passed. Reproduced in Chrome: terminals 1..16 all
+  // stayed alive, then from the 17th onward exactly one older context died per
+  // additional terminal, pinned at 16 alive. Phones cap far lower.
+  //
+  // App.svelte mounts a live <TerminalView> per tab, so N tabs meant N live
+  // contexts and the browser silently killed the older tabs' renderers. That is
+  // why the corruption needed several tabs to appear, why some tabs stayed
+  // correct while others froze mid-frame, and why closing ALL tabs was the only
+  // cure. A hidden terminal draws nothing, so holding its context buys nothing
+  // and costs the one resource that is actually scarce.
+  suspend(): void;
+  resume(): void;
   // Detach for good: no further loss event may rebuild anything. Called on
   // unmount, where rebuilding into a torn-down terminal would be a leak.
   dispose(): void;
 }
 
-export function installWebgl(host: WebglHost, maxRebuilds = MAX_WEBGL_REBUILDS): WebglHandle {
+/**
+ * `startSuspended` skips the initial context creation entirely — for a terminal
+ * that mounts off-screen. Opening a session while several tabs are already open
+ * would otherwise create N contexts in one go and blow straight past the cap,
+ * which is precisely the failure this module now exists to prevent.
+ */
+export function installWebgl(
+  host: WebglHost,
+  maxRebuilds = MAX_WEBGL_REBUILDS,
+  startSuspended = false,
+): WebglHandle {
   let current: WebglAddonLike | undefined;
   let rebuilds = 0;
   let released = false;
+  // Deliberately off-screen, as opposed to "never had a context" or "the GPU
+  // took it away". Only a suspend may be resumed.
+  let suspended = false;
   const log = (m: string) => host.log?.(m);
 
   // Attach a fresh addon and subscribe to ITS loss event. Each addon has its own
@@ -111,15 +164,52 @@ export function installWebgl(host: WebglHost, maxRebuilds = MAX_WEBGL_REBUILDS):
     host.reseed();
   };
 
-  attach();
+  // A terminal that mounts hidden marks itself suspended without ever taking a
+  // context, so the later resume() on activation is the first one created.
+  if (startSuspended) suspended = true;
+  else attach();
 
   return {
     active: () => current !== undefined,
     rebuilds: () => rebuilds,
+    suspend() {
+      // Released → already torn down. No addon → the DOM renderer is drawing,
+      // which holds no GL context and so has nothing to give back.
+      if (released || !current) return;
+      const addon = current;
+      // Clear `current` FIRST: dispose can fire the addon's loss emitter, and
+      // onLoss checks `current !== addon` to ignore stale events. Leaving it set
+      // would let a deliberate suspend masquerade as a GPU failure and burn the
+      // rebuild budget.
+      current = undefined;
+      // Release the context BEFORE dispose: dispose detaches the canvas, and
+      // reaching the GL handle through the addon afterwards is not guaranteed.
+      releaseContext(addon, log);
+      try { addon.dispose(); } catch (e) { log(`[webgl] dispose on suspend threw: ${String(e)}`); }
+      suspended = true;
+    },
+    resume() {
+      // Only a suspend may be undone. Without this guard a resume racing an
+      // unmount — or arriving for a terminal that never had WebGL at all —
+      // would create a context nothing owns.
+      if (released || !suspended || current) return;
+      suspended = false;
+      // Deliberately NO reseed, unlike the context-loss path. The buffer lives
+      // in xterm's core, not in the renderer, so it survives an addon swap
+      // untouched, and attaching a renderer triggers a full repaint from it.
+      // Nothing was dropped either: while suspended the DOM renderer was in
+      // charge, and hidden terminals stash their output separately (R1).
+      // Reseeding here would mean a tmux round-trip on every single tab switch.
+      if (!attach()) log("[webgl] resume failed to create a context — DOM renderer for this tab");
+    },
     dispose() {
       released = true;
+      suspended = false;
       const addon = current;
       current = undefined;
+      // Same reason as suspend: closing a tab must give the context back now,
+      // not whenever GC gets around to it.
+      if (addon) releaseContext(addon, log);
       try { addon?.dispose(); } catch { /* teardown is best-effort */ }
     },
   };

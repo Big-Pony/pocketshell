@@ -680,3 +680,38 @@ test("agent.info returns null when no instance name is set", () => {
     expect(reply.result).toEqual({ instanceName: null });
   } else { throw new Error("expected an ok response"); }
 });
+
+// —— diag.report：客户端把回前台时的图集状态发回来，agent 打到 stdout（launchd
+// 已把 stdout 落盘）。这里验证两件事：走通了、且**只**打白名单字段——线路上
+// 的净化归 diag-report.test.ts 逐条覆盖，这条测的是它确实被接上了。
+test("diag.report logs one whitelisted line and acks", () => {
+  const keyDir = mkdtempSync(join(tmpdir(), "ps-diag-key-"));
+  const srv = startServer({ port: 0, config: loadConfig({ POCKETSHELL_KEY_DIR: keyDir }), channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any); srv.__test.message(ws as any, M1); ws.sent.length = 0;
+
+  const lines: string[] = [];
+  const origLog = console.log;
+  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+  try {
+    srv.__test.message(ws as any, utf8(encode({
+      type: "rpc", id: "d1", method: "diag.report",
+      params: { tag: "s1", kind: "atlas", pages: 1, pageVersions: [3], textureVersions: [3], pagesBlank: [true], buffer: "SECRET" },
+    })));
+  } finally { console.log = origLog; }
+
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  srv.stop();
+  rmSync(keyDir, { recursive: true, force: true });
+
+  expect(reply.type).toBe("response");
+  if (reply.type === "response" && reply.ok) {
+    expect(reply.result).toEqual({ ok: true });
+  } else { throw new Error("expected an ok response"); }
+
+  const diag = lines.filter((l) => l.startsWith("[pocketshell:diag]"));
+  expect(diag.length).toBe(1);
+  expect(diag[0]).toContain('"pagesBlank":[true]');
+  // 终端内容绝不能落进日志（本仓库公开，日志可能被贴进 issue）。
+  expect(diag[0]).not.toContain("SECRET");
+});
