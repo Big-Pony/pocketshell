@@ -22,6 +22,22 @@ export function webPushErrorKey(e: unknown): string | null {
   return null;
 }
 
+// agent 侧发送失败的原因（notify.json 的 webPushLastError，经 notify.getConfig
+// 回传）。与 webPushErrorKey 是两套文本：那边是浏览器的 DOMException，这边是
+// Node/undici 的网络错误——服务器发不出去与手机订阅不上是两回事，提示也不同
+// （这台服务器要能到 fcm.googleapis.com，与手机自己的网络无关）。
+export function pushSendErrorKey(e: string | null | undefined): string | null {
+  const msg = (e ?? "").toLowerCase();
+  if (!msg) return null;
+  if (/econnrefused|etimedout|enotfound|econnreset|ehostunreach|enetunreach|fetch failed|socket hang up/.test(msg)) {
+    return "notify.webpush.err.sendUnreachable";
+  }
+  // 换过 vapid.json（或换了服务器）而手机上的旧订阅还在时，推送服务回 403 并
+  // 在 body 里明说密钥对不上。重新订阅即可，值得区别于"网络不通"单独提示。
+  if (msg.includes("vapid credentials")) return "notify.webpush.err.sendVapidMismatch";
+  return null;
+}
+
 // OTA 更新后 App.svelte 会走 hardReset()，其中的 unregisterServiceWorkers()
 // 连带销毁浏览器的 push 订阅——但 agent 侧 notify.json 的 webPush 仍是 true，
 // push-subs.json 里那条 endpoint 也还在（注销 SW 不会让推送服务返回 410，
@@ -69,11 +85,13 @@ export interface WebhookCfg {
 export interface NotifyConfig {
   tools: { claude: boolean; codex: boolean; opencode: boolean; kimi: boolean };
   webPush: boolean; includeSummary: boolean; dedupeMs: number; webhooks: WebhookCfg[];
+  /** 上次 Web Push 发送失败的原因（agent 侧记录，成功即清空）。 */
+  webPushLastError?: string | null;
   /** 需求 5：接管 Claude Code 的 statusLine 以获取上下文用量。与 tools.* 不同
    *  ——它不产生任何通知，只取数字，所以单列一个字段而不是塞进 tools。 */
   contextStatusline: boolean;
 }
 
 export function defaultNotifyConfig(): NotifyConfig {
-  return { tools: { claude: false, codex: false, opencode: false, kimi: false }, webPush: false, includeSummary: true, dedupeMs: 10000, webhooks: [], contextStatusline: false };
+  return { tools: { claude: false, codex: false, opencode: false, kimi: false }, webPush: false, webPushLastError: null, includeSummary: true, dedupeMs: 10000, webhooks: [], contextStatusline: false };
 }

@@ -1,5 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe } from "../src/lib/notify";
+import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe, pushSendErrorKey } from "../src/lib/notify";
+
+// agent 侧发送失败的原因（notify.json 的 webPushLastError）。与浏览器订阅失败
+// 是两套完全不同的文本：这些是 Node/undici 的网络错误，不是 DOMException。
+describe("pushSendErrorKey", () => {
+  it("maps a refused connection to the agent-unreachable hint", () => {
+    expect(pushSendErrorKey("connect ECONNREFUSED 127.0.0.1:7890")).toBe("notify.webpush.err.sendUnreachable");
+  });
+  it("maps a timeout to the same hint", () => {
+    expect(pushSendErrorKey("connect ETIMEDOUT 142.250.66.106:443")).toBe("notify.webpush.err.sendUnreachable");
+  });
+  it("maps DNS failure to the same hint", () => {
+    expect(pushSendErrorKey("getaddrinfo ENOTFOUND fcm.googleapis.com")).toBe("notify.webpush.err.sendUnreachable");
+  });
+  it("maps a fetch-level failure to the same hint", () => {
+    expect(pushSendErrorKey("fetch failed")).toBe("notify.webpush.err.sendUnreachable");
+  });
+  it("returns null for an unrecognized reason so the raw text still shows", () => {
+    expect(pushSendErrorKey("status 500")).toBeNull();
+  });
+  // VAPID 密钥与订阅不匹配：换过 vapid.json（或换了服务器）而手机上的旧订阅
+  // 还在时会遇到，agent 侧 body 明确写着原因。重新订阅即可修复，值得单独提示。
+  it("maps a VAPID credential mismatch to the resubscribe hint", () => {
+    expect(pushSendErrorKey("status 403: the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions."))
+      .toBe("notify.webpush.err.sendVapidMismatch");
+  });
+});
 
 describe("needsResubscribe", () => {
   // OTA 更新后 hardReset() 会 unregister service worker，连带销毁 push 订阅，

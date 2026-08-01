@@ -483,8 +483,11 @@ export default {
     webpush: {
       label: "Web Push",
       iosHint: "iOS 需先“添加到主屏幕”才能开启推送",
+      sendFailed: "上次发送失败",
       err: {
         unreachable: "连不上浏览器的推送服务（Chrome 走 Google FCM）。这不是配置问题——国内网络请开代理/VPN 后重试；也可能是浏览器不带推送后端（如 Brave）或防火墙拦截。",
+        sendUnreachable: "运行 Agent 的服务器连不上推送服务（Google FCM），推送发不出去。需要在服务器上配置代理（Agent 遵循 HTTPS_PROXY 环境变量），与手机自己的网络无关。",
+        sendVapidMismatch: "此设备的订阅与服务器当前的推送密钥不匹配（换过服务器或密钥后会这样）。关掉 Web Push 再重新开启即可。",
         noWorker: "Service Worker 未就绪。请刷新页面后重试；仍失败可在下方「清除缓存并重载」。",
       },
     },

@@ -96,9 +96,19 @@ export class NotificationService {
       );
       const targets = this.subs.filter((s) => !skip.has(s.pubKey));
       const payload = JSON.stringify({ title: p.title, body, sessionId: p.sessionId });
+      // 记下本轮的失败原因回报到 UI（发送失败原先完全静默）。规则：只要有一台
+      // 设备发失败就留下原因，全部成功才清空——多设备时不能让一台成功盖掉另
+      // 一台的失败。endpoint 已失效（410/404）不算失败：那是正常的订阅回收，
+      // 该设备的订阅随即被删掉，报错反而是噪音。
+      let lastErr: string | null = null;
       for (const t of targets) {
         const r = await sendPush(this.deps.pushSender, t, payload);
-        if (r.gone) this.removeSubsForDevice(t.pubKey);
+        if (r.gone) { this.removeSubsForDevice(t.pubKey); continue; }
+        if (!r.ok && !lastErr) lastErr = r.error ?? "error";
+      }
+      if (targets.length && this.cfg.webPushLastError !== lastErr) {
+        this.cfg.webPushLastError = lastErr;
+        saveNotifyConfig(this.cfgFile, this.cfg);
       }
     }
     for (const wh of this.cfg.webhooks) {

@@ -483,8 +483,11 @@ export default {
     webpush: {
       label: "Web Push",
       iosHint: "On iOS, add to Home Screen first to enable push",
+      sendFailed: "Last send failed",
       err: {
         unreachable: "Cannot reach the browser's push service (Chrome uses Google FCM). Not a misconfiguration — check for a firewall or proxy blocking it, a browser without a push backend (e.g. Brave), or a region where FCM needs a VPN.",
+        sendUnreachable: "The server running the agent cannot reach the push service (Google FCM), so pushes never go out. Configure a proxy on that server (the agent honors HTTPS_PROXY) — this is unrelated to your phone's own network.",
+        sendVapidMismatch: "This device's subscription does not match the server's current push keys (this happens after switching servers or regenerating keys). Turn Web Push off and back on to fix it.",
         noWorker: "Service worker not ready. Reload the page and try again; if it persists, use \"Clear cache and reload\" below.",
       },
     },

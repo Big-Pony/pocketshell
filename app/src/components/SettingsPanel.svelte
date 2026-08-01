@@ -4,7 +4,7 @@
   import { tr } from "../lib/i18n";
   import type { Connection } from "../lib/connection";
   import type { Settings } from "../lib/settings";
-  import { webPushErrorKey, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
+  import { webPushErrorKey, pushSendErrorKey, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import { subscribeAndReport, unsubscribeBrowser } from "../lib/web-push-client";
   import DeviceManager from "./DeviceManager.svelte";
   import { detectPairing } from "../lib/pair-detect";
@@ -88,6 +88,12 @@
       // Keep the defaults visible; per-action failures (wire/test/subscribe)
       // still surface their own fail-loud errors below.
     }
+  }
+
+  // agent 侧发送失败原因：认得出的给解释，认不出的原样显示原文（不吞错）。
+  function sendErrText(raw: string): string {
+    const key = pushSendErrorKey(raw);
+    return key ? tr(key) : raw;
   }
 
   function reasonText(reason?: string, detail?: string): string {
@@ -362,6 +368,11 @@
         <div class="label">{$t('notify.webpush.label')}</div>
         {#if showIosHint}<div class="desc">{$t('notify.webpush.iosHint')}</div>{/if}
         {#if webPushError}<div class="err">{webPushError}</div>{/if}
+        <!-- agent 侧发送失败：开关显示「开」但服务器发不出去，不显示的话这个
+             状态完全静默。只在推送开着时有意义。 -->
+        {#if cfg.webPush && cfg.webPushLastError}
+          <div class="err">{$t('notify.webpush.sendFailed')}: {sendErrText(cfg.webPushLastError)}</div>
+        {/if}
       </div>
       <div class="seg">
         <button class:on={!cfg.webPush} onclick={() => toggleWebPush(false)}>{$t('notify.off')}</button>

@@ -43,9 +43,28 @@ export function removeSubsForDevice(subs: PushSub[], pubKey: string): PushSub[] 
 }
 
 export type PushSender = (subscription: unknown, payload: string) => Promise<{ statusCode: number }>;
-export async function sendPush(sender: PushSender, sub: PushSub, payload: string): Promise<{ ok: boolean; gone: boolean }> {
-  try { const r = await sender(sub.subscription, payload); const ok = r.statusCode >= 200 && r.statusCode < 300; return { ok, gone: false }; }
-  catch (e) { const code = (e as { statusCode?: number }).statusCode; return { ok: false, gone: code === 404 || code === 410 }; }
+// error 带出失败原因（成功时不设）。原先只回 ok/gone 两个 bool，发送失败的
+// 原因被整个吞掉——用户在设置面板看到 Web Push 开着却收不到推送，无从知道
+// 是这台服务器发不出去（最常见：连不上 fcm.googleapis.com）。现在像 webhook
+// 的 lastError 一样把原因带到 UI。
+export async function sendPush(
+  sender: PushSender, sub: PushSub, payload: string,
+): Promise<{ ok: boolean; gone: boolean; error?: string }> {
+  try {
+    const r = await sender(sub.subscription, payload);
+    const ok = r.statusCode >= 200 && r.statusCode < 300;
+    return ok ? { ok, gone: false } : { ok, gone: false, error: `status ${r.statusCode}` };
+  } catch (e) {
+    const err = e as { statusCode?: number; body?: unknown; message?: string };
+    const code = err.statusCode;
+    // web-push 把所有 HTTP 层失败统一抛成 "Received unexpected response code"，
+    // 诊断信息全在 statusCode/body 上（实证：VAPID 不匹配时 body 才写着
+    // "the VAPID credentials ... do not correspond"）。只取 message 会把这些
+    // 丢光，UI 上只剩一句什么也没说的通用文本。
+    const body = typeof err.body === "string" ? err.body.trim() : "";
+    if (code) return { ok: false, gone: code === 404 || code === 410, error: body ? `status ${code}: ${body}` : `status ${code}` };
+    return { ok: false, gone: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 // Real sender factory (not unit-tested; exercised in end-to-end). VAPID subject
