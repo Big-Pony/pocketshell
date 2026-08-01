@@ -22,6 +22,36 @@ export function webPushErrorKey(e: unknown): string | null {
   return null;
 }
 
+// OTA 更新后 App.svelte 会走 hardReset()，其中的 unregisterServiceWorkers()
+// 连带销毁浏览器的 push 订阅——但 agent 侧 notify.json 的 webPush 仍是 true，
+// push-subs.json 里那条 endpoint 也还在（注销 SW 不会让推送服务返回 410，
+// sendPush 的自动清理兜不住）。结果是设置面板显示「开」而实际收不到推送，
+// 用户必须手动关一次再开。启动时用这个判据静默补订阅。
+//
+// 三个条件缺一不可：
+//
+// 1. cfgWebPush —— agent 侧开着推送。
+// 2. !hasBrowserSub —— 这台设备的订阅确实没了（否则无事可做）。
+// 3. permission === "granted" —— **这台设备**曾经同意过通知。
+//
+// 第 3 条是关键，两个作用：
+//
+// (a) notify.json 是 agent 全局的，不是每设备一份。手机开了推送后，一台从没
+//     开过推送的新设备连上来同样读到 webPush=true —— 只看前两条就会替它订阅，
+//     用户从没同意过却开始收通知。Notification.permission 由浏览器每设备独立
+//     持有（hardReset 也清不掉），是「这台设备是否同意过」唯一可信的本地证据。
+// (b) 权限为 default 时调 subscribe() 会**弹权限框**。自愈是后台行为，绝不能
+//     在用户刚连上时凭空弹窗。挡住非 granted 也就挡住了弹窗。
+//
+// 单向：只补不撤，绝不因为浏览器有残留订阅就把用户主动关掉的推送重新打开。
+export function needsResubscribe(s: {
+  cfgWebPush: boolean;
+  hasBrowserSub: boolean;
+  permission: NotificationPermission;
+}): boolean {
+  return s.cfgWebPush && !s.hasBrowserSub && s.permission === "granted";
+}
+
 export function sessionFromUrl(search: string): string | null {
   const v = new URLSearchParams(search).get("session");
   return v && v.length > 0 ? v : null;

@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey } from "../src/lib/notify";
+import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe } from "../src/lib/notify";
+
+describe("needsResubscribe", () => {
+  // OTA 更新后 hardReset() 会 unregister service worker，连带销毁 push 订阅，
+  // 但 agent 侧 notify.json 的 webPush 仍是 true —— 开关显示「开」却收不到推送，
+  // 用户得手动关一次再开。启动时据此自愈。
+  it("resubscribes when the agent says push is on but this browser lost its subscription", () => {
+    expect(needsResubscribe({ cfgWebPush: true, hasBrowserSub: false, permission: "granted" })).toBe(true);
+  });
+  it("does nothing when both sides agree push is on", () => {
+    expect(needsResubscribe({ cfgWebPush: true, hasBrowserSub: true, permission: "granted" })).toBe(false);
+  });
+  it("does not resurrect push the user turned off, even if a stale browser sub lingers", () => {
+    expect(needsResubscribe({ cfgWebPush: false, hasBrowserSub: true, permission: "granted" })).toBe(false);
+  });
+  it("does nothing when push is off on both sides", () => {
+    expect(needsResubscribe({ cfgWebPush: false, hasBrowserSub: false, permission: "granted" })).toBe(false);
+  });
+
+  // notify.json 的 webPush 是 agent 全局的，不是每设备一份。手机开了推送后，
+  // 一台从没开过推送的新设备连上来也会读到 webPush=true —— 绝不能因此替它
+  // 订阅。Notification.permission 是每设备独立、由浏览器持有的本地证据，
+  // 「这台设备是否曾经同意过」只能问它。
+  it("never subscribes a device that has not granted notification permission", () => {
+    expect(needsResubscribe({ cfgWebPush: true, hasBrowserSub: false, permission: "default" })).toBe(false);
+  });
+  it("never subscribes a device where the user denied notifications", () => {
+    expect(needsResubscribe({ cfgWebPush: true, hasBrowserSub: false, permission: "denied" })).toBe(false);
+  });
+});
 
 describe("webPushErrorKey", () => {
   // 真机上最常见的失败：手机连不上 FCM（国内网络），Chrome 抛这句原文，

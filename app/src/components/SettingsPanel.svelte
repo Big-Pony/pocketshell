@@ -4,7 +4,8 @@
   import { tr } from "../lib/i18n";
   import type { Connection } from "../lib/connection";
   import type { Settings } from "../lib/settings";
-  import { urlBase64ToUint8Array, webPushErrorKey, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
+  import { webPushErrorKey, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
+  import { subscribeAndReport, unsubscribeBrowser } from "../lib/web-push-client";
   import DeviceManager from "./DeviceManager.svelte";
   import { detectPairing } from "../lib/pair-detect";
   import HintManager from "./HintManager.svelte";
@@ -118,6 +119,10 @@
   async function toggleWebPush(on: boolean) {
     if (!on) {
       await conn.notifyUnsubscribe();
+      // 浏览器侧也要退订，否则推送服务里留着一条再不会用到的活订阅。放在
+      // agent 之后、且失败不拦关闭流程：此时 agent 已经不发了，退订失败只是
+      // 不整洁，不该让开关卡在「开」上。
+      await unsubscribeBrowser().catch(() => {});
       cfg = { ...cfg, webPush: false };
       await persistCfg();
       webPushError = null;
@@ -127,10 +132,7 @@
     try {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") { webPushError = tr("notify.permDenied"); return; }
-      const reg = await navigator.serviceWorker.ready;
-      const { publicKey } = await conn.notifyGetVapidKey();
-      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
-      await conn.notifySubscribe(sub.toJSON());
+      await subscribeAndReport(conn);
       cfg = { ...cfg, webPush: true };
       await persistCfg();
     } catch (e) {
