@@ -5,7 +5,7 @@
 // unit-testable half — Connection wires it to the rpc pending map and gives
 // the buffers the exact same lifetime as a pending rpc (timeout / disconnect
 // / settle all drop them).
-import { fromB64 } from "./bytes";
+import { fromB64 } from "../bytes";
 
 // Hard cap on chunks per response: a sane upper bound far above any real
 // response (server slices ~60KB, so 10000 chunks ≈ 600MB). Garbage totals

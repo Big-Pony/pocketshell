@@ -1,8 +1,9 @@
 <script module lang="ts">
-  // R1 (hidden terminals) buffering lives in ../lib/pending-buffer.ts — pure
-  // logic, re-exported here so existing importers of this component keep working.
-  import { PendingBuffer } from "../lib/pending-buffer";
-  export { PendingBuffer };
+  // R1 (hidden terminals) output buffering lives in ../lib/pending-buffer.ts:
+  // pure logic with no Svelte dependency, and a named export from a .svelte
+  // file is invisible to `tsc --noEmit` (which only sees the ambient
+  // `*.svelte` default export).
+  import { PendingBuffer } from "../lib/term/pending-buffer";
 
   // xterm's theme takes literal colour strings, not CSS variables. Read the
   // --term-* tokens off :root so app.css stays the single source of truth for
@@ -34,11 +35,11 @@
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
-  import { installWebgl, type WebglHandle } from "../lib/webgl-renderer";
-  import { snapshotAtlas, formatSnapshot } from "../lib/atlas-probe";
-  import { Connection } from "../lib/connection";
+  import { installWebgl, type WebglHandle } from "../lib/term/webgl-renderer";
+  import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
+  import { Connection } from "../lib/net/connection";
   import { fromB64 } from "../lib/bytes";
-  import type { TermHistoryResult } from "../lib/protocol";
+  import type { TermHistoryResult } from "../lib/net/protocol";
 
   let {
     conn,

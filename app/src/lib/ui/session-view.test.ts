@@ -4,7 +4,7 @@ import {
   tombstone, closeTab,
   type LocalSession,
 } from "./session-view";
-import type { SessionMeta } from "./protocol";
+import type { SessionMeta } from "../net/protocol";
 
 const meta = (over: Partial<SessionMeta> = {}): SessionMeta => ({
   name: "s1", kind: "tmux", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true, ...over,

@@ -2,12 +2,12 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import type { Connection } from "../lib/connection";
+  import type { Connection } from "../lib/net/connection";
   import type { Settings } from "../lib/settings";
   import { webPushErrorKey, pushSendErrorKey, defaultNotifyConfig, type NotifyConfig, type WebhookCfg, type WebhookKind } from "../lib/notify";
   import { subscribeAndReport, unsubscribeBrowser } from "../lib/web-push-client";
   import DeviceManager from "./DeviceManager.svelte";
-  import { detectPairing } from "../lib/pair-detect";
+  import { detectPairing } from "../lib/net/pair-detect";
   import HintManager from "./HintManager.svelte";
   import OperationGuide from "./OperationGuide.svelte";
   import { hardReset } from "../lib/cache-admin";

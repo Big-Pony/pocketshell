@@ -2,7 +2,7 @@
 // Built-in snippets were removed by product decision (2026-07-07). The panel now
 // shows only user-added custom snippets, which the backend persists and syncs.
 // mergeSnippets stays as the single place that groups the panel's rows.
-import type { Snippet } from "./protocol";
+import type { Snippet } from "./net/protocol";
 
 export const BUILTIN_SNIPPETS: Snippet[] = [];
 

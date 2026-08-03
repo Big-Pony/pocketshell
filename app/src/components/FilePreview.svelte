@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { Connection } from "../lib/connection";
+  import { Connection } from "../lib/net/connection";
   import { splitLines, highlightTo } from "../lib/highlight";
   import { previewKind, previewOrigin, previewUrl, relFromBase } from "../lib/preview";
   import HtmlView from "./HtmlView.svelte";

@@ -1,6 +1,6 @@
 import { test, expect, beforeEach } from "vitest";
 import { loadOrCreateIdentity, getAgentPubKey, getAgentAddr, applyPairing, getPendingPair, clearPendingPair } from "./keystore";
-import { toB64 } from "./bytes";
+import { toB64 } from "../bytes";
 
 beforeEach(() => localStorage.clear());
 

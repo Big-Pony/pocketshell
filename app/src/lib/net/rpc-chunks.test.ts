@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import { ChunkReassembler, MAX_CHUNKS, type ChunkFrame } from "./rpc-chunks";
-import { toB64 } from "./bytes";
+import { toB64 } from "../bytes";
 
 const frame = (id: string, index: number, total: number, bytes: Uint8Array): ChunkFrame =>
   ({ id, index, total, data: toB64(bytes) });

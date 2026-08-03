@@ -1,7 +1,7 @@
 import { test, expect, vi } from "vitest";
 import { Connection, rpcDeadlineMs, RPC_BASE_TIMEOUT_MS, RPC_MAX_TIMEOUT_MS, type WebSocketLike, type Scheduler } from "./connection";
 import { encode, decodeClient, type ServerMsg, type SessionMeta } from "./protocol";
-import { toB64 } from "./bytes";
+import { toB64 } from "../bytes";
 import type { SecureChannel } from "./secure-channel";
 import { applyPairing, getPendingPair } from "./keystore";
 

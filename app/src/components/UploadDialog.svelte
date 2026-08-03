@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { Connection } from "../lib/connection";
-  import { uploadFiles, humanSize, MAX_TRANSFER_BYTES, type UploadItem } from "../lib/transfer";
+  import { Connection } from "../lib/net/connection";
+  import { uploadFiles, humanSize, MAX_TRANSFER_BYTES, type UploadItem } from "../lib/net/transfer";
 
   let { conn, dir, onClose, onUploaded }: {
     conn: Connection; dir: string; onClose: () => void; onUploaded: (dir: string) => void;

@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { Connection } from "../lib/connection";
-  import { toFileNodes, setChildren, collapse, type FileNode } from "../lib/file-tree";
+  import { Connection } from "../lib/net/connection";
+  import { toFileNodes, setChildren, collapse, type FileNode } from "../lib/ui/file-tree";
 
   let { conn, rootDir, currentPath, open, onSelect, onClose }: {
     conn: Connection; rootDir: string; currentPath: string; open: boolean;

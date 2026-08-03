@@ -3,11 +3,11 @@
 // storage, pairing, and rpc() are added in later slices.
 // S4b: in-channel pairing — send pair on established, await paired, then normal flow.
 import { encode, decodeServer, type ClientMsg, type SessionMeta, type DeviceInfo, type Snippet, type Hint } from "./protocol";
-import { toB64, fromB64 } from "./bytes";
+import { toB64, fromB64 } from "../bytes";
 import { ChunkReassembler } from "./rpc-chunks";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
 import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
-import { tr } from "./i18n";
+import { tr } from "../i18n";
 
 export interface WebSocketLike {
   binaryType?: string;

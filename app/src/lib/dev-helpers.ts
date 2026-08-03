@@ -1,15 +1,15 @@
 // Development-only console helpers for AI/browser automation.
 // Mounted on `window.pocketshell` only when DEV_HELPERS_ENABLED is true.
 // This is NOT a public API and will be disabled in production builds.
-import { parsePairingString } from "./pairing";
+import { parsePairingString } from "./net/pairing";
 import {
   applyPairing as applyPairingToStore,
   getAgentAddr,
   getAgentPubKey,
-} from "./keystore";
-import { saveProjectRoot, clearProjectRoot, loadProjectRoot } from "./file-tree";
+} from "./net/keystore";
+import { saveProjectRoot, clearProjectRoot, loadProjectRoot } from "./ui/file-tree";
 import { toB64 } from "./bytes";
-import type { BottomPanel } from "./shell";
+import type { BottomPanel } from "./ui/shell";
 
 // Switch: enabled by default in both dev and production builds to support
 // browser automation / AI testing. Set VITE_POCKETSHELL_DEV_HELPERS=0 at build

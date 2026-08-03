@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { Connection } from "../lib/connection";
-  import { loadProjectRoot } from "../lib/file-tree";
+  import { Connection } from "../lib/net/connection";
+  import { loadProjectRoot } from "../lib/ui/file-tree";
 
   let { conn, onOpenDiff }: { conn: Connection; onOpenDiff: (path: string) => void } = $props();
 

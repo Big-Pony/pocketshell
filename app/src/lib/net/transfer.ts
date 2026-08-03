@@ -1,8 +1,8 @@
 // P2: file transfer orchestration (pure-ish; DOM download helper lives in the
 // download half). All bytes travel the encrypted WS via conn.rpc — chunked
 // base64 to stay well under the WS payload cap.
-import { toB64, fromB64 } from "./bytes";
-import { tr } from "./i18n";
+import { toB64, fromB64 } from "../bytes";
+import { tr } from "../i18n";
 
 export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
 

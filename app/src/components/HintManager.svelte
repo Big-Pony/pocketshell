@@ -3,8 +3,8 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import type { Connection } from "../lib/connection";
-  import type { Hint } from "../lib/protocol";
+  import type { Connection } from "../lib/net/connection";
+  import type { Hint } from "../lib/net/protocol";
   import { parseHintImport, filterAgainstBuiltins, buildHintPrompt, ALL_BUILTINS, HINT_MAX_LEN } from "../lib/hints";
   import { CATALOG } from "../lib/command-catalog";
   import { SLASH_CATALOG } from "../lib/slash-catalog";

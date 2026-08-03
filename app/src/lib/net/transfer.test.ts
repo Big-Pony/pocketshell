@@ -1,6 +1,6 @@
 import { test, expect, vi, beforeAll, describe } from "vitest";
 import { humanSize, chunkOffsets, childPath, uploadFiles, uploadChunksWindowed, UPLOAD_WINDOW, baseName, downloadFileBlob, downloadFolder, fetchChunksWindowed, DOWNLOAD_WINDOW, CHUNK_BYTES, type RpcLike } from "./transfer";
-import { toB64, fromB64 } from "./bytes";
+import { toB64, fromB64 } from "../bytes";
 
 beforeAll(() => {
   // jsdom does not implement Blob.prototype.arrayBuffer; polyfill it via

@@ -1,7 +1,7 @@
 <!-- app/src/components/BottomBar.svelte -->
 <script lang="ts">
   import { t } from "svelte-i18n";
-  import type { BottomPanel } from "../lib/shell";
+  import type { BottomPanel } from "../lib/ui/shell";
   let { active, taskBadge = false, onSelect }: {
     active: BottomPanel; taskBadge?: boolean; onSelect: (p: BottomPanel) => void;
   } = $props();

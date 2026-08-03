@@ -1,7 +1,7 @@
 import { test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import TermCopyOverlay from "./TermCopyOverlay.svelte";
-import { COPY_PAGE_ROWS } from "../lib/term-clone";
+import { COPY_PAGE_ROWS } from "../lib/term/term-clone";
 
 // btoa, not Buffer: the app tsconfig has no node types, and these fixtures are
 // ASCII so the latin1 round-trip is exact.

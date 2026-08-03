@@ -2,12 +2,12 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/keymap";
-  import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/input-router";
-  import { createKeyRepeater, type KeyRepeater } from "../lib/key-repeat";
-  import { imeSendText } from "../lib/ime-send";
+  import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/term/keymap";
+  import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/term/input-router";
+  import { createKeyRepeater, type KeyRepeater } from "../lib/term/key-repeat";
+  import { imeSendText } from "../lib/term/ime-send";
   import type { VibrateLevel } from "../lib/settings";
-  import { keyboardHeight, isKeyboardOpen, type ViewportMetrics } from "../lib/keyboard-inset";
+  import { keyboardHeight, isKeyboardOpen, type ViewportMetrics } from "../lib/term/keyboard-inset";
 
   let { onText, onCommand, vibrate = "medium" as VibrateLevel, layout = "mac", hints = [], onHint = (_c: string) => {} }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
@@ -181,7 +181,7 @@
   const isModOn = (id: string) => MODSET.has(id) && mods[id as ModName] !== "off";
   const isModLocked = (id: string) => MODSET.has(id) && mods[id as ModName] === "locked";
 
-  function keyLabel(k: import("../lib/keymap").KeyCap): { main: string; upper?: string } {
+  function keyLabel(k: import("../lib/term/keymap").KeyCap): { main: string; upper?: string } {
     const main = capFor(k, layout);
     const shifted = activeMods(mods).shift;
     if (k.up) {

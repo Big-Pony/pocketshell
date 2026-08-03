@@ -2,10 +2,10 @@ import { test, expect, vi, beforeAll, afterAll } from "vitest";
 import { render, waitFor } from "@testing-library/svelte";
 import { Terminal } from "@xterm/xterm";
 import TerminalView from "./Terminal.svelte";
-import { PendingBuffer } from "../lib/pending-buffer";
+import { PendingBuffer } from "../lib/term/pending-buffer";
 import { FitAddon } from "@xterm/addon-fit";
 import { toB64 } from "../lib/bytes";
-import type { Connection } from "../lib/connection";
+import type { Connection } from "../lib/net/connection";
 
 // The two merged suites need different xterm implementations: the buffering /
 // poll / resize tests below drive a recording mock, while the IME-hardening

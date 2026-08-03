@@ -1,6 +1,6 @@
 // B6 pairing — parse the pasted pairing string produced by the agent console.
 // Format: "pocketshell-pair:" + base64url(JSON{v:1,pub,addr,code}).
-import { tr } from "./i18n";
+import { tr } from "../i18n";
 
 export interface PairingInfo { pub: string; addr: string; code: string; }
 

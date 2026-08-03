@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { toB64, fromB64 } from "./bytes";
+import { toB64, fromB64 } from "../bytes";
 import { encode, decodeServer, decodeClient } from "./protocol";
 
 test("browser base64 round-trips non-UTF8 bytes", () => {

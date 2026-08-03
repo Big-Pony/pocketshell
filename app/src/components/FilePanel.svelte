@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
-  import { Connection } from "../lib/connection";
-  import { loadProjectRoot } from "../lib/file-tree";
+  import { Connection } from "../lib/net/connection";
+  import { loadProjectRoot } from "../lib/ui/file-tree";
   import FileTree from "./FileTree.svelte";
   import GitPanel from "./GitPanel.svelte";
 

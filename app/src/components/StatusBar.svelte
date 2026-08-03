@@ -10,8 +10,8 @@
      一律不显示，不留 `--` 占位符。 -->
 <script lang="ts">
   import { t } from "svelte-i18n";
-  import { formatLatency, formatRate, formatBranch, formatContext } from "../lib/status-bar";
-  import { loadTipSeen, saveTipSeen } from "../lib/status-bar-tip";
+  import { formatLatency, formatRate, formatBranch, formatContext } from "../lib/ui/status-bar";
+  import { loadTipSeen, saveTipSeen } from "../lib/ui/status-bar-tip";
 
   let {
     branch = "",

@@ -1,5 +1,5 @@
 // Shared, testable view helpers for the session tabs + task panel.
-import type { SessionMeta, SessionState } from "./protocol";
+import type { SessionMeta, SessionState } from "../net/protocol";
 
 export interface LocalSession extends SessionMeta {
   closed?: boolean;

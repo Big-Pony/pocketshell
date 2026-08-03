@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 
 // 顶栏实例名的渲染规则做成纯函数便于断言：组件只负责把它塞进 span。
-import { brandPrefix } from "./lib/instance-name";
+import { brandPrefix } from "./lib/ui/instance-name";
 
 describe("brandPrefix", () => {
   test("returns the name plus separator when set", () => {

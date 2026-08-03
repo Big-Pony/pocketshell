@@ -1,7 +1,7 @@
 // B1.6 keystore: this device's persistent Noise static identity (localStorage)
 // + the Agent's static public key (localStorage override, VITE env default).
 import DH from "noise-handshake/dh";
-import { toB64, fromB64 } from "./bytes";
+import { toB64, fromB64 } from "../bytes";
 
 const ID_KEY = "pocketshell.identity";
 const AGENT_KEY = "pocketshell.agentPubKey";

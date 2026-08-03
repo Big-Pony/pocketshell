@@ -2,17 +2,17 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { Connection } from "../lib/connection";
+  import { Connection } from "../lib/net/connection";
   import {
     loadProjectRoot, saveProjectRoot, clearProjectRoot,
     loadRootHistory, pushRootHistory, loadRootFollow, saveRootFollow,
     toFileNodes, setChildren, collapse, filterTree, collectExpandedPaths, parentOf, type FileNode
-  } from "../lib/file-tree";
-  import { getBrowseCache, setBrowseCache } from "../lib/file-tree-cache";
-  import { IDLE, press, type ArmState } from "../lib/confirm-armed";
+  } from "../lib/ui/file-tree";
+  import { getBrowseCache, setBrowseCache } from "../lib/ui/file-tree-cache";
+  import { IDLE, press, type ArmState } from "../lib/ui/confirm-armed";
   import ContextMenu from "./ContextMenu.svelte";
   import UploadDialog from "./UploadDialog.svelte";
-  import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/transfer";
+  import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/net/transfer";
 
   let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, refreshTick, onToast, onToastRich, onRefresh, onNewFile }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
