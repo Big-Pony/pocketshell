@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { emptyCmdLine, feed } from "../src/lib/command-line";
+import { emptyCmdLine, feed } from "./command-line";
 
 test("append visible characters", () => {
   let s = emptyCmdLine();

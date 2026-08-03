@@ -3,14 +3,15 @@ import { loadTabs, saveTabs, type PersistedTabs } from "./tab-store";
 
 function memStore(): Storage {
   const m = new Map<string, string>();
-  return {
-    getItem: (k) => m.get(k) ?? null,
-    setItem: (k, v) => void m.set(k, v),
-    removeItem: (k) => void m.delete(k),
+  const store: Storage = {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
     clear: () => m.clear(),
     key: () => null,
     length: 0,
-  } as unknown as Storage;
+  };
+  return store;
 }
 
 describe("tab-store", () => {

@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { createKeyRepeater, type RepeatScheduler } from "../src/lib/key-repeat";
+import { createKeyRepeater, type RepeatScheduler } from "./key-repeat";
 
 // Manual clock: 1ms-step advance; fires due timeouts and interval ticks.
 // Timer handles are plain increasing ids like the Connection test scheduler.

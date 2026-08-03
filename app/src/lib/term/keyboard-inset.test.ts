@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { keyboardHeight, isKeyboardOpen } from "../src/lib/keyboard-inset";
+import { keyboardHeight, isKeyboardOpen } from "./keyboard-inset";
 
 test("keyboardHeight is layout height minus visual viewport bottom", () => {
   // 844 tall layout; keyboard shrinks visual viewport to 544 at offsetTop 0.

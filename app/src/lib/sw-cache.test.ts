@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cacheStrategy, bucketName, staleBuckets, BUCKET_PREFIX } from "../src/lib/sw-cache";
+import { cacheStrategy, bucketName, staleBuckets, BUCKET_PREFIX } from "./sw-cache";
 
 describe("cacheStrategy", () => {
   it("hashed assets are cache-first", () => {

@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { suggest, delta, dedupe } from "../src/lib/command-suggest";
+import { suggest, delta, dedupe } from "./command-suggest";
 
 test("without input returns recent history (deduped, ordered)", () => {
   expect(suggest("", ["ls", "pwd", "ls"], [], ["git status"])).toEqual(["ls", "pwd"]);

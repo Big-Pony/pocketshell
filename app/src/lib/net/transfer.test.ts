@@ -1,5 +1,5 @@
 import { test, expect, vi, beforeAll, describe } from "vitest";
-import { humanSize, chunkOffsets, childPath, uploadFiles, uploadChunksWindowed, UPLOAD_WINDOW, baseName, downloadFileBlob, downloadFolder, fetchChunksWindowed, DOWNLOAD_WINDOW, CHUNK_BYTES } from "./transfer";
+import { humanSize, chunkOffsets, childPath, uploadFiles, uploadChunksWindowed, UPLOAD_WINDOW, baseName, downloadFileBlob, downloadFolder, fetchChunksWindowed, DOWNLOAD_WINDOW, CHUNK_BYTES, type RpcLike } from "./transfer";
 import { toB64, fromB64 } from "./bytes";
 
 beforeAll(() => {
@@ -51,12 +51,14 @@ test("uploadFiles chunks each file, flags first/last, reports aggregate progress
 });
 
 test("uploadFiles stops early when shouldCancel() turns true", async () => {
-  const rpc = vi.fn(async () => ({ written: 0 }));
+  // Typed with RpcLike's own signature so the recorded wrapper can forward the
+  // real (method, params) pair — a bare `async () => …` mock takes 0 args.
+  const rpc = vi.fn<RpcLike["rpc"]>(async () => ({ written: 0 }));
   let sent = 0;
   const orig = rpc.getMockImplementation()!;
-  rpc.mockImplementation(async (...a: any[]) => { sent++; return orig(...a as [any, any]); });
+  rpc.mockImplementation(async (method, params) => { sent++; return orig(method, params); });
   const blob = new Blob([new Uint8Array(10)]);
-  await uploadFiles({ rpc } as any, "/d", [{ name: "f", size: 10, blob, destName: "f" }], {
+  await uploadFiles({ rpc } as unknown as RpcLike, "/d", [{ name: "f", size: 10, blob, destName: "f" }], {
     chunkBytes: 2, shouldCancel: () => sent >= 2, // cancel after 2 chunks
   });
   expect(sent).toBeLessThan(5); // did not send all 5 chunks

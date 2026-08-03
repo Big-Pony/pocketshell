@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { ReplayService } from "../src/replay";
+import { ReplayService } from "./replay";
 
 const b = (s: string) => new TextEncoder().encode(s);
 

@@ -1,9 +1,9 @@
 // P1 unified top-area tab model. Terminal tabs (kind:"term") come from live
 // sessions; file preview tabs (kind:"file") are opened from the file panel.
 // Both share one ordered list so Fn+←/→ cycles across them uniformly.
-export type TopTab =
-  | { kind: "term"; id: string; title: string }
-  | { kind: "file"; id: string; title: string; path: string; mode: "code" | "diff" };
+export type TermTab = { kind: "term"; id: string; title: string };
+export type FileTab = { kind: "file"; id: string; title: string; path: string; mode: "code" | "diff" };
+export type TopTab = TermTab | FileTab;
 
 export function fileTabId(path: string, mode: "code" | "diff"): string {
   return `file:${mode}:${path}`;
@@ -21,10 +21,12 @@ export function openFileTab(tabs: TopTab[], path: string, mode: "code" | "diff")
   return [...tabs, { kind: "file", id, title, path, mode }];
 }
 
+// Only file tabs carry a path, so the result is narrowed to FileTab — callers
+// can read `.path`/`.mode` without re-discriminating the union.
 export function findTabByPath(
   tabs: TopTab[], path: string, mode: "code" | "diff",
-): TopTab | undefined {
-  return tabs.find((t) => t.kind === "file" && t.path === path && t.mode === mode);
+): FileTab | undefined {
+  return tabs.find((t): t is FileTab => t.kind === "file" && t.path === path && t.mode === mode);
 }
 
 // In-place navigation: change a file tab's path (and title) while keeping its id

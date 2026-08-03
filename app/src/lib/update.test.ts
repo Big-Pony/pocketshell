@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { phaseLabelKey, hasUpdate, compareSemver, shouldReloadAfterUpdate } from "../src/lib/update";
+import { phaseLabelKey, hasUpdate, compareSemver, shouldReloadAfterUpdate } from "./update";
 
 describe("update pure logic", () => {
   it("phaseLabelKey maps each phase", () => {

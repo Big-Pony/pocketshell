@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
-import UpdateDialog from "../src/components/UpdateDialog.svelte";
+import UpdateDialog from "./UpdateDialog.svelte";
 
 describe("UpdateDialog", () => {
   it("shows versions and fires onConfirm/onCancel", async () => {

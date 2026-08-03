@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { toB64, fromB64 } from "../src/bytes";
+import { toB64, fromB64 } from "./bytes";
 
 test("round-trips arbitrary bytes including non-UTF8", () => {
   const src = new Uint8Array([0, 1, 2, 27, 91, 255, 254, 0x41]);

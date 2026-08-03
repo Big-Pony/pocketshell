@@ -28,8 +28,13 @@ export function applyLanguage(lang: Language): void {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
 }
 
+// Interpolation values accepted by ICU message formatting. Mirrors
+// svelte-i18n's internal `InterpolationValues` (not exported by the package);
+// `unknown` would not do — intl-messageformat can only format these.
+export type TrValues = Record<string, string | number | boolean | Date | null | undefined>;
+
 // One-shot, non-reactive translate for plain TS (event handlers, lib modules,
 // error strings). In templates and $derived prefer the reactive `$t(...)`.
-export function tr(key: string, values?: Record<string, unknown>): string {
+export function tr(key: string, values?: TrValues): string {
   return get(t)(key, values ? { values } : undefined);
 }

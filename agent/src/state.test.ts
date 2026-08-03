@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { inferState, RUN_WINDOW_MS, StateHysteresis } from "../src/state";
+import { inferState, RUN_WINDOW_MS, StateHysteresis } from "./state";
 
 test("no tmux session -> done", () => {
   expect(inferState({ hasSession: false, lastOutputAt: 1000, now: 1000 })).toBe("done");

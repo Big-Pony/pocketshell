@@ -1,6 +1,13 @@
 import { test, expect } from "bun:test";
 import { TerminalService, type TmuxResult, type TmuxRunner } from "./terminal";
 import { StateHysteresis } from "./state";
+import { hasTmux as tmuxAvailable } from "./test-support";
+
+// Probe via the shared helper: a bare `Bun.spawnSync(["tmux","-V"])` THROWS when
+// tmux is absent, which would take down this whole file at collection time.
+// Declared up here (not beside the integration block below) because the two
+// `ensure()` LANG tests also need it, and a `const` further down is in TDZ.
+const hasTmux = tmuxAvailable();
 
 const utf8 = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
 const ok = (s = "") => ({ exitCode: 0, stdout: utf8(s), stderr: new Uint8Array() });
@@ -405,7 +412,11 @@ test("pwd() returns empty pwd when tmux fails", () => {
   term.dispose();
 });
 
-test("ensure() injects LANG at new-session when a locale fallback is configured", () => {
+// These two stub the tmux *command runner*, but `ensure()` -> `attach()` also
+// spawns a real `tmux attach` PTY (hardcoded in terminal.ts, not injectable), so
+// they need the binary too. Previously unguarded only because the file crashed
+// at collection time on tmux-less machines and never got this far.
+test.skipIf(!hasTmux)("ensure() injects LANG at new-session when a locale fallback is configured", () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => {
@@ -424,7 +435,7 @@ test("ensure() injects LANG at new-session when a locale fallback is configured"
   expect(created[eIdx - 1]).toBe("-e"); // must be preceded by its own -e flag
 });
 
-test("ensure() does not inject LANG at new-session when there is no locale fallback", () => {
+test.skipIf(!hasTmux)("ensure() does not inject LANG at new-session when there is no locale fallback", () => {
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => {
@@ -518,4 +529,120 @@ test("list() reports the scanner-debounced state, not a fresh raw inference", as
   const sessions = await term.list();
   expect(sessions.find((s) => s.name === "s")?.state).toBe("wait");
   term.dispose();
+});
+
+// ---- merged from the former agent/test/terminal.test.ts ----
+// Integration tests against a real tmux binary (skipped when tmux is absent).
+
+const NAME = "pocketshell_test";
+
+test.skipIf(!hasTmux)("ensure creates a session and streams echoed output", async () => {
+  const svc = new TerminalService();
+  const chunks: string[] = [];
+  svc.onOutput((_name, chunk) => chunks.push(new TextDecoder().decode(chunk)));
+
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(400);                 // let attach settle
+  svc.write(NAME, new TextEncoder().encode("echo TERM_OK\n"));
+  await Bun.sleep(600);                 // let output flush
+
+  const all = chunks.join("");
+  expect(all).toContain("TERM_OK");
+
+  await svc.kill(NAME);
+  svc.dispose();
+});
+
+test.skipIf(!hasTmux)("list reports the live session", async () => {
+  const svc = new TerminalService();
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(300);
+  expect((await svc.list()).some((s) => s.name === NAME)).toBe(true);
+  await svc.kill(NAME);
+  svc.dispose();
+});
+
+test.skipIf(!hasTmux)("state transitions run -> wait after output goes quiet", async () => {
+  const svc = new TerminalService();
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(300);
+  svc.write(NAME, new TextEncoder().encode("echo BUSY\n"));
+
+  const pollFor = async (target: "run" | "wait", timeoutMs: number) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const s = (await svc.list()).find((sess) => sess.name === NAME);
+      if (s?.state === target) return s;
+      await Bun.sleep(50);
+    }
+    return (await svc.list()).find((sess) => sess.name === NAME);
+  };
+
+  const busy = await pollFor("run", 3000);
+  expect(busy?.state).toBe("run");        // output arrived
+  const idle = await pollFor("wait", 3000);
+  expect(idle?.state).toBe("wait");       // quiet for > RUN_WINDOW_MS
+  await svc.kill(NAME);
+  svc.dispose();
+});
+
+test.skipIf(!hasTmux)("onSessionsChange fires when a session's state changes", async () => {
+  const svc = new TerminalService();
+  let fired = 0;
+  svc.onSessionsChange(() => { fired++; });
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(1600);                    // let the 1s scanner run at least once
+  expect(fired).toBeGreaterThan(0);
+  await svc.kill(NAME);
+  svc.dispose();
+});
+
+test.skipIf(!hasTmux)("rename changes the session name in the list", async () => {
+  const svc = new TerminalService();
+  const NEW = "pocketshell_test_renamed";
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(300);
+  svc.rename(NAME, NEW);
+  const names = (await svc.list()).map((s) => s.name);
+  expect(names).toContain(NEW);
+  expect(names).not.toContain(NAME);
+  await svc.kill(NEW);
+  svc.dispose();
+});
+
+test.skipIf(!hasTmux)("output is delivered under the new name after rename", async () => {
+  const svc = new TerminalService();
+  const NEW = "pocketshell_test_renamed_out";
+  const got: string[] = [];
+  svc.onOutput((name, chunk) => { if (name === NEW) got.push(new TextDecoder().decode(chunk)); });
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(400);
+  svc.rename(NAME, NEW);
+  await Bun.sleep(400);                 // let the re-attach settle
+  svc.write(NEW, new TextEncoder().encode("echo RENAMED_OUT\n"));
+  await Bun.sleep(700);
+  expect(got.join("")).toContain("RENAMED_OUT");  // must arrive tagged with NEW name
+  await svc.kill(NEW);
+  svc.dispose();
+});
+
+test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)", async () => {
+  const svc = new TerminalService();
+  const exited: string[] = [];
+  svc.onExit((name) => exited.push(name));
+  svc.ensure(NAME, { cols: 80, rows: 24 });
+  await Bun.sleep(400);
+  // Detach every client attached to the session; the tmux session must survive.
+  Bun.spawnSync(["tmux", "detach-client", "-s", NAME]);
+  await Bun.sleep(600);
+  expect(exited).not.toContain(NAME);          // no exit fired
+  expect((await svc.list()).some((s) => s.name === NAME)).toBe(true); // still listed
+  // And it still streams after re-attach:
+  const chunks: string[] = [];
+  svc.onOutput((_n, c) => chunks.push(new TextDecoder().decode(c)));
+  svc.write(NAME, new TextEncoder().encode("echo REATTACH_OK\n"));
+  await Bun.sleep(600);
+  expect(chunks.join("")).toContain("REATTACH_OK");
+  await svc.kill(NAME);
+  svc.dispose();
 });

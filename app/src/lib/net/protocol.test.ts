@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
-import { toB64, fromB64 } from "../src/lib/bytes";
-import { encode, decodeServer, decodeClient } from "../src/lib/protocol";
+import { toB64, fromB64 } from "./bytes";
+import { encode, decodeServer, decodeClient } from "./protocol";
 
 test("browser base64 round-trips non-UTF8 bytes", () => {
   const src = new Uint8Array([0, 27, 91, 255, 65]);

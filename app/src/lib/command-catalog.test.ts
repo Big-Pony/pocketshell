@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { CATALOG } from "../src/lib/command-catalog";
+import { CATALOG } from "./command-catalog";
 
 test("CATALOG contains common commands and follows format rules", () => {
   expect(CATALOG).toContain("git status");

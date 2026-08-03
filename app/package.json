@@ -47,6 +47,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.4.2",
     "@types/markdown-it": "^14.1.2",
+    "@types/node": "^26.1.2",
     "jsdom": "^25.0.0",
     "svelte": "^5.0.0",
     "typescript": "^7.0.2",

@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { resolveKey, EMPTY_MODS, activeMods } from "../src/lib/input-router";
+import { resolveKey, EMPTY_MODS, activeMods } from "./input-router";
 
 test("Del resolves to the forward-delete escape sequence", () => {
   const r = resolveKey("Del", activeMods(EMPTY_MODS));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe, pushSendErrorKey } from "../src/lib/notify";
+import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe, pushSendErrorKey } from "./notify";
 
 // agent 侧发送失败的原因（notify.json 的 webPushLastError）。与浏览器订阅失败
 // 是两套完全不同的文本：这些是 Node/undici 的网络错误，不是 DOMException。

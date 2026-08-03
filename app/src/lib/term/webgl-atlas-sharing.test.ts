@@ -24,15 +24,10 @@ describe("webgl shared atlas invalidation (upstream #6038 regression guard)", ()
   // import.meta.url: under vite the latter is an http-scheme URL, not file:.
   const src = "node_modules/@xterm/addon-webgl/lib/addon-webgl.js";
 
-  // `node:fs` has no types here (the project ships no @types/node, and adding it
-  // just for this guard would widen the dependency surface), so the import is
-  // funnelled through one narrowly-typed helper instead of being sprinkled with
-  // ts-expect-error at each call site.
+  // One helper so the dynamic node:fs import (vitest runs in node) is not
+  // repeated at each call site.
   const readText = async (path: string): Promise<string> => {
-    // @ts-expect-error -- no @types/node in this project; vitest runs in node.
-    const fs = (await import("node:fs")) as {
-      readFileSync(p: string, enc: string): string;
-    };
+    const fs = await import("node:fs");
     return fs.readFileSync(path, "utf8");
   };
 
