@@ -1,4 +1,4 @@
-import { test, expect, vi } from "vitest";
+import { test, expect, vi, describe, it } from "vitest";
 import { Connection, rpcDeadlineMs, RPC_BASE_TIMEOUT_MS, RPC_MAX_TIMEOUT_MS, type WebSocketLike, type Scheduler } from "./connection";
 import { encode, decodeClient, type ServerMsg, type SessionMeta } from "./protocol";
 import { toB64 } from "../bytes";
@@ -494,8 +494,9 @@ class FakeWS implements WebSocketLike {
   onmessage: ((ev: { data: ArrayBuffer }) => void) | null = null;
   onclose: (() => void) | null = null;
   sent: Uint8Array[] = [];
+  closed = false;
   send(data: Uint8Array) { this.sent.push(data); }
-  close() { this.onclose?.(); }
+  close() { this.closed = true; this.onclose?.(); }
   // fire a bytes frame as if the server sent it. The bytes are copied into a
   // fresh ArrayBuffer (not `b.buffer.slice(...)`, whose static type is the
   // wider ArrayBufferLike) so the payload matches a real ws "arraybuffer" event.
@@ -529,12 +530,20 @@ function makeFakeScheduler() {
   let nextId = 1;
   const timeouts = new Map<number, { at: number; fn: () => void }>();
   const intervals = new Map<number, { every: number; next: number; fn: () => void }>();
-  const sched: Scheduler = {
+  const sched: Scheduler & { pending: () => Array<{ id: number; delay: number }> } = {
     setTimeout: (fn, ms) => { const id = nextId++; timeouts.set(id, { at: t + ms, fn }); return id; },
     clearTimeout: (id) => { timeouts.delete(id); },
     setInterval: (fn, ms) => { const id = nextId++; intervals.set(id, { every: ms, next: t + ms, fn }); return id; },
     clearInterval: (id) => { intervals.delete(id); },
     now: () => t,
+    // Exposes what's currently scheduled (timeouts AND intervals) so tests can
+    // assert on "how many timers are pending" without reaching into private
+    // Connection state. delay is ms-from-now, matching what was passed to
+    // setTimeout/setInterval when nothing has advanced the clock since.
+    pending: () => [
+      ...[...timeouts.entries()].map(([id, x]) => ({ id, delay: x.at - t })),
+      ...[...intervals.entries()].map(([id, x]) => ({ id, delay: x.next - t })),
+    ],
   };
   function advance(ms: number) {
     const target = t + ms;
@@ -1100,4 +1109,62 @@ test("dispatches an update frame to onUpdate", () => {
   conn.onUpdate((u) => seen.push(u));
   ws.emit(encode({ type: "update", phase: "downloading", pct: 10, version: "0.4.0" }));
   expect(seen).toEqual([{ phase: "downloading", pct: 10, message: undefined, version: "0.4.0" }]);
+});
+
+// ──────────────────────────────────────────────────────────────
+// dropConnection: closes the current socket by hand so tests (and the
+// upcoming automation surface on window.pocketshell) can exercise the
+// offline → reconnect path deterministically, instead of waiting out the
+// 25s liveness window. Reuses the FakeWS + makeFakeScheduler fixtures from
+// the reconnect/backoff tests above — same house style, not a new one.
+// ──────────────────────────────────────────────────────────────
+function makeConn() {
+  const { sched, advance } = makeFakeScheduler();
+  let socket!: FakeWS;
+  const statuses: string[] = [];
+  const conn = new Connection({
+    url: "ws://x", scheduler: sched,
+    wsFactory: () => (socket = new FakeWS()),
+    channelFactory: passthroughInitiator,
+  });
+  conn.onStatus((s) => statuses.push(s));
+  return { conn, socket, sched, statuses, advance };
+}
+
+describe("dropConnection", () => {
+  it("closes the live socket and goes offline", () => {
+    const { conn, socket, statuses } = makeConn();
+    socket.onopen?.();                        // handshake started, not established yet
+    expect(conn.status).toBe("connecting");   // still connecting pre-handshake
+
+    conn.dropConnection();
+
+    expect(socket.closed).toBe(true);
+    expect(statuses).toContain("offline");
+  });
+
+  it("schedules a reconnect after dropping", () => {
+    const { conn, socket, sched } = makeConn();
+    socket.onopen?.();
+    conn.dropConnection();
+    // FakeWS.close() invokes onclose synchronously (same as every other test
+    // in this file), so handleDown() has already run — no need to fire the
+    // close event a second time by hand.
+
+    // handleDown 排了一个 backoff timer；第一次退避是 500ms × (0.8~1.2)
+    expect(sched.pending().length).toBe(1);
+    expect(sched.pending()[0]!.delay).toBeLessThanOrEqual(600);
+  });
+
+  it("stops the heartbeat so no ping fires on a dead socket", () => {
+    const { conn, socket, sched } = makeConn();
+    completeHandshake(socket);                // fully online, heartbeat running
+    expect(sched.pending().length).toBe(1);   // just the heartbeat interval
+
+    conn.dropConnection();
+
+    // Heartbeat interval cleared; only the reconnect backoff timer remains —
+    // if dropConnection failed to stop the heartbeat this would be 2.
+    expect(sched.pending().length).toBe(1);
+  });
 });

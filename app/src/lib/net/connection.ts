@@ -253,6 +253,20 @@ export class Connection {
     if (this.hsTimer !== undefined) { this.sched.clearTimeout(this.hsTimer); this.hsTimer = undefined; }
   }
 
+  /**
+   * Tear down the current socket and let the normal reconnect path take over.
+   *
+   * Mirrors what the heartbeat liveness timeout does: stop the heartbeat, close
+   * the socket, and let `onclose` land in `handleDown()` so status, metrics and
+   * backoff all follow the same path a real network drop would take. Exposed so
+   * callers can exercise the offline/reconnect flow deterministically instead of
+   * waiting out the liveness window.
+   */
+  dropConnection(): void {
+    this.stopHeartbeat();
+    this.ws.close();
+  }
+
   dispose(): void {
     this.stopHeartbeat();
     this.clearHsTimer();
