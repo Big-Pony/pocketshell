@@ -25,10 +25,6 @@ describe("cacheStrategy", () => {
     expect(cacheStrategy("/preview/abc123/nested/dir/page.html")).toBe("bypass");
   });
 
-  it("admin routes bypass", () => {
-    expect(cacheStrategy("/admin")).toBe("bypass");
-    expect(cacheStrategy("/admin-api/devices")).toBe("bypass");
-  });
 
   it("sw.js itself bypasses so the browser can always revalidate it", () => {
     expect(cacheStrategy("/sw.js")).toBe("bypass");

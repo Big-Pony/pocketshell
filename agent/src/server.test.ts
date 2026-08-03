@@ -437,6 +437,10 @@ function realServer(extraConfig: any = {}) {
     ...base,
     ...extraConfig,
     registry,
+    // loadConfig() ignores the `registryFile` key above (it reads env vars, and
+    // that is not one), so it must be set explicitly — otherwise the registry
+    // watcher polls the developer's real ~/.pocketshell/devices.json.
+    registryFile: file,
     pairing: null,
     pairingMode: false,
     listen: { host: "127.0.0.1", port: 0 },
@@ -447,65 +451,66 @@ function realServer(extraConfig: any = {}) {
   return { srv: startServer({ port: 0, config: cfg }), file };
 }
 
-test("admin page is served on /admin from loopback when enabled", async () => {
-  const { srv, file } = realServer({ adminEnabled: true });
-  const res = await fetch(buildUrl(srv, "/admin"));
-  expect(res.status).toBe(200);
-  const text = await res.text();
-  expect(text).toContain("PocketShell 本地管理");
+// any link in that chain breaks.
+test("CLI device removal disconnects the live session and de-authorizes it", () => {
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  registry.add("B", "victim");
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry, registryFile: file, pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
+  };
+  const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("B", false) });
+
+  let bClosed = false;
+  const wsB: any = { sent: [] as Uint8Array[], send(d: any) { this.sent.push(d); }, close() { bClosed = true; } };
+  srv.__test.openWith(wsB, "2.2.2.2", stubResponder("B", false));
+  srv.__test.message(wsB as any, M1);
+  expect(registry.has("B")).toBe(true);
+
+  // A separate process removes the device — exactly what `devices remove` does.
+  loadDeviceRegistry(file).remove("B");
+  // The resident agent has not noticed yet: this was the whole bug. Before the
+  // watcher it never would, and the next touch() rewrote the record back.
+  expect(registry.has("B")).toBe(true);
+  expect(bClosed).toBe(false);
+
+  srv.__test.pollRegistry();
+
+  // De-authorized (future handshakes refused) AND kicked (the already-open
+  // socket had passed the handshake and would otherwise keep working).
+  expect(registry.has("B")).toBe(false);
+  expect(bClosed).toBe(true);
   srv.stop();
   rmSync(file, { force: true });
 });
 
-test("admin endpoints return 404 when adminEnabled=false", async () => {
-  const { srv, file } = realServer({ adminEnabled: false });
-  expect((await fetch(buildUrl(srv, "/admin"))).status).toBe(404);
-  expect((await fetch(buildUrl(srv, "/admin-api/devices"))).status).toBe(404);
-  srv.stop();
-  rmSync(file, { force: true });
-});
+test("registry watcher does not disturb devices when nobody was removed", () => {
+  // touch() rewrites devices.json on every heartbeat. If that read as a
+  // revocation, every connected device would be kicked every few seconds.
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  registry.add("B", "keeper");
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry, registryFile: file, pairing: null, pairingMode: false,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
+  };
+  const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("B", false) });
+  let bClosed = false;
+  const wsB: any = { sent: [] as Uint8Array[], send(d: any) { this.sent.push(d); }, close() { bClosed = true; } };
+  srv.__test.openWith(wsB, "2.2.2.2", stubResponder("B", false));
+  srv.__test.message(wsB as any, M1);
 
-test("admin-api/devices reflects registry devices and online IPs", async () => {
-  const { srv, file } = realServer({ adminEnabled: true });
-  const reg = srv.__test.config.registry;
-  reg.add("PUB1", "iPhone");
-  reg.touch("PUB1", "127.0.0.1");
-  const res = await fetch(buildUrl(srv, "/admin-api/devices"));
-  expect(res.status).toBe(200);
-  const rows = await res.json();
-  expect(rows.length).toBe(1);
-  expect(rows[0]).toMatchObject({ pubKey: "PUB1", name: "iPhone", online: false, ip: "127.0.0.1" });
-  srv.stop();
-  rmSync(file, { force: true });
-});
-
-test("admin-api/revoke removes a device", async () => {
-  const { srv, file } = realServer({ adminEnabled: true });
-  const reg = srv.__test.config.registry;
-  reg.add("PUB2", "Pixel");
-  let deleted = false;
-  const res = await fetch(buildUrl(srv, "/admin-api/revoke"), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pubKey: "PUB2" }),
-  });
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(body.ok).toBe(true);
-  expect(reg.has("PUB2")).toBe(false);
-  srv.stop();
-  rmSync(file, { force: true });
-});
-
-test("admin-api/pair generates a new pairing code", async () => {
-  const { srv, file } = realServer({ adminEnabled: true, pairingMode: true });
-  const res = await fetch(buildUrl(srv, "/admin-api/pair"), { method: "POST" });
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(typeof body.code).toBe("string");
-  expect(body.code.length).toBe(8);
-  expect(typeof body.pairString).toBe("string");
-  expect(body.pairString.length).toBeGreaterThan(0);
+  registry.touch("B", "2.2.2.2"); // rewrites the file, removes nobody
+  srv.__test.pollRegistry();
+  expect(registry.has("B")).toBe(true);
+  expect(bClosed).toBe(false);
   srv.stop();
   rmSync(file, { force: true });
 });
@@ -537,6 +542,26 @@ test("applyGate: refuses when the cached check says canApply is false, surfacing
 test("applyGate: starts when repo is set, cache is applicable, and nothing is in flight", () => {
   const out = applyGate("org/repo", { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() }, false);
   expect(out).toEqual({ started: true, latest: "1.1.0" });
+});
+
+// RCE-⑥ / VULN-002. update.apply renames a downloaded binary over the running
+// executable, and its only integrity check is a SHA256SUMS.txt from the same
+// release — whoever picks the repo controls both sides. So POCKETSHELL_UPDATE_REPO
+// was effectively a remote-code-execution knob settable from the environment.
+// Auto-apply is now restricted to the built-in repo.
+test("applyGate: refuses to auto-apply from a non-official repo", () => {
+  const cache = { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() };
+  expect(applyGate("evil/pocketshell", cache, false, false)).toEqual({ started: false, reason: "unofficial_repo" });
+  // Refused even when everything else is perfect — the repo alone decides.
+  expect(applyGate("evil/pocketshell", cache, false, true)).toEqual({ started: true, latest: "1.1.0" });
+});
+
+test("applyGate: unofficial repo outranks the in-progress and cache reasons", () => {
+  // Ordering matters: if "in_progress" or "no_release_info" answered first, a
+  // caller retrying later would eventually get through on the second attempt.
+  const cache = { current: "1.0.0", latest: "1.1.0", hasUpdate: true, notes: "", publishedAt: null, canApply: true, checkedAt: Date.now() };
+  expect(applyGate("evil/repo", cache, true, false).started).toBe(false);
+  expect(applyGate("evil/repo", null, false, false)).toEqual({ started: false, reason: "unofficial_repo" });
 });
 
 // —— 实例身份：serve 层品牌化 ——

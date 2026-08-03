@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { loadConfig, buildPairingString, resolveTlsMaterial, advertiseToHttp, resolveAdvertise } from "./config";
+import { loadConfig, buildPairingString, resolveTlsMaterial, advertiseToHttp, resolveAdvertise, OFFICIAL_UPDATE_REPO } from "./config";
 import { toB64 } from "./bytes";
 import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync, readFileSync as _rf } from "node:fs";
 import { tmpdir } from "node:os";
@@ -158,15 +158,17 @@ test("POCKETSHELL_TLS=0 forces tls off even if agent.json enables it", () => {
   rmSync(keyDir, { recursive: true, force: true });
 });
 
-test("adminEnabled defaults to true", () => {
+// RCE-⑥ / VULN-002: `official` decides whether update.apply may swap the
+// running binary. See applyGate in server.ts.
+test("update.official tracks whether the repo is the built-in one", () => {
   const keyDir = tmpKeyDir();
-  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir }).adminEnabled).toBe(true);
-  rmSync(keyDir, { recursive: true, force: true });
-});
-
-test("adminEnabled is false when POCKETSHELL_ADMIN=0", () => {
-  const keyDir = tmpKeyDir();
-  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_ADMIN: "0" }).adminEnabled).toBe(false);
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir }).update.official).toBe(true);
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_UPDATE_REPO: OFFICIAL_UPDATE_REPO }).update.official).toBe(true);
+  const forked = loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_UPDATE_REPO: "evil/pocketshell" });
+  expect(forked.update.official).toBe(false);
+  // Still ENABLED — check keeps working against a fork, only apply is refused.
+  expect(forked.update.enabled).toBe(true);
+  expect(forked.update.repo).toBe("evil/pocketshell");
   rmSync(keyDir, { recursive: true, force: true });
 });
 

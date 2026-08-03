@@ -9,10 +9,22 @@ import { PreviewTokens, contentTypeFor, parseRange } from "./preview-service";
 // an opaque origin (cannot read the app's identity keys), and nosniff stops
 // MIME-sniffing octet-stream bodies into HTML. The iframe's own sandbox attr
 // is the first layer; this makes it not the ONLY layer.
+//
+// VULN-003: `access-control-allow-origin: *` used to sit here, which let any
+// site read a preview response if it ever learned a token. It is gone. Nothing
+// needs it — the app loads previews through <img src> / <video src> and an
+// <iframe>, none of which require CORS; the app is same-origin with the agent
+// anyway. Dropping the header costs no functionality and takes cross-origin
+// *reads* off the table even when a token leaks.
+//
+// The token itself stays in the URL path. The audit suggested moving it to an
+// Authorization header, but media elements cannot send one — that would mean
+// fetching every preview into a blob, which breaks HTTP range requests and so
+// breaks video seeking. `no-referrer` + `no-store` + a 30-minute TTL remain the
+// mitigations for the URL-borne token.
 const HARDENING = {
   "referrer-policy": "no-referrer",
   "cache-control": "no-store",
-  "access-control-allow-origin": "*",
   "content-security-policy": "sandbox allow-scripts",
   "x-content-type-options": "nosniff",
 } as const;

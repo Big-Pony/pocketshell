@@ -10,7 +10,7 @@
 // Strategy, by path:
 //   /assets/*, /fonts/*, /icons/*, /manifest.webmanifest -> cache-first
 //   /, /index.html                                       -> network-first
-//   everything else (incl. /preview/*, /admin*, /sw.js)  -> bypass
+//   everything else (incl. /preview/*, /sw.js)         -> bypass
 // Allowlist by design: an unlisted path is never cached, so a future
 // token-authed route can't be cached by accident.
 //

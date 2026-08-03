@@ -218,7 +218,7 @@ The Agent listens on port **`8722`** by default (change with `POCKETSHELL_PORT`)
 
 On first run the Agent prints the App URL, a pasteable **pairing string**, and the Agent public key. Open the App on your phone, paste the pairing string to complete a one-time pairing (default TTL 300s). The device is trusted afterward.
 
-Once installed as a service, that output goes to the log instead — read it with `sudo journalctl -u pocketshell -n 50` on Linux. The pairing code has a 300-second TTL and is minted only at process start; if it expires you don't need to restart the service — open the admin page at `http://127.0.0.1:8722/admin` on the Agent's own machine and generate a new one.
+Once installed as a service, that output goes to the log instead — read it with `sudo journalctl -u pocketshell -n 50` on Linux. The pairing code has a 300-second TTL and is minted only at process start; if it expires you don't need to restart the service — run `pocketshell-agent pair` on the Agent's own machine and it prints a fresh pairing string, which a running Agent picks up automatically.
 
 **Common environment variables** (`agent/src/config.ts`; precedence env > `<keyDir>/agent.json` > default)
 
@@ -229,7 +229,7 @@ Once installed as a service, that output goes to the log instead — read it wit
 | `POCKETSHELL_ADVERTISE` | — | external address baked into the pairing string |
 | `POCKETSHELL_KEY_DIR` | `~/.pocketshell` | keys / devices / audit dir |
 | `POCKETSHELL_TLS` / `_CERT` / `_KEY` | `0` | Agent built-in TLS (bring your own cert) |
-| `POCKETSHELL_ADMIN` | on | local admin page (127.0.0.1 only), `0` to disable |
+| `POCKETSHELL_UPDATE_REPO` | `Big-Pony/pocketshell` | release source for update checks; auto-update only applies from the built-in repo |
 | `POCKETSHELL_INSTANCE_NAME` | — | instance label, used to tell multiple installs apart (see below); unset shows the default "PocketShell" |
 
 ### Running more than one server
@@ -253,15 +253,21 @@ So you end up with two independent PWAs and two home-screen icons you can tell a
 
 > Each instance needs its own domain or address. The app is served over HTTPS, browsers refuse to let an HTTPS page open a plaintext `ws://` connection, and `wss://` needs a certificate — which cannot be issued for a bare IP. So any instance reachable over the internet needs a domain name (a subdomain is enough — see the [deployment guide](./DEPLOYMENT.md)). Direct IP access on a LAN is not affected.
 
-### Admin page
+### Managing devices
 
-The Agent ships a built-in admin page restricted to **localhost only**: open `http://127.0.0.1:8722/admin` on the machine running the Agent (port follows `POCKETSHELL_PORT`; the page itself is bilingual zh/en). It lets you:
+Device management is a command-line interface, run on the machine hosting the Agent:
 
-- **Generate a new pairing code** — a fresh one-time pairing string (TTL 300s) for pairing a new phone, no Agent restart needed;
-- **Inspect paired devices** — name, public key, last-seen IP, online status;
-- **Remove / revoke devices** — a revoked device is disconnected immediately and can no longer complete the handshake.
+```bash
+pocketshell-agent pair [--name <device-name>]   # mint a pairing string (TTL 300s)
+pocketshell-agent devices list                  # name, fingerprint, last seen, IP
+pocketshell-agent devices remove <fingerprint>  # revoke a device
+```
 
-The admin page only answers requests from `127.0.0.1`; access via a reverse proxy or the public internet is rejected by design. Set `POCKETSHELL_ADMIN=0` to disable it entirely.
+`pair` works against a running Agent — no restart needed. `devices remove` takes effect within a few seconds: the resident Agent notices the change, drops the device's authorization, closes its live connection, and clears its push subscriptions.
+
+> **There used to be a web admin page here.** It was removed in v1.7.5 because it was reachable from the public internet on every reverse-proxied deployment. Its only credential was a check that the request came from `127.0.0.1` — but a same-host reverse proxy (Caddy, Nginx, Cloudflare Tunnel, frp — all four setups [DEPLOYMENT.md](./DEPLOYMENT.md) recommends) connects from exactly that address, so the check passed for *every* request, including anonymous ones from the internet. `POST /admin-api/pair` would then return a working pairing string to anyone who asked. The page was localhost-only by design, which means its audience always had a shell — so it could never do anything the commands above cannot, and deleting it removes the attack surface rather than guarding it.
+>
+> **If you ran a reverse-proxied deployment on v1.7.4 or earlier**, check for unauthorized access: `<keyDir>/audit.log` for `admin_pair_new` events you did not trigger, and `pocketshell-agent devices list` for devices you do not recognise. `POCKETSHELL_ADMIN` is no longer read.
 
 ### Deployment
 

@@ -10,9 +10,7 @@ export type AuditEvent =
   | "connect"
   | "disconnect"
   | "revoke"
-  | "ratelimit_lock"
-  /** Operator minted a fresh pairing code from the local admin page. */
-  | "admin_pair_new";
+  | "ratelimit_lock";
 export interface AuditEntry { ts: string; event: AuditEvent; pub?: string | null; ip?: string; reason?: string; detail?: unknown; }
 export interface Audit { log(e: Omit<AuditEntry, "ts">): void; }
 

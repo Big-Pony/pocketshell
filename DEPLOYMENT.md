@@ -24,7 +24,7 @@ This guide covers four ways to expose the PocketShell Agent to your phone, from 
 
 **3. Encryption vs TLS.** PocketShell is end-to-end encrypted on its own (a Noise IK handshake per connection: mutual authentication + forward secrecy). Terminal traffic is ciphertext inside the WebSocket frames, so **even over plain `http://` + `ws://`, a man-in-the-middle can neither read nor impersonate anything**. What HTTPS adds is browser-side comfort: no address-bar warning, unrestricted clipboard APIs, and PWA installability. Bare-IP deployments (option A) are therefore safe; HTTPS setups (B/C/D) give the most complete experience.
 
-> Pairing tip: the pairing code has a 300 s TTL and is only generated at process start. To pair a new phone on a long-running Agent, no restart is needed — open the admin page `http://127.0.0.1:8722/admin` on the Agent machine and mint a fresh pairing string.
+> Pairing tip: the pairing code has a 300 s TTL and is only generated at process start. To pair a new phone on a long-running Agent, no restart is needed — run `pocketshell-agent pair` on the Agent machine to mint a fresh pairing string.
 
 ---
 
@@ -316,9 +316,9 @@ Each terminal session gets three env vars injected into its subprocess environme
 | `push-subs.json` | per-device Web Push subscriptions |
 | `notify_token` | the random token used to authenticate calls to `/internal/notify` |
 
-### CLI device management (headless ops)
+### CLI device management
 
-The `/admin` page only listens on `127.0.0.1`, which is awkward to reach on a headless Linux / SSH server. The Agent binary ships equivalent CLI subcommands that read and write the same `POCKETSHELL_KEY_DIR` (run them with the same `POCKETSHELL_KEY_DIR` env var as the resident process):
+This is the device-management interface (a web admin page existed until v1.7.5 — see the README for why it was removed). Run these on the Agent host, with the same `POCKETSHELL_KEY_DIR` env var as the resident process:
 
 ```bash
 # list paired devices (fingerprint, name, added time, last-seen, last IP)
@@ -333,7 +333,9 @@ pocketshell-agent pair [--name <device-name>]
 pocketshell-agent devices remove <pubkey-or-fingerprint>
 ```
 
-> `pair` atomically writes the pending code to `<keyDir>/pairing.pending.json` (0600); the resident Agent reads and adopts it the next time an unregistered device attempts the handshake, and clears it on a successful pairing. This suits headless Linux and replaces the localhost-only `/admin` page.
+> `pair` atomically writes the pending code to `<keyDir>/pairing.pending.json` (0600); the resident Agent reads and adopts it the next time an unregistered device attempts the handshake, and clears it on a successful pairing.
+
+> `devices remove` reaches a running Agent too: it polls `<keyDir>/devices.json` every 3 s, so within seconds of the removal the device loses its authorization, its live connection is closed, and its push subscriptions are dropped. No restart needed.
 
 > (Fixed 2026-07-30) Until now, a code minted by `pair` within **the first 5 minutes after the service started** was shadowed by the code minted at process start, so pairing with the fresh code returned a misleading `bad_code`. The newer code on disk now takes over from a still-live startup code, so `pair` takes effect immediately whenever you run it.
 
@@ -343,6 +345,6 @@ pocketshell-agent devices remove <pubkey-or-fingerprint>
 |---|---|
 | Phone can't load the page | Is the Agent running? Is `HOST` still `127.0.0.1`? Is the proxy/tunnel process alive? |
 | Page loads but keeps reconnecting | Does the proxy pass WebSocket through (check Nginx `Upgrade` headers)? HTTPS pages must use `wss` |
-| Pairing always fails | Pairing code expired (300 s TTL) — open `http://127.0.0.1:8722/admin` on the Agent machine and mint a new one |
+| Pairing always fails | Pairing code expired (300 s TTL) — run `pocketshell-agent pair` on the Agent machine to mint a new one |
 | Agent keeps exiting under launchd/systemd | Check error logs; usually `PATH` missing tmux (macOS) or a non-executable binary |
 | Garbled CJK/icons in the terminal | Check the host locale; the Agent already forces UTF-8 via `tmux -u`, so this is rarely needed |

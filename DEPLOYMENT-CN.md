@@ -24,7 +24,7 @@
 
 **3. 加密与 TLS 的关系。** PocketShell 自带端到端加密（每次连接做 Noise IK 握手，双向身份认证 + 前向保密）：终端内容在 WebSocket 帧内就是密文，**即使走明文 `http://` + `ws://` 链路，中间人也解不开、也冒充不了**。TLS/HTTPS 带来的是浏览器侧的额外好处：地址栏不告警、剪贴板等 API 不受限、可安装 PWA。因此纯 IP 直连（方式 A）是安全的，但体验最完整的是 HTTPS（方式 B/C/D）。
 
-> 配对提示：配对码 TTL 300 秒且仅在进程启动时生成一次。Agent 长期常驻后要加新手机，不用重启——在 Agent 所在机器打开管理页 `http://127.0.0.1:8722/admin` 一键生成新配对串即可。
+> 配对提示：配对码 TTL 300 秒且仅在进程启动时生成一次。Agent 长期常驻后要加新手机，不用重启——在 Agent 所在机器执行 `pocketshell-agent pair` 生成新配对串即可。
 
 ---
 
@@ -315,9 +315,9 @@ Agent 内置一个仅本机可访问的通知回环端点 `/internal/notify`（`
 | `push-subs.json` | 各设备的 Web Push 订阅信息 |
 | `notify_token` | `/internal/notify` 鉴权用的随机 token |
 
-### 命令行设备管理（无桌面运维）
+### 命令行设备管理
 
-`/admin` 管理页只监听 `127.0.0.1`，在纯 Linux / SSH 服务器上不方便打开。Agent 二进制内置了等效的命令行子命令，直接读写同一个 `POCKETSHELL_KEY_DIR`（务必用与常驻进程相同的 `POCKETSHELL_KEY_DIR` 环境变量运行）：
+这是设备管理的操作方式（v1.7.5 之前另有一个网页管理页，移除原因见 README）。在 Agent 所在主机上运行，务必用与常驻进程相同的 `POCKETSHELL_KEY_DIR` 环境变量：
 
 ```bash
 # 列出已配对设备（指纹、名称、加入时间、最近在线、最近 IP）
@@ -331,7 +331,9 @@ pocketshell-agent pair [--name <设备名>]
 pocketshell-agent devices remove <pubkey-or-fingerprint>
 ```
 
-> `pair` 会把待配对码原子写入 `<keyDir>/pairing.pending.json`（0600）；常驻 Agent 在下一次有未授权设备尝试握手时读取并采纳它，配对成功后自动清盘。适合 Linux 无桌面场景，替代仅监听 localhost 的 `/admin` 页。
+> `pair` 会把待配对码原子写入 `<keyDir>/pairing.pending.json`（0600）；常驻 Agent 在下一次有未授权设备尝试握手时读取并采纳它，配对成功后自动清盘。
+
+> `devices remove` 对常驻 Agent 同样即时生效：Agent 每 3 秒轮询一次 `<keyDir>/devices.json`，删除后数秒内该设备即失去授权、在线连接被断开、推送订阅被清除，无需重启。
 
 > （2026-07-30 修复）此前 `pair` 在服务**刚启动的 5 分钟内**会被进程启动时铸的码盖住，用户拿新码配对只会得到误导性的 `bad_code`。现在磁盘上更新的码会抢占仍存活的启动码，任何时刻跑 `pair` 都即刻生效。
 
@@ -341,6 +343,6 @@ pocketshell-agent devices remove <pubkey-or-fingerprint>
 |---|---|
 | 手机打不开页面 | Agent 是否在跑；`HOST` 是否还是 `127.0.0.1`；反代/隧道进程是否存活 |
 | 页面能开但连不上（一直重连） | 反代是否透传了 WebSocket（Nginx 检查 `Upgrade` 头）；HTTPS 页面必须走 `wss` |
-| 配对总失败 | 配对码已过期（TTL 300s）——在 Agent 机器上开 `http://127.0.0.1:8722/admin` 重新生成 |
+| 配对总失败 | 配对码已过期（TTL 300s）——在 Agent 机器上执行 `pocketshell-agent pair` 重新生成 |
 | launchd/systemd 下 Agent 反复退出 | 看错误日志；多半是 `PATH` 缺 tmux（macOS）或二进制无执行权限 |
 | 终端里中文/图标乱码 | 确认目标机 locale；Agent 已用 `tmux -u` 强制 UTF-8，一般无需处理 |

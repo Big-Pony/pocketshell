@@ -19,7 +19,8 @@ import { resolveStatic, contentEtag, isNotModified } from "./static-serve";
 import { brandManifest, brandHtml } from "./instance-brand";
 import { ASSETS } from "./embedded-manifest";
 import { createPairing, readPendingPairing, clearPendingPairing, shouldAdoptDiskPairing } from "./pairing";
-import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
+import { isLocalAddr } from "./net-addr";
+import { watchRegistryFile, readStamp } from "./registry-watch";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
 import { AGENT_VERSION } from "./version";
@@ -53,8 +54,19 @@ export function applyGate(
   repo: string | null,
   cache: CachedCheck | null,
   applying: boolean,
+  official = true,
 ): { started: false; reason: string } | { started: true; latest: string } {
   if (!repo) return { started: false, reason: "disabled" };
+  // RCE-⑥ / VULN-002. `update.apply` fetches a binary and renames it over the
+  // running executable; its only integrity check is a SHA256SUMS.txt from the
+  // same release, so whoever controls the repo controls both sides of the
+  // comparison. Auto-apply is therefore restricted to the built-in repo.
+  //
+  // Checking still works against a fork (`update.check` never calls this gate),
+  // so the version banner and "update available" UI keep functioning — you just
+  // have to install a fork's build deliberately instead of having the agent
+  // swap its own binary on the say-so of an env var.
+  if (!official) return { started: false, reason: "unofficial_repo" };
   if (applying) return { started: false, reason: "in_progress" };
   if (!cache?.canApply || !cache.latest) return { started: false, reason: cache?.reason ?? "no_release_info" };
   return { started: true, latest: cache.latest };
@@ -349,6 +361,30 @@ export function startServer(deps: Deps = {}) {
   const previewSweepTimer = setInterval(() => previewTokens.sweep(Date.now()), 300_000);
   (previewSweepTimer as unknown as { unref?: () => void }).unref?.();
 
+  // Everything that must happen when a device loses authorization. Dropping the
+  // registry row alone is not enough: an already-open WebSocket has passed the
+  // handshake and would keep working until it happened to reconnect, and its
+  // push subscriptions would keep delivering. Used by the in-band revokeDevice
+  // RPC and by the CLI-removal watcher, so the two paths cannot drift.
+  const revokeEffects = (pub: string, via: string) => {
+    config.audit.log({ event: "revoke", pub, ip: via });
+    for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
+    notify.removeSubsForDevice(pub);
+  };
+
+  // `pocketshell-agent devices remove` edits devices.json from another process.
+  // Without this poll the resident agent never notices: the device stays in the
+  // in-memory registry, keeps passing authorize(), and the next touch() writes
+  // the removed record back to disk. See registry-watch.ts.
+  const registryWatch = watchRegistryFile({
+    stamp: () => readStamp(config.registryFile),
+    current: () => config.registry.list().map((d) => d.pubKey),
+    reload: () => config.registry.reload().map((d) => d.pubKey),
+    onRemoved: (pubs) => {
+      for (const pub of pubs) revokeEffects(pub, "cli");
+    },
+  });
+
   const pushSnippets = (target?: Conn) => {
     const items = config.snippets.list().map((r) => ({
       id: r.id, group: r.group, label: r.label, command: r.command, autoEnter: r.autoEnter,
@@ -374,7 +410,7 @@ export function startServer(deps: Deps = {}) {
   let applying = false;
   async function runApply(): Promise<{ started: boolean; reason?: string }> {
     const cache = readCache(config.keyDir);
-    const gate = applyGate(config.update.repo, cache, applying);
+    const gate = applyGate(config.update.repo, cache, applying, config.update.official);
     if (!gate.started) return gate;
     applying = true;
     const tag = `v${gate.latest}`;
@@ -720,41 +756,6 @@ export function startServer(deps: Deps = {}) {
     });
   };
 
-  const onlineIpByPub = () => {
-    const m = new Map<string, string>();
-    for (const c of conns.values()) if (c.ready && c.remoteStatic) m.set(c.remoteStatic, c.ip);
-    return m;
-  };
-
-  const handleAdmin = async (url: URL, req: Request): Promise<Response> => {
-    if (url.pathname === "/admin") {
-      return new Response(ADMIN_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
-    }
-    if (url.pathname === "/admin-api/devices") {
-      return Response.json(deviceRows(config.registry.list(), onlineIpByPub()));
-    }
-    if (url.pathname === "/admin-api/pair" && req.method === "POST") {
-      config.pairing = createPairing({ now: () => Date.now() });
-      config.pairingMode = true;
-      const pairString = buildPairingString(config.identity.publicKey, resolveAdvertise(config), config.pairing.code);
-      config.audit.log({ event: "admin_pair_new" });
-      return Response.json({ code: config.pairing.code, pairString });
-    }
-    if (url.pathname === "/admin-api/revoke" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { pubKey?: string };
-      const pub = String(body.pubKey ?? "");
-      if (envKeys.has(pub)) return new Response("env keys are read-only", { status: 400 });
-      const removed = config.registry.remove(pub);
-      if (removed) {
-        config.audit.log({ event: "revoke", pub, ip: "admin" });
-        for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
-        notify.removeSubsForDevice(pub);
-      }
-      return Response.json({ ok: removed });
-    }
-    return new Response("Not found", { status: 404 });
-  };
-
   const tlsMaterial = resolveTlsMaterial(config.keyDir, config.tls);
   const server = Bun.serve({
     hostname: config.listen.host,
@@ -786,12 +787,6 @@ export function startServer(deps: Deps = {}) {
       }
       if (url.pathname.startsWith("/preview/")) {
         return buildPreviewResponse(previewTokens, url, Date.now(), req.headers.get("range"));
-      }
-      if (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin-api/")) {
-        if (!config.adminEnabled) return new Response("Not found", { status: 404 });
-        const ip = srv.requestIP(req)?.address ?? "";
-        if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
-        return handleAdmin(url, req);
       }
       const r = resolveStatic(
         url.pathname,
@@ -890,6 +885,7 @@ export function startServer(deps: Deps = {}) {
       clearInterval(pushTimer);
       clearInterval(sweepTimer);
       clearInterval(previewSweepTimer);
+      registryWatch.stop();
       batcher.clearAll();
       terminal.dispose();
       shell.dispose();
@@ -905,6 +901,7 @@ export function startServer(deps: Deps = {}) {
       emitExit: onTermExit,
       flushOutput: (name: string) => batcher.flush(name),
       drain: (ws: any) => { const conn = conns.get(ws); if (conn) maybeResync(conn); },
+      pollRegistry: () => registryWatch.poll(),
       config,
     },
   };

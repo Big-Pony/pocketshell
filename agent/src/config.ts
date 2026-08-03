@@ -13,6 +13,9 @@ import { openSnippetStore, type SnippetStore } from "./snippet-store";
 import { openHintStore, type HintStore } from "./hint-store";
 import { normalizeInstanceName } from "./instance-brand";
 
+/** The repo OTA is allowed to auto-apply from. See the `update` block below. */
+export const OFFICIAL_UPDATE_REPO = "Big-Pony/pocketshell";
+
 export interface AgentConfig {
   listen: { host: string; port: number };
   advertise?: string;
@@ -22,6 +25,9 @@ export interface AgentConfig {
   identity: { publicKey: Uint8Array; secretKey: Uint8Array };
   authorizedKeys: string[];
   registry: DeviceRegistry;
+  /** Path backing `registry`. The resident agent polls it so that a device
+   *  removed by the `devices remove` CLI takes effect without a restart. */
+  registryFile: string;
   pairingMode: boolean;
   pairing: Pairing | null;
   tls: { enabled: boolean; cert?: string; key?: string };
@@ -30,10 +36,9 @@ export interface AgentConfig {
   snippets: SnippetStore;
   hints: HintStore;
   tmpDir: string;
-  adminEnabled: boolean;
   /** 部署时传入的实例名（已归一化）。未设即不做 PWA 品牌化。 */
   instanceName?: string;
-  update: { enabled: boolean; repo: string | null };
+  update: { enabled: boolean; repo: string | null; official: boolean };
   notifyToken: string;
 }
 
@@ -131,7 +136,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  const registry = loadDeviceRegistry(join(keyDir, "devices.json"));
+  const registryFile = join(keyDir, "devices.json");
+  const registry = loadDeviceRegistry(registryFile);
   const pairingMode = registry.list().length === 0 || env.POCKETSHELL_PAIR === "1";
   const pairing = pairingMode ? createPairing({ now: () => Date.now() }) : null;
 
@@ -145,7 +151,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     env.POCKETSHELL_TLS === "1" ? true :
     env.POCKETSHELL_TLS === "0" ? false :
     (file.tls ?? false);
-  const adminEnabled = env.POCKETSHELL_ADMIN === "0" ? false : true;
   // 读 agent.json 是为了让运维手工编辑该文件；**不写回**（见 persistAgentJson
   // 附近的 toWrite）——把 env 传入的值落盘会让「下次不传 env」时名字仍生效，
   // 破坏「不设即现状」的约束。
@@ -175,9 +180,24 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (tls.key) toWrite.tlsKey = tls.key;
   persistAgentJson(keyDir, toWrite);
 
-  const updateRepoRaw = env.POCKETSHELL_UPDATE_REPO ?? "Big-Pony/pocketshell";
+  // RCE-⑥ / VULN-002: `update.apply` downloads a binary and renames it over the
+  // running executable. Its integrity check is self-referential — tarball and
+  // SHA256SUMS.txt come from the same release, so whoever picks the repo picks
+  // both. That makes POCKETSHELL_UPDATE_REPO a remote-code-execution knob, and
+  // an env var is a weak place for one (a compromised shell profile, a leaked
+  // CI variable, or an edited service unit all reach it).
+  //
+  // `official` records whether the repo is still the built-in one. A pointed-
+  // elsewhere repo keeps working — forks are legitimate — but OTA drops to
+  // check-only and refuses to apply, so a repo swap can no longer silently
+  // become a binary swap. Applying from a fork stays possible by hand.
+  const updateRepoRaw = env.POCKETSHELL_UPDATE_REPO ?? OFFICIAL_UPDATE_REPO;
   const updateEnabled = env.POCKETSHELL_UPDATE !== "0" && updateRepoRaw !== "off";
-  const update = { enabled: updateEnabled, repo: updateEnabled ? updateRepoRaw : null };
+  const update = {
+    enabled: updateEnabled,
+    repo: updateEnabled ? updateRepoRaw : null,
+    official: updateRepoRaw === OFFICIAL_UPDATE_REPO,
+  };
 
   return {
     listen: { host, port },
@@ -188,6 +208,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     identity: identity,
     authorizedKeys,
     registry,
+    registryFile,
     pairingMode,
     pairing,
     tls,
@@ -196,7 +217,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     snippets,
     hints,
     tmpDir,
-    adminEnabled,
     instanceName,
     update,
     notifyToken,
