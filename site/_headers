@@ -1,0 +1,30 @@
+# 截图内容极少变动，长缓存
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 首页要能随发版立刻更新（英文默认页）
+/
+  Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# 中文页同上。源文件是 site/zh.html 而不是 site/zh/index.html：
+# 目录形式会让 /zh 308 跳到 /zh/，canonical 就指到了一个跳转上。
+/zh
+  Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# 样式与脚本没有内容哈希文件名，跟着页面一起更新，不能长缓存
+/site.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+/site.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# 爬虫入口，短缓存即可
+/sitemap.xml
+  Cache-Control: public, max-age=3600
+
+/robots.txt
+  Cache-Control: public, max-age=3600

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PocketShell — Run Claude Code from your phone, drop offline, keep running</title>
+<meta name="description" content="A self-hosted, mobile-first remote terminal. Your sessions live in server-side tmux, so losing signal never kills the task; reconnecting replays only the gap you missed; and a push pings you when the agent finishes or needs an answer. One binary, Noise IK end-to-end encryption, Apache-2.0." />
+<meta name="keywords" content="PocketShell,mobile terminal,remote terminal,Claude Code mobile,tmux,mobile SSH,self-hosted,AI coding agent,resilient sessions" />
+<link rel="canonical" href="https://pocketshell.net/" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/" />
+<meta property="og:title" content="PocketShell — Your AI is running. You're stuck at your desk." />
+<meta property="og:description" content="Hand off the work and put your phone away. Sessions live on the server, so they keep running when you drop offline — and a push calls you back when it's done or needs you." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="PocketShell: a remote terminal on your phone, with sessions that live on the server" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="PocketShell — Your AI is running. You're stuck at your desk." />
+<meta name="twitter:description" content="Hand off the work and put your phone away. Sessions live on the server, so they keep running when you drop offline — and a push calls you back when it's done or needs you." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "PocketShell",
+  "url": "https://pocketshell.net/",
+  "description": "A self-hosted, mobile-first remote terminal: sessions live in server-side tmux so the task survives losing signal, reconnecting replays only the output you missed, and a push notification reaches your phone when an AI agent finishes or waits for input.",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Terminal Emulator",
+  "operatingSystem": "Linux, macOS",
+  "softwareVersion": "1.8.0",
+  "inLanguage": ["en", "zh-CN"],
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "codeRepository": "https://github.com/Big-Pony/pocketshell",
+  "downloadUrl": "https://github.com/Big-Pony/pocketshell/releases",
+  "screenshot": "https://pocketshell.net/assets/og-cover.png",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#vs">vs SSH</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <span class="pill"><span class="dot"></span>v1.8.0 · Apache-2.0 · self-hosted</span>
+    <h1>Your AI is running.<br />You're stuck at your <em>desk</em>.</h1>
+    <p class="sub">Hand off the work and put your phone away. <b>Sessions live on the server</b>, so they keep running while you're offline — and a push calls you back when it's done or needs a decision.</p>
+    <div class="cta">
+      <a class="btn btn-dark" href="#quickstart">Install in 3 minutes →</a>
+      <a class="btn btn-light" href="#how">See how it works</a>
+    </div>
+    <div class="phones">
+      <div class="phone"><img src="/assets/screenshots/01-launch-task.jpg" width="1220" height="2712" alt="Composing a whole prompt for Claude Code in the IME buffer" /></div>
+      <div class="phone"><img src="/assets/screenshots/03-push-notification.jpg" width="1220" height="2712" alt="Lock-screen push: Claude is waiting for your input" /></div>
+      <div class="phone"><img src="/assets/screenshots/04-task-done-git.jpg" width="1220" height="2712" alt="Back online, the output has replayed and the Git panel shows the commit" /></div>
+    </div>
+  </div>
+</section>
+
+<div class="stats">
+  <div class="wrap stats-in">
+    <div class="stat"><div class="n">1</div><div class="l">binary — that's the whole product</div></div>
+    <div class="stat"><div class="n">300<i>s</i></div><div class="l">pairing-code TTL, then it's gone</div></div>
+    <div class="stat"><div class="n">4</div><div class="l">AI tools that push when they finish</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">lines of your code leave your machine</div></div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">How it works</div>
+      <h2>The session lives on the server.<br />Your phone is just the screen.</h2>
+    </div>
+
+    <div class="scenario">
+      <div class="s-text">
+        <h3>Pocket the phone. The task keeps going.</h3>
+        <p>9:12 — you kick off a refactor from the subway entrance and put your phone away. Tunnel, a text you had to answer, screen locked. Not one second of work stopped on the server.</p>
+        <ul>
+          <li>The real session is tmux on the host; disconnecting just unplugs the screen</li>
+          <li>Per-session sequence accounting: reconnecting replays only the gap, never what you already have</li>
+          <li>Unlimited scrollback on long output, with the input line pinned to the bottom</li>
+        </ul>
+      </div>
+      <div class="s-card">
+        <div class="row"><span class="st run"></span><span class="name">claude-refactor</span></div>
+        <div class="prev">⏺ Editing src/auth.ts …</div>
+        <hr />
+        <div class="row"><span class="st wait"></span><span class="name">kimi-docs</span></div>
+        <div class="prev">Waiting: apply this patch? (y/n)</div>
+        <hr />
+        <div class="row"><span class="st idle"></span><span class="name">build-server</span></div>
+        <div class="prev">✓ Done in 34.2s</div>
+      </div>
+    </div>
+
+    <div class="scenario rev">
+      <div class="s-text">
+        <h3>When it needs you, it comes to you</h3>
+        <p>10:05 — your phone buzzes. Claude finished a round and wants to know whether to apply the patch. You read the question on the lock screen, unlock, tap in, type <code>y</code>, lock it again, and keep walking.</p>
+        <ul>
+          <li>Arrives with the app closed and the phone locked</li>
+          <li>No notification for the session you're already looking at</li>
+          <li>Or skip push entirely: Slack / Discord / custom webhooks are built in</li>
+        </ul>
+      </div>
+      <div class="s-card notify-card">
+        <div class="n-head"><span class="n-logo">❯_</span>POCKETSHELL · now</div>
+        <div class="n-title">Claude is waiting for your input</div>
+        <div class="n-body">claude-refactor: apply this patch? (y/n)</div>
+      </div>
+    </div>
+
+    <div class="scenario stack">
+      <div class="s-text">
+        <h3>On a phone. Actually usable.</h3>
+        <p>12:30 — you sit down at your desk and the work is already finished, because every call that needed you got made while you were out.</p>
+        <ul>
+          <li>A laptop-grade keyboard: F1–F12, arrow keys, sticky modifiers</li>
+          <li>Compose a whole prompt in the system keyboard, then inject it in one shot</li>
+          <li>File tree, code editing, Markdown and image preview, Git diff</li>
+        </ul>
+      </div>
+      <div class="carousel" id="car">
+        <div class="car-phone">
+          <div class="car-track">
+            <img class="on" src="/assets/screenshots/07-keyboard-full.jpg" width="1220" height="2712" alt="Laptop-grade full keyboard with F1–F12, arrows and sticky modifiers" data-cap="<b>Full keyboard</b> · F1–F12, arrows and modifiers, all there" />
+            <img src="/assets/screenshots/08-keyboard-hints.jpg" width="1220" height="2712" loading="lazy" alt="Smart command-hint bar suggesting completions by prefix" data-cap="<b>Command hints</b> · prefix suggestions, tap to complete" />
+            <img src="/assets/screenshots/10-markdown-preview.jpg" width="1220" height="2712" loading="lazy" alt="Rendered Markdown preview alongside the file tree" data-cap="<b>Markdown preview</b> · read docs rendered, not raw" />
+            <img src="/assets/screenshots/12-file-menu.jpg" width="1220" height="2712" loading="lazy" alt="File action menu: rename, upload, download, set as project root" data-cap="<b>File actions</b> · rename, upload, download, set project root" />
+            <img src="/assets/screenshots/13-snippets.jpg" width="1220" height="2712" loading="lazy" alt="Snippets: save your own commands, synced across devices" data-cap="<b>Snippets</b> · save your commands, synced across devices" />
+          </div>
+        </div>
+        <div class="car-cap" id="car-cap"></div>
+        <div class="car-dots" id="car-dots" data-label="Slide %n"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head center">
+      <div class="eyebrow">Features</div>
+      <h2>One binary. Everything's in it.</h2>
+      <p>The frontend is embedded and served on the same port. Download, run, pair — there is no fourth step.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="ico">▣</div><h3>Multi-session terminal</h3><p>Every tmux session on the host is listed, including ones it didn't create. Three-state dots plus a last-line preview show at a glance what's running and what's stuck waiting on you.</p></div>
+      <div class="card"><div class="ico">⌨</div><h3>Custom full keyboard</h3><p>Typing in a terminal on a phone stops being punishment. Full laptop layout, smart command hints, and snippets synced across your devices.</p></div>
+      <div class="card"><div class="ico">🗀</div><h3>Files and Git</h3><p>No dropping back to the shell to run <code>cat</code>. Directory tree, code editing, Markdown and image preview, working-tree diff, upload and download.</p></div>
+      <div class="card"><div class="ico">🔔</div><h3>Push when it's done</h3><p>Completion hooks for Claude Code / Codex / opencode / Kimi CLI are wired up automatically, each with its own switch. No config to write.</p></div>
+      <div class="card"><div class="ico">🔒</div><h3>End-to-end encrypted</h3><p>A full Noise IK handshake per connection. Tunnels and reverse proxies in between only ever handle ciphertext — they can't see your terminal.</p></div>
+      <div class="card"><div class="ico">◎</div><h3>Add to home screen, it's an app</h3><p>Six themes, English and Chinese, one-tap in-app updates, and live AI context usage.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="vs" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Why not SSH</div>
+      <h2>You could open an SSH client instead.<br />It isn't the same thing.</h2>
+    </div>
+    <div class="vs">
+      <div class="vs-row vs-head">
+        <div></div><div>Mobile SSH client</div><div class="mine">PocketShell</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">You lose signal</div><div class="them" data-them="SSH: ">Connection drops; reconnect and re-attach by hand</div><div class="mine">Task keeps running, reattaches itself when you're back</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">Output you missed</div><div class="them" data-them="SSH: ">Either gone, or the whole screen redraws</div><div class="mine">Sequence-tracked replay of exactly the gap</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">The agent finishes</div><div class="them" data-them="SSH: ">Nothing tells you; go look for yourself</div><div class="mine">Push straight to the lock screen, opens that session</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">Typing</div><div class="them" data-them="SSH: ">Phone keyboard — no function or arrow keys</div><div class="mine">Laptop-grade keyboard + whole-prompt injection</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">Files and diffs</div><div class="them" data-them="SSH: ">Back to the shell to type commands</div><div class="mine">File tree, preview and a diff panel</div>
+      </div>
+    </div>
+    <p class="vs-note"><b>PocketShell doesn't replace SSH.</b> It assumes you already have tmux and a machine that stays on — it just covers the stretch where you aren't there.</p>
+  </div>
+</section>
+
+<section id="quickstart" style="padding-top:0">
+  <div class="wrap">
+    <div class="quick">
+      <h2>Three minutes to running</h2>
+      <p class="q-sub">The host needs tmux and git. Linux or macOS. No reverse proxy required to try it — start on your LAN.</p>
+      <div class="quick-grid">
+        <div>
+          <div class="q-step"><div class="q-n">1</div><div><h4>One-line install</h4><p>Detects your platform, verifies the SHA256, lands in your PATH.</p></div></div>
+          <div class="q-step"><div class="q-n">2</div><div><h4>Register it as a service</h4><p>Starts at boot; a first install prints the pairing string right there.</p></div></div>
+          <div class="q-step"><div class="q-n">3</div><div><h4>Pair your phone</h4><p>Open the URL, paste, add to home screen. Done.</p></div></div>
+        </div>
+        <div class="term-light">
+          <div class="t-bar">terminal<button class="copy-btn" data-copied="copied ✓" data-copy="curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh">copy</button></div>
+          <pre><span class="c"># install</span>
+<span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
+
+<span class="c"># run it as a service (no sudo on macOS)</span>
+<span class="p">$</span> pocketshell-agent install \
+    --advertise wss://your.domain --name my-mac</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="security" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Security</div>
+      <h2>Your machine. Your keys.</h2>
+      <p>The whole security model rests on one question — who gets to pair — so that question is guarded from several directions at once.</p>
+    </div>
+    <div class="sec-strip">
+      <div class="sec-item"><h4>Noise IK handshake</h4><p>Mutual authentication and forward secrecy. An unregistered device never gets past it.</p></div>
+      <div class="sec-item"><h4>One-time pairing codes</h4><p>300-second TTL, limited attempts, rate-limited. Brute force gets you locked out.</p></div>
+      <div class="sec-item"><h4>Revocation lands instantly</h4><p>One command drops a device: live connections close within seconds and push subscriptions are cleared.</p></div>
+      <div class="sec-item"><h4>Audited throughout</h4><p>Handshakes, pairings, revocations and lockouts are written as structured logs — while your commands and terminal contents never are.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>You carried a laptop all day<br />for fifteen minutes of work</h2>
+    <p>Kick something off, answer a <code>y</code>, glance at a diff, tell it to try again — that's the part that actually needs you. The rest of the time, the machine runs on its own.</p>
+    <div class="cta">
+      <a class="btn btn-dark" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">★ Star on GitHub</a>
+      <a class="btn btn-light" href="#quickstart">Install in 3 minutes</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/Big-Pony/pocketshell/releases" target="_blank" rel="noopener">Releases</a>
+    <a href="https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT.md" target="_blank" rel="noopener">Deployment guide</a>
+    <a href="/zh" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

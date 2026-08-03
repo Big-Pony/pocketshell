@@ -64,6 +64,18 @@ if [ "$DRY_RUN" -eq 0 ]; then
     rm -f "$pj.bak"
     echo "[release] set version=$VERSION in ${pj#"$REPO"/}"
   done
+  # 官网首屏徽标与 JSON-LD 里的版本号（英文 index.html + 中文 zh.html）。
+  # site/ 不参与构建、由 Cloudflare Pages 独立发布，所以漂了不会有任何报错——
+  # 这里静默同步，别指望别处能发现。
+  for page in "$REPO/site/index.html" "$REPO/site/zh.html"; do
+    [ -f "$page" ] || continue
+    sed -i.bak -E \
+      -e "s/v[0-9]+\.[0-9]+\.[0-9]+ · Apache-2\.0/v$VERSION · Apache-2.0/" \
+      -e "s/(\"softwareVersion\": *\")[0-9]+\.[0-9]+\.[0-9]+/\1$VERSION/" \
+      "$page"
+    rm -f "$page.bak"
+    echo "[release] set version=$VERSION in ${page#"$REPO"/}"
+  done
 fi
 
 # --- build all target binaries ----------------------------------------------
@@ -98,6 +110,9 @@ fi
 
 # --- commit, tag, push -------------------------------------------------------
 git -C "$REPO" add "$AGENT/package.json" "$REPO/app/package.json"
+for page in "$REPO/site/index.html" "$REPO/site/zh.html"; do
+  [ -f "$page" ] && git -C "$REPO" add "$page"
+done
 git -C "$REPO" commit \
   -m "release: $TAG — bump version to $VERSION" \
   -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"

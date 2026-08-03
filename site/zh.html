@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PocketShell —— 手机上跑 Claude Code，断网任务照跑</title>
+<meta name="description" content="自托管的移动端远程终端。会话活在服务器上的 tmux 里，手机断网任务不停；重连按序号只补你错过的那段；AI 跑完或等你拍板时推送叫你回来。单个二进制、Noise IK 端到端加密、Apache-2.0 开源。" />
+<meta name="keywords" content="PocketShell,手机终端,远程终端,Claude Code 手机,tmux,移动端 SSH,自托管,AI 编程,断线重连" />
+<link rel="canonical" href="https://pocketshell.net/zh" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh" />
+<meta property="og:title" content="PocketShell —— AI 在跑，你却被锁在椅子上" />
+<meta property="og:description" content="派完活就把手机收起来。会话活在服务器上，断网它继续跑；跑完或要你拍板时，推送叫你回来。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="PocketShell：手机上的远程终端，会话活在服务器上" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="PocketShell —— AI 在跑，你却被锁在椅子上" />
+<meta name="twitter:description" content="派完活就把手机收起来。会话活在服务器上，断网它继续跑；跑完或要你拍板时，推送叫你回来。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "PocketShell",
+  "url": "https://pocketshell.net/zh",
+  "description": "自托管的移动端远程终端：会话活在服务器上的 tmux 里，手机断网任务不停，重连按序号补齐错过的输出，AI 跑完或等待输入时推送到手机。",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Terminal Emulator",
+  "operatingSystem": "Linux, macOS",
+  "softwareVersion": "1.8.0",
+  "inLanguage": ["zh-CN", "en"],
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "codeRepository": "https://github.com/Big-Pony/pocketshell",
+  "downloadUrl": "https://github.com/Big-Pony/pocketshell/releases",
+  "screenshot": "https://pocketshell.net/assets/og-cover.png",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="#how">工作方式</a>
+      <a href="#features">功能</a>
+      <a href="#vs">vs SSH</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/" hreflang="en" title="English">EN</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <span class="pill"><span class="dot"></span>v1.8.0 · Apache-2.0 开源 · 自托管</span>
+    <h1>AI 在跑，<br />你却被锁在<em>椅子上</em></h1>
+    <p class="sub">派完活就把手机收起来。<b>会话活在服务器上</b>，断网它继续跑；跑完或要你拍板时，推送叫你回来。</p>
+    <div class="cta">
+      <a class="btn btn-dark" href="#quickstart">三分钟装上 →</a>
+      <a class="btn btn-light" href="#how">看看它怎么做到的</a>
+    </div>
+    <div class="phones">
+      <div class="phone"><img src="/assets/screenshots/01-launch-task.jpg" width="1220" height="2712" alt="用系统输入法整段派活给 Claude Code" /></div>
+      <div class="phone"><img src="/assets/screenshots/03-push-notification.jpg" width="1220" height="2712" alt="锁屏推送：Claude 等待你的输入" /></div>
+      <div class="phone"><img src="/assets/screenshots/04-task-done-git.jpg" width="1220" height="2712" alt="重连后输出已补齐，Git 面板显示提交" /></div>
+    </div>
+  </div>
+</section>
+
+<div class="stats">
+  <div class="wrap stats-in">
+    <div class="stat"><div class="n">1<i>个</i></div><div class="l">二进制装完就是完整产品</div></div>
+    <div class="stat"><div class="n">300<i>秒</i></div><div class="l">配对码有效期，用完即焚</div></div>
+    <div class="stat"><div class="n">4<i>种</i></div><div class="l">AI 工具完成即推送</div></div>
+    <div class="stat"><div class="n">0<i>行</i></div><div class="l">你的代码离开过自己的机器</div></div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">How it works</div>
+      <h2>会话活在服务器上，<br />手机只是那块屏幕</h2>
+    </div>
+
+    <div class="scenario">
+      <div class="s-text">
+        <h3>收起手机，任务照跑</h3>
+        <p>09:12 在地铁口派出一个重构任务，然后把手机装回兜里。进隧道、切出去回微信、锁屏——服务器上的活一秒没停。</p>
+        <ul>
+          <li>会话真身是服务端 tmux，手机断开只是「屏幕拔了」</li>
+          <li>按序号记账，重连只补你错过的那一段，不重发</li>
+          <li>长输出无上限滚动，输入行始终钉在底部</li>
+        </ul>
+      </div>
+      <div class="s-card">
+        <div class="row"><span class="st run"></span><span class="name">claude-refactor</span></div>
+        <div class="prev">⏺ 正在修改 src/auth.ts …</div>
+        <hr />
+        <div class="row"><span class="st wait"></span><span class="name">kimi-docs</span></div>
+        <div class="prev">等待输入：是否应用这个补丁？(y/n)</div>
+        <hr />
+        <div class="row"><span class="st idle"></span><span class="name">build-server</span></div>
+        <div class="prev">✓ Done in 34.2s</div>
+      </div>
+    </div>
+
+    <div class="scenario rev">
+      <div class="s-text">
+        <h3>需要你时，它会来找你</h3>
+        <p>10:05 手机震了一下：Claude 跑完了一轮，在等你回答要不要应用这个补丁。你在锁屏上看清了它问什么，解锁点进去回了个 y，锁屏，继续走路。</p>
+        <ul>
+          <li>App 没打开、手机锁着也能收到</li>
+          <li>正在看的那个会话不推送，不打扰你</li>
+          <li>国内网络可走企微 / 飞书 webhook，不依赖 FCM</li>
+        </ul>
+      </div>
+      <div class="s-card notify-card">
+        <div class="n-head"><span class="n-logo">❯_</span>POCKETSHELL · 现在</div>
+        <div class="n-title">Claude 等待你的输入</div>
+        <div class="n-body">claude-refactor：是否应用这个补丁？(y/n)</div>
+      </div>
+    </div>
+
+    <div class="scenario stack">
+      <div class="s-text">
+        <h3>在手机上，是真的能用</h3>
+        <p>12:30 到工位打开电脑，活已经干完了——因为该拍板的地方，你在路上就都拍完了。</p>
+        <ul>
+          <li>笔记本级全键盘：F1–F12、方向键、sticky 修饰键</li>
+          <li>用系统输入法写完一整段中文需求，一次注入</li>
+          <li>文件树 / 代码编辑 / Markdown 与图片预览 / Git diff</li>
+        </ul>
+      </div>
+      <div class="carousel" id="car">
+        <div class="car-phone">
+          <div class="car-track">
+            <img class="on" src="/assets/screenshots/07-keyboard-full.jpg" width="1220" height="2712" alt="笔记本级全键盘：F1–F12、方向键与 sticky 修饰键" data-cap="<b>全键盘</b> · F1–F12、方向键、修饰键都在" />
+            <img src="/assets/screenshots/08-keyboard-hints.jpg" width="1220" height="2712" loading="lazy" alt="智能命令提示条：按前缀联想，点一下补全" data-cap="<b>命令联想</b> · 按前缀提示，点一下补全" />
+            <img src="/assets/screenshots/10-markdown-preview.jpg" width="1220" height="2712" loading="lazy" alt="Markdown 渲染预览与文件树" data-cap="<b>Markdown 预览</b> · 文档直接渲染着看" />
+            <img src="/assets/screenshots/12-file-menu.jpg" width="1220" height="2712" loading="lazy" alt="文件操作菜单：重命名、上传下载、设为项目根" data-cap="<b>文件操作</b> · 重命名、上传下载、设项目根" />
+            <img src="/assets/screenshots/13-snippets.jpg" width="1220" height="2712" loading="lazy" alt="快捷指令：常用命令存下来，多设备同步" data-cap="<b>快捷指令</b> · 常用命令存下来，多设备同步" />
+          </div>
+        </div>
+        <div class="car-cap" id="car-cap"></div>
+        <div class="car-dots" id="car-dots" data-label="第 %n 张"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head center">
+      <div class="eyebrow">Features</div>
+      <h2>一个二进制，装完就齐</h2>
+      <p>前端内嵌、同端口服务。下载、运行、配对——没有第四步。</p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="ico">▣</div><h3>多会话终端</h3><p>机器上所有 tmux 会话都在列表里，包括不是它开的。三态灯 + 末行预览，一眼看出哪个在跑、哪个卡着等你。</p></div>
+      <div class="card"><div class="ico">⌨</div><h3>自定义全键盘</h3><p>手机敲终端不再是酷刑。完整笔记本布局、智能命令联想、快捷指令多设备同步。</p></div>
+      <div class="card"><div class="ico">🗀</div><h3>文件与 Git</h3><p>不用退回终端敲 cat。目录树、代码编辑、Markdown 与图片预览、工作区 diff、上传下载。</p></div>
+      <div class="card"><div class="ico">🔔</div><h3>完成即推送</h3><p>Claude Code / Codex / opencode / Kimi CLI 的完成钩子自动接线，按工具独立开关，不用你写配置。</p></div>
+      <div class="card"><div class="ico">🔒</div><h3>端到端加密</h3><p>每次连接一次完整 Noise IK 握手。中间的隧道和反代只经手密文，看不见你的终端。</p></div>
+      <div class="card"><div class="ico">◎</div><h3>加到主屏就是 App</h3><p>六套主题、中英双语、应用内一键更新、AI 上下文用量实时可见。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="vs" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Why not SSH</div>
+      <h2>手机上开个 SSH 也能连，<br />但那不是同一件事</h2>
+    </div>
+    <div class="vs">
+      <div class="vs-row vs-head">
+        <div></div><div>手机 SSH 客户端</div><div class="mine">PocketShell</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">断网之后</div><div class="them" data-them="SSH：">连接断开，得手动重连再 attach</div><div class="mine">任务不停，回来自动接上</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">错过的输出</div><div class="them" data-them="SSH：">要么全丢，要么整屏重刷</div><div class="mine">按序号只补你错过的那段</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">Agent 跑完了</div><div class="them" data-them="SSH：">没人告诉你，只能自己去看</div><div class="mine">推送直达锁屏，点开就是那个会话</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">打字</div><div class="them" data-them="SSH：">手机键盘，没有 F 键和方向键</div><div class="mine">笔记本级全键盘 + 输入法整段注入</div>
+      </div>
+      <div class="vs-row">
+        <div class="k">看文件 / diff</div><div class="them" data-them="SSH：">回终端敲命令</div><div class="mine">文件树、预览、diff 面板</div>
+      </div>
+    </div>
+    <p class="vs-note"><b>PocketShell 不替代 SSH</b>——它假设你已经有 tmux 和一台常开的机器，只是把「人不在场那段」补上。</p>
+  </div>
+</section>
+
+<section id="quickstart" style="padding-top:0">
+  <div class="wrap">
+    <div class="quick">
+      <h2>三分钟，跑起来</h2>
+      <p class="q-sub">宿主机只要有 tmux 和 git。Linux / macOS 都行。装完不用配反代，也能先在局域网里试。</p>
+      <div class="quick-grid">
+        <div>
+          <div class="q-step"><div class="q-n">1</div><div><h4>一行安装</h4><p>自动认平台、校验 SHA256，装完就在 PATH 里。</p></div></div>
+          <div class="q-step"><div class="q-n">2</div><div><h4>注册成服务</h4><p>开机自启，第一次安装会直接把配对串打出来。</p></div></div>
+          <div class="q-step"><div class="q-n">3</div><div><h4>手机配对</h4><p>浏览器打开、粘贴、加到主屏幕，完事。</p></div></div>
+        </div>
+        <div class="term-light">
+          <div class="t-bar">terminal<button class="copy-btn" data-copied="已复制 ✓" data-copy="curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh">copy</button></div>
+          <pre><span class="c"># 安装</span>
+<span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
+
+<span class="c"># 服务化（macOS 无需 sudo）</span>
+<span class="p">$</span> pocketshell-agent install \
+    --advertise wss://your.domain --name my-mac</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="security" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Security</div>
+      <h2>你的机器，你的密钥</h2>
+      <p>所有安全性压在「谁能配对」这一个点上——所以这个点被层层把守。</p>
+    </div>
+    <div class="sec-strip">
+      <div class="sec-item"><h4>Noise IK 握手</h4><p>双向认证 + 前向保密。没登记过的设备，握手这关就过不去。</p></div>
+      <div class="sec-item"><h4>一次性配对码</h4><p>300 秒过期、限次、限速。爆破会被锁。</p></div>
+      <div class="sec-item"><h4>吊销即刻生效</h4><p>命令行一句话踢掉一台设备，在线连接几秒内断开，推送订阅一并清除。</p></div>
+      <div class="sec-item"><h4>全程留痕</h4><p>握手、配对、吊销、锁定都结构化落盘，随时可查——但不记录你的命令和终端内容。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>为了一天 15 分钟的活，<br />你背了一整天电脑</h2>
+    <p>派活、答一句 y、看眼 diff、让它重试——真正要你在场的就这些。剩下的时间，那台机器自己会跑。</p>
+    <div class="cta">
+      <a class="btn btn-dark" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">★ 在 GitHub 上 Star</a>
+      <a class="btn btn-light" href="#quickstart">三分钟装上</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/Big-Pony/pocketshell/releases" target="_blank" rel="noopener">Releases</a>
+    <a href="https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT-CN.md" target="_blank" rel="noopener">部署指南</a>
+    <a href="/" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # 官网与纯文档改动不触发构建测试（site/ 是静态站，由 Cloudflare Pages 独立发布）
   push:
+    paths-ignore: ['site/**', '**.md']
   pull_request:
+    paths-ignore: ['site/**', '**.md']
 
 # Cancel superseded runs on the same ref (a new push obsoletes the previous one).
 concurrency:
