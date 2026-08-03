@@ -2,3 +2,6 @@ User-agent: *
 Allow: /
 
 Sitemap: https://pocketshell.net/sitemap.xml
+
+# 面向大模型的站点摘要（llmstxt.org）
+# LLM-friendly summary of this site: https://pocketshell.net/llms.txt

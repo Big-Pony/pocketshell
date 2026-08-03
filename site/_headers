@@ -33,3 +33,10 @@
 
 /robots.txt
   Cache-Control: public, max-age=3600
+
+# llms.txt 规范（llmstxt.org）：必须是 Markdown、至少一个 H1、要有链接。
+# 缺这个文件时 Pages 返回 404 + 空体，PageSpeed 会当成「格式不合规」报错，
+# 而不是当成「没有」，所以必须真的放一份。
+/llms.txt
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600

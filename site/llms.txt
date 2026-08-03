@@ -1,0 +1,24 @@
+# PocketShell
+
+> A self-hosted, mobile-first remote terminal. Sessions live in server-side tmux, so losing signal never kills the task; reconnecting replays only the output you missed; and a push notification reaches your phone when an AI coding agent (Claude Code, Codex, opencode, Kimi CLI) finishes a round or waits for your input. One binary, Noise IK end-to-end encryption, Apache-2.0.
+
+PocketShell is not a cloud service and not an IDE. It assumes you already have tmux and a Linux or macOS machine that stays on, and it covers the stretch where you are away from that machine. Your code never leaves your own hardware: the agent runs on your host and the phone is only a screen.
+
+## Site
+
+- [Home (English)](https://pocketshell.net/): what it is, how resilient sessions and replay work, feature overview, comparison with a mobile SSH client, three-step install
+- [首页（中文）](https://pocketshell.net/zh): the same page in Chinese
+
+## Documentation
+
+- [README](https://github.com/Big-Pony/pocketshell/blob/main/README.md): full feature list, quick start, install options, good-fit / not-a-fit guidance
+- [README (中文)](https://github.com/Big-Pony/pocketshell/blob/main/README-CN.md): Chinese README
+- [Interaction cheat sheet](https://github.com/Big-Pony/pocketshell/blob/main/USAGE.md): mobile gestures, key combos, keyboard layers
+- [Deployment guide](https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT.md): reverse proxy, TLS, running as a systemd or launchd service
+
+## Source and releases
+
+- [GitHub repository](https://github.com/Big-Pony/pocketshell): Apache-2.0 source for the Bun agent and the Svelte frontend
+- [Releases](https://github.com/Big-Pony/pocketshell/releases): prebuilt binaries for linux-x64, linux-arm64, darwin-arm64 and darwin-x64, with SHA256SUMS.txt
+- [Install script](https://github.com/Big-Pony/pocketshell/blob/main/install.sh): detects the platform, verifies the checksum, installs into PATH
+- [License](https://github.com/Big-Pony/pocketshell/blob/main/LICENSE): Apache-2.0
