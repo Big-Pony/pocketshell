@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
-import { defaultNotifyConfig, loadNotifyConfig, saveNotifyConfig, sanitizeNotifyConfig } from "./notify-config";
+import { defaultNotifyConfig, loadNotifyConfig, saveNotifyConfig, sanitizeNotifyConfig, type WebhookCfg } from "./notify-config";
 
 test("default has all channels off", () => {
   const c = defaultNotifyConfig();
@@ -45,7 +45,9 @@ test("sanitizeNotifyConfig corrects malformed webhooks to empty array", () => {
   expect(c2.webhooks).toEqual([]);
   const c3 = sanitizeNotifyConfig({});
   expect(c3.webhooks).toEqual([]);
-  const wh = [{ id: "a", name: "n", kind: "slack", url: "https://x", enabled: true }];
+  // `satisfies` keeps `kind` as the literal "slack" (a WebhookKind) instead of
+  // letting it widen to `string`, which would not match WebhookCfg.
+  const wh = [{ id: "a", name: "n", kind: "slack", url: "https://x", enabled: true }] satisfies WebhookCfg[];
   const c4 = sanitizeNotifyConfig({ webhooks: wh });
   expect(c4.webhooks).toEqual(wh);
 });

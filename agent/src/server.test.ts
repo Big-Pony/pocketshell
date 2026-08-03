@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { loadConfig } from "./config";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hasTmux } from "./test-support";
+import { hasTmux, uniqueSessionName, killSession, waitFor } from "./test-support";
 
 const M1 = new Uint8Array([1]);
 const M2 = new Uint8Array([2]);
@@ -572,7 +572,9 @@ function startBranded(instanceName?: string) {
 }
 
 function cleanupBranded(b: { srv: ReturnType<typeof startServer>; dir: string; keyDir: string }) {
-  b.srv.stop(true);
+  // startServer's stop() takes no arguments — it already force-closes
+  // (server.stop(true)) internally, so the stray `true` was silently dropped.
+  b.srv.stop();
   rmSync(b.dir, { recursive: true, force: true });
   rmSync(b.keyDir, { recursive: true, force: true });
 }
@@ -725,7 +727,11 @@ test("diag.report logs one whitelisted line and acks", () => {
 
 // Helper: open a passthrough-secured WS, perform the marker handshake,
 // then return the socket ready for business frames.
-async function openHandshakedWs(port: number): Promise<WebSocket> {
+// `port` is Bun.Server["port"], which is `number | undefined` (a unix-socket
+// server has none). These tests always listen on TCP, so assert rather than
+// interpolate `undefined` into the URL and fail with an opaque connect error.
+async function openHandshakedWs(port: number | undefined): Promise<WebSocket> {
+  if (port == null) throw new Error("server is not listening on a TCP port");
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
   ws.binaryType = "arraybuffer";
   await new Promise<void>((res) => (ws.onopen = () => res()));
@@ -768,20 +774,25 @@ test.skipIf(!hasTmuxWs)("newSession + input round-trips output over WS", async (
     }
   };
 
-  const NAME = "pocketshell_ws_test";
-  sendBinary(ws, encode({ type: "newSession", name: NAME }));
-  sendBinary(ws, encode({ type: "attach", sessionId: NAME }));
-  await Bun.sleep(400);
-  sendBinary(ws, encode({ type: "input", sessionId: NAME, data: btoa("echo WS_OK\n") }));
-  await Bun.sleep(700);
-
+  // Unique per process+call: tmux session names are machine-global, so a fixed
+  // literal collided with concurrent `bun test` runs (and with a leaked session
+  // from a previously failed run). Same defect that made terminal.test.ts flaky.
+  const NAME = uniqueSessionName("ws");
   try {
-    expect(outputs.join("")).toContain("WS_OK");
+    sendBinary(ws, encode({ type: "newSession", name: NAME }));
+    sendBinary(ws, encode({ type: "attach", sessionId: NAME }));
+    // Wait for the shell prompt to reach us over the WS instead of sleeping a
+    // fixed 400ms — measured, a prompt takes ~600ms even on an idle machine, so
+    // input sent at 400ms can be swallowed before the shell is listening.
+    expect(await waitFor(() => outputs.length > 0)).toBe(true);
+    sendBinary(ws, encode({ type: "input", sessionId: NAME, data: btoa("echo WS_OK\n") }));
+    expect(await waitFor(() => outputs.join("").includes("WS_OK"))).toBe(true);
   } finally {
     sendBinary(ws, encode({ type: "kill", sessionId: NAME }));
     await Bun.sleep(100);
     ws.close();
     srv.stop();
+    killSession(NAME);
   }
 });
 
@@ -794,12 +805,14 @@ test.skipIf(!hasTmuxWs)("newSession broadcasts a sessions frame including the se
     const msg = parseFrame(ev);
     if (msg.type === "sessions") sessionsFrames.push(msg.sessions.map((s) => s.name));
   };
-  const NAME = "pocketshell_ws_sessions";
+  const NAME = uniqueSessionName("wssess");
   try {
     sendBinary(ws, encode({ type: "newSession", name: NAME }));
-    await Bun.sleep(300);
+    // Wait for the broadcast rather than sleeping: the sessions frame is what
+    // is being asserted, so waiting for it is both faster and load-proof.
+    expect(await waitFor(() => sessionsFrames.flat().includes(NAME))).toBe(true);
     sendBinary(ws, encode({ type: "renameSession", sessionId: NAME, name: NAME + "_r" }));
-    await Bun.sleep(300);
+    expect(await waitFor(() => sessionsFrames.flat().includes(NAME + "_r"))).toBe(true);
     const flat = sessionsFrames.flat();
     expect(flat).toContain(NAME);
     expect(flat).toContain(NAME + "_r");
@@ -808,6 +821,8 @@ test.skipIf(!hasTmuxWs)("newSession broadcasts a sessions frame including the se
     await Bun.sleep(100);
     ws.close();
     srv.stop();
+    killSession(NAME);
+    killSession(NAME + "_r");
   }
 });
 
@@ -818,14 +833,18 @@ test("listSessions on an empty agent returns an empty sessions frame", async () 
   const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
   const ws = await openHandshakedWs(srv.port);
   ws.binaryType = "arraybuffer";
-  let got: string[] | null = null;
+  // Collect into an array (the idiom the rest of this file uses) rather than a
+  // `let x: T | null` the callback reassigns: TS's control-flow analysis cannot
+  // see the callback run, so it narrows the variable to `null` at the assert.
+  const got: string[][] = [];
   ws.onmessage = (ev) => {
     const msg = parseFrame(ev);
-    if (msg.type === "sessions") got = msg.sessions.map((s) => s.name);
+    if (msg.type === "sessions") got.push(msg.sessions.map((s) => s.name));
   };
   sendBinary(ws, encode({ type: "listSessions" }));
   await Bun.sleep(150);
-  expect(got).toEqual([]);
+  // `.at(-1)` is undefined when no frame arrived, which still fails the assert.
+  expect(got.at(-1)).toEqual([]);
   ws.close();
   srv.stop();
 });

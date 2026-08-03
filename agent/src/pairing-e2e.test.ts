@@ -22,7 +22,11 @@ type ClientKeys = { publicKey: Uint8Array; secretKey: Uint8Array };
 
 // A real IK initiator over a real WebSocket, standing in for the app. Reuses a
 // caller-supplied static keypair so a reconnect presents the same identity.
-function connectClient(port: number, agentPub: Uint8Array, keys: ClientKeys) {
+// `port` is Bun.Server["port"], which is `number | undefined` (a unix-socket
+// server has none). These tests always listen on TCP, so assert rather than
+// interpolate `undefined` into the URL and fail with an opaque connect error.
+function connectClient(port: number | undefined, agentPub: Uint8Array, keys: ClientKeys) {
+  if (port == null) throw new Error("server is not listening on a TCP port");
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
   (ws as any).binaryType = "arraybuffer";
   const hs = new Noise("IK", true, { publicKey: Buffer.from(keys.publicKey), secretKey: Buffer.from(keys.secretKey) });

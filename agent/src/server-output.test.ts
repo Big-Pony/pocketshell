@@ -28,12 +28,24 @@ function passthroughResponder(): SecureChannel {
   };
 }
 
-// fake ServerWebSocket with a settable bufferedAmount for backpressure tests
+// Fake ServerWebSocket for the backpressure tests.
+//
+// The queued-bytes accessor MUST mirror the real Bun `ServerWebSocket`, which
+// exposes a `getBufferedAmount()` METHOD and has NO `bufferedAmount` property.
+// This double used to carry a plain `bufferedAmount` field; production read
+// that field, got `undefined` on a real socket, and the entire A6 backpressure
+// path was dead for two weeks while these tests stayed green. Tests set the
+// level via `setBufferedAmount(n)`; production only ever calls the getter.
+// `wsContract()` at the bottom of this file pins the shape against a real
+// socket so the two can't drift apart again.
 function fakeWs() {
   const sent: Uint8Array[] = [];
+  let buffered = 0;
   return {
     sent,
-    bufferedAmount: 0,
+    /** test-only knob; not part of the ServerWebSocket surface */
+    setBufferedAmount(n: number) { buffered = n; },
+    getBufferedAmount() { return buffered; },
     send(d: Uint8Array | string) { sent.push(typeof d === "string" ? utf8(d) : d); },
     close() {},
   };
@@ -146,11 +158,11 @@ test("A6: a backed-up conn drops output frames, then earns a resync after the bu
   const ws = fakeWs();
   openReady(srv, ws);
   attach(srv, ws, "s");
-  ws.bufferedAmount = 2 * 1024 * 1024; // above the 1MB high water
+  ws.setBufferedAmount(2 * 1024 * 1024); // above the 1MB high water
   srv.__test.emitOutput("s", b("dropped"));
   srv.__test.flushOutput("s");
   expect(outputs(ws).length).toBe(0); // frame dropped for this conn
-  ws.bufferedAmount = 0; // socket drained
+  ws.setBufferedAmount(0); // socket drained
   srv.__test.drain(ws as any);
   const rs = frames(ws).filter((m) => m.type === "resync");
   expect(rs).toEqual([{ type: "resync", sessionId: "s", from: 1 }]);
@@ -172,10 +184,10 @@ test("A6: delivery resumes after the resync, with seq continuing untouched", () 
   attach(srv, ws, "s");
   srv.__test.emitOutput("s", b("a"));
   srv.__test.flushOutput("s"); // seq1 delivered normally
-  ws.bufferedAmount = 2 * 1024 * 1024;
+  ws.setBufferedAmount(2 * 1024 * 1024);
   srv.__test.emitOutput("s", b("b"));
   srv.__test.flushOutput("s"); // seq2 dropped
-  ws.bufferedAmount = 0;
+  ws.setBufferedAmount(0);
   srv.__test.drain(ws as any); // resync for the hole
   srv.__test.emitOutput("s", b("c"));
   srv.__test.flushOutput("s"); // seq3 delivered normally again
@@ -190,13 +202,13 @@ test("A6: hysteresis — no resync while the buffer is still above the low water
   const ws = fakeWs();
   openReady(srv, ws);
   attach(srv, ws, "s");
-  ws.bufferedAmount = 2 * 1024 * 1024;
+  ws.setBufferedAmount(2 * 1024 * 1024);
   srv.__test.emitOutput("s", b("x"));
   srv.__test.flushOutput("s"); // dropped
-  ws.bufferedAmount = 512 * 1024; // below high water but above the 256KB low water
+  ws.setBufferedAmount(512 * 1024); // below high water but above the 256KB low water
   srv.__test.drain(ws as any);
   expect(frames(ws).some((m) => m.type === "resync")).toBe(false);
-  ws.bufferedAmount = 128 * 1024; // now below low water
+  ws.setBufferedAmount(128 * 1024); // now below low water
   srv.__test.drain(ws as any);
   expect(frames(ws).some((m) => m.type === "resync")).toBe(true);
   srv.stop();
@@ -207,7 +219,7 @@ test("A6: control messages still reach a backed-up conn (only output frames are 
   const ws = fakeWs();
   openReady(srv, ws);
   attach(srv, ws, "s");
-  ws.bufferedAmount = 2 * 1024 * 1024;
+  ws.setBufferedAmount(2 * 1024 * 1024);
   srv.__test.message(ws as any, utf8(encode({ type: "ping" })));
   expect(frames(ws).some((m) => m.type === "pong")).toBe(true);
   srv.stop();
@@ -218,12 +230,124 @@ test("A6: a detached session earns no resync after drain", () => {
   const ws = fakeWs();
   openReady(srv, ws);
   attach(srv, ws, "s");
-  ws.bufferedAmount = 2 * 1024 * 1024;
+  ws.setBufferedAmount(2 * 1024 * 1024);
   srv.__test.emitOutput("s", b("x"));
   srv.__test.flushOutput("s"); // dropped, session flagged for resync
   srv.__test.message(ws as any, utf8(encode({ type: "detach", sessionId: "s" })));
-  ws.bufferedAmount = 0;
+  ws.setBufferedAmount(0);
   srv.__test.drain(ws as any);
   expect(frames(ws).some((m) => m.type === "resync")).toBe(false);
+  srv.stop();
+});
+
+// --- Guard: the fake WS must not drift away from Bun's real ServerWebSocket ---
+//
+// Backstory (do not delete these tests): A6 above was dead code from 2026-07-18
+// to 2026-08-03 because server.ts read `conn.ws.bufferedAmount`, a property Bun's
+// SERVER-side socket does not have (that's the browser/client `WebSocket` API —
+// the server one only offers `getBufferedAmount()`). It read `undefined`, `?? 0`
+// turned it into a constant 0, and every drop/resync branch became unreachable.
+// The tests above stayed green the whole time because the double invented a
+// `bufferedAmount` field that only existed in the tests. Nothing compared the
+// double to the real thing, so nobody noticed.
+//
+// The three tests below close that hole from both sides: they pin the real API
+// shape, pin the double against it, and run production against a socket that
+// REFUSES any member the real socket doesn't have.
+
+/** The socket members src/server.ts actually touches (grep `conn.ws.` / `ws.`). */
+const PROD_WS_MEMBERS = ["send", "close", "getBufferedAmount"] as const;
+/** Knobs that belong to the double only — never touched by production. */
+const TEST_ONLY_MEMBERS = new Set(["sent", "setBufferedAmount"]);
+
+/** Boot a throwaway Bun WS server and hand the live server-side socket to `fn`. */
+async function withRealServerSocket<T>(fn: (ws: any) => T): Promise<T> {
+  let resolveSock: (ws: any) => void;
+  const sock = new Promise<any>((r) => { resolveSock = r; });
+  const srv = Bun.serve({
+    port: 0,
+    fetch(req, server) { return server.upgrade(req) ? undefined : new Response("no"); },
+    websocket: { open(ws) { resolveSock(ws); }, message() {} },
+  });
+  const client = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  try {
+    const ws = await Promise.race([
+      sock,
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("no ws upgrade in 5s")), 5000)),
+    ]);
+    return fn(ws);
+  } finally {
+    client.close();
+    srv.stop(true);
+  }
+}
+
+test("guard: Bun's real ServerWebSocket exposes getBufferedAmount() and has NO bufferedAmount property", async () => {
+  await withRealServerSocket((ws) => {
+    // The method production must use.
+    expect(typeof ws.getBufferedAmount).toBe("function");
+    expect(typeof ws.getBufferedAmount()).toBe("number");
+    // The property production must NOT use — absent, so reading it yields
+    // `undefined` and any `?? 0` fallback silently becomes a constant 0.
+    expect("bufferedAmount" in ws).toBe(false);
+    expect(ws.bufferedAmount).toBeUndefined();
+  });
+});
+
+test("guard: fakeWs() matches the real ServerWebSocket on every member production uses", async () => {
+  await withRealServerSocket((real) => {
+    const fake = fakeWs() as any;
+    for (const m of PROD_WS_MEMBERS) {
+      expect(`${m}:${typeof real[m]}`).toBe(`${m}:function`);        // real has it
+      expect(`${m}:${typeof fake[m]}`).toBe(`${m}:function`);        // so must the double
+    }
+    // A `bufferedAmount` field on the double is exactly the drift that hid the
+    // bug: it makes production's wrong read look like it works.
+    expect("bufferedAmount" in fake).toBe(false);
+    // And the double must not sprout members the real socket lacks.
+    for (const k of Object.keys(fake)) {
+      if (TEST_ONLY_MEMBERS.has(k)) continue;
+      expect(`${k} on real socket: ${k in real}`).toBe(`${k} on real socket: true`);
+    }
+  });
+});
+
+test("guard: backpressure works against a socket that refuses non-existent members (real shape)", async () => {
+  // Captures the real socket's member names, then runs the drop+resync scenario
+  // through a double that THROWS on any other property read. If server.ts ever
+  // goes back to `conn.ws.bufferedAmount` (or reaches for any other invented
+  // member), this test throws instead of silently passing.
+  const realMembers = await withRealServerSocket(
+    (ws) => new Set<string>(Object.getOwnPropertyNames(Object.getPrototypeOf(ws))),
+  );
+  expect(realMembers.has("getBufferedAmount")).toBe(true);
+  expect(realMembers.has("bufferedAmount")).toBe(false);
+
+  const inner = fakeWs();
+  const strictWs = new Proxy(inner as any, {
+    get(target, prop, recv) {
+      if (typeof prop === "string" && !realMembers.has(prop) && !TEST_ONLY_MEMBERS.has(prop)
+          && prop !== "then" && prop !== "constructor") {
+        throw new Error(
+          `server.ts read ws.${prop}, which Bun's ServerWebSocket does not have ` +
+          `(members: ${[...realMembers].sort().join(", ")})`,
+        );
+      }
+      return Reflect.get(target, prop, recv);
+    },
+  }) as FakeWs;
+
+  const replay = new ReplayService();
+  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder });
+  openReady(srv, strictWs);
+  attach(srv, strictWs, "s");
+  strictWs.setBufferedAmount(2 * 1024 * 1024); // backed up, via the REAL accessor only
+  srv.__test.emitOutput("s", b("dropped"));
+  srv.__test.flushOutput("s");
+  expect(outputs(strictWs).length).toBe(0); // the drop branch really ran
+  strictWs.setBufferedAmount(0);
+  srv.__test.drain(strictWs as any);
+  expect(frames(strictWs).filter((m) => m.type === "resync"))
+    .toEqual([{ type: "resync", sessionId: "s", from: 1 }]);
   srv.stop();
 });

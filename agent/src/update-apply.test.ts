@@ -9,7 +9,10 @@ import { createHash } from "node:crypto";
 // Use Bun's tar? Simpler: shell out to tar in the test to craft a real archive.
 import { $ } from "bun";
 
-async function makeArchive(dir: string, binName: string): Promise<{ buf: Uint8Array; sha: string }> {
+// `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array`: the latter defaults
+// to `ArrayBufferLike`, which may be a SharedArrayBuffer and so is not a valid
+// Response body. Bun.file().arrayBuffer() always yields a real ArrayBuffer.
+async function makeArchive(dir: string, binName: string): Promise<{ buf: Uint8Array<ArrayBuffer>; sha: string }> {
   await Bun.write(join(dir, binName), "#!/bin/sh\necho stub\n");
   await $`chmod +x ${join(dir, binName)}`;
   await $`tar -czf ${join(dir, binName + ".tar.gz")} -C ${dir} ${binName}`;

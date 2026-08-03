@@ -1,7 +1,13 @@
 import { test, expect } from "bun:test";
 import { TerminalService, type TmuxResult, type TmuxRunner } from "./terminal";
 import { StateHysteresis } from "./state";
-import { hasTmux as tmuxAvailable } from "./test-support";
+import {
+  hasTmux as tmuxAvailable,
+  uniqueSessionName,
+  killSession,
+  waitFor,
+  waitForPrompt,
+} from "./test-support";
 
 // Probe via the shared helper: a bare `Bun.spawnSync(["tmux","-V"])` THROWS when
 // tmux is absent, which would take down this whole file at collection time.
@@ -534,115 +540,175 @@ test("list() reports the scanner-debounced state, not a fresh raw inference", as
 // ---- merged from the former agent/test/terminal.test.ts ----
 // Integration tests against a real tmux binary (skipped when tmux is absent).
 
-const NAME = "pocketshell_test";
+// Each test below owns a FRESH tmux session name (uniqueSessionName) and tears
+// it down in `finally`. Both halves matter and neither is optional:
+//
+//   - Unique names: tmux's session namespace is machine-global, so the old
+//     shared `const NAME = "pocketshell_test"` was one mutable object shared
+//     across every test in this file, every concurrent `bun test` process, and
+//     the developer's own tmux. Measured: two concurrent runs of this file
+//     failed 2 and 4 tests; each run alone failed none.
+//   - `finally` teardown: the old code called `svc.kill()` as the last
+//     STATEMENT, so a failed assertion returned early and leaked both the tmux
+//     session and the TerminalService's 1s scan timer. That leak is what made
+//     one failure cascade into several on the next run — the classic "5 runs,
+//     4 different results" signature.
+//
+// See test-support.ts for the reasoning behind waitForPrompt/waitFor.
 
 test.skipIf(!hasTmux)("ensure creates a session and streams echoed output", async () => {
   const svc = new TerminalService();
+  const NAME = uniqueSessionName("echo");
   const chunks: string[] = [];
   svc.onOutput((_name, chunk) => chunks.push(new TextDecoder().decode(chunk)));
 
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(400);                 // let attach settle
-  svc.write(NAME, new TextEncoder().encode("echo TERM_OK\n"));
-  await Bun.sleep(600);                 // let output flush
-
-  const all = chunks.join("");
-  expect(all).toContain("TERM_OK");
-
-  await svc.kill(NAME);
-  svc.dispose();
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    // Wait for the shell to actually be ready instead of guessing 400ms.
+    // Measured on an IDLE machine the prompt lands at ~580-680ms, so the old
+    // sleep was already short of the real cost — input written before the
+    // shell exists is swallowed and the echo never arrives.
+    expect(await waitForPrompt(NAME)).toBe(true);
+    svc.write(NAME, new TextEncoder().encode("echo TERM_OK\n"));
+    expect(await waitFor(() => chunks.join("").includes("TERM_OK"))).toBe(true);
+  } finally {
+    await svc.kill(NAME);
+    svc.dispose();
+    killSession(NAME);
+  }
 });
 
 test.skipIf(!hasTmux)("list reports the live session", async () => {
   const svc = new TerminalService();
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(300);
-  expect((await svc.list()).some((s) => s.name === NAME)).toBe(true);
-  await svc.kill(NAME);
-  svc.dispose();
+  const NAME = uniqueSessionName("list");
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    expect(
+      await waitFor(async () => (await svc.list()).some((s) => s.name === NAME)),
+    ).toBe(true);
+  } finally {
+    await svc.kill(NAME);
+    svc.dispose();
+    killSession(NAME);
+  }
 });
 
 test.skipIf(!hasTmux)("state transitions run -> wait after output goes quiet", async () => {
   const svc = new TerminalService();
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(300);
-  svc.write(NAME, new TextEncoder().encode("echo BUSY\n"));
+  const NAME = uniqueSessionName("state");
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    expect(await waitForPrompt(NAME)).toBe(true);
+    svc.write(NAME, new TextEncoder().encode("echo BUSY\n"));
 
-  const pollFor = async (target: "run" | "wait", timeoutMs: number) => {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const s = (await svc.list()).find((sess) => sess.name === NAME);
-      if (s?.state === target) return s;
-      await Bun.sleep(50);
-    }
-    return (await svc.list()).find((sess) => sess.name === NAME);
-  };
+    // The published state is owned by the 1s scanner + 2-tick hysteresis, so a
+    // run->wait flip needs ~2 scan ticks after output stops. The old 50ms poll
+    // interval was self-defeating: every tick spawned a `tmux capture-pane`
+    // per session on the machine (10+ here), and that spawn storm competed
+    // with the very scanner it was waiting on. Poll gently and let the
+    // scanner run.
+    const stateIs = (target: "run" | "wait") => async () =>
+      (await svc.list()).find((s) => s.name === NAME)?.state === target;
 
-  const busy = await pollFor("run", 3000);
-  expect(busy?.state).toBe("run");        // output arrived
-  const idle = await pollFor("wait", 3000);
-  expect(idle?.state).toBe("wait");       // quiet for > RUN_WINDOW_MS
-  await svc.kill(NAME);
-  svc.dispose();
+    expect(await waitFor(stateIs("run"), { intervalMs: 100 })).toBe(true);
+    expect(await waitFor(stateIs("wait"), { intervalMs: 100 })).toBe(true);
+  } finally {
+    await svc.kill(NAME);
+    svc.dispose();
+    killSession(NAME);
+  }
 });
 
 test.skipIf(!hasTmux)("onSessionsChange fires when a session's state changes", async () => {
   const svc = new TerminalService();
+  const NAME = uniqueSessionName("change");
   let fired = 0;
   svc.onSessionsChange(() => { fired++; });
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(1600);                    // let the 1s scanner run at least once
-  expect(fired).toBeGreaterThan(0);
-  await svc.kill(NAME);
-  svc.dispose();
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    // Event-driven: return as soon as the scanner fires rather than sleeping
+    // a fixed 1600ms and hoping a 1s tick landed inside it.
+    expect(await waitFor(() => fired > 0)).toBe(true);
+  } finally {
+    await svc.kill(NAME);
+    svc.dispose();
+    killSession(NAME);
+  }
 });
 
 test.skipIf(!hasTmux)("rename changes the session name in the list", async () => {
   const svc = new TerminalService();
-  const NEW = "pocketshell_test_renamed";
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(300);
-  svc.rename(NAME, NEW);
-  const names = (await svc.list()).map((s) => s.name);
-  expect(names).toContain(NEW);
-  expect(names).not.toContain(NAME);
-  await svc.kill(NEW);
-  svc.dispose();
+  const NAME = uniqueSessionName("ren");
+  const NEW = `${NAME}_renamed`;
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    expect(await waitForPrompt(NAME)).toBe(true);
+    svc.rename(NAME, NEW);
+    expect(
+      await waitFor(async () => {
+        const names = (await svc.list()).map((s) => s.name);
+        return names.includes(NEW) && !names.includes(NAME);
+      }),
+    ).toBe(true);
+  } finally {
+    await svc.kill(NEW);
+    svc.dispose();
+    killSession(NAME);
+    killSession(NEW);
+  }
 });
 
 test.skipIf(!hasTmux)("output is delivered under the new name after rename", async () => {
   const svc = new TerminalService();
-  const NEW = "pocketshell_test_renamed_out";
+  const NAME = uniqueSessionName("renout");
+  const NEW = `${NAME}_renamed`;
   const got: string[] = [];
   svc.onOutput((name, chunk) => { if (name === NEW) got.push(new TextDecoder().decode(chunk)); });
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(400);
-  svc.rename(NAME, NEW);
-  await Bun.sleep(400);                 // let the re-attach settle
-  svc.write(NEW, new TextEncoder().encode("echo RENAMED_OUT\n"));
-  await Bun.sleep(700);
-  expect(got.join("")).toContain("RENAMED_OUT");  // must arrive tagged with NEW name
-  await svc.kill(NEW);
-  svc.dispose();
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    expect(await waitForPrompt(NAME)).toBe(true);
+    svc.rename(NAME, NEW);
+    // rename() kills the old PTY and attaches a new one; wait for that attach
+    // to produce bytes under the NEW name before typing into it.
+    expect(await waitFor(() => got.length > 0)).toBe(true);
+    svc.write(NEW, new TextEncoder().encode("echo RENAMED_OUT\n"));
+    // must arrive tagged with the NEW name
+    expect(await waitFor(() => got.join("").includes("RENAMED_OUT"))).toBe(true);
+  } finally {
+    await svc.kill(NEW);
+    svc.dispose();
+    killSession(NAME);
+    killSession(NEW);
+  }
 });
 
 test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)", async () => {
   const svc = new TerminalService();
+  const NAME = uniqueSessionName("detach");
   const exited: string[] = [];
-  svc.onExit((name) => exited.push(name));
-  svc.ensure(NAME, { cols: 80, rows: 24 });
-  await Bun.sleep(400);
-  // Detach every client attached to the session; the tmux session must survive.
-  Bun.spawnSync(["tmux", "detach-client", "-s", NAME]);
-  await Bun.sleep(600);
-  expect(exited).not.toContain(NAME);          // no exit fired
-  expect((await svc.list()).some((s) => s.name === NAME)).toBe(true); // still listed
-  // And it still streams after re-attach:
   const chunks: string[] = [];
+  svc.onExit((name) => exited.push(name));
   svc.onOutput((_n, c) => chunks.push(new TextDecoder().decode(c)));
-  svc.write(NAME, new TextEncoder().encode("echo REATTACH_OK\n"));
-  await Bun.sleep(600);
-  expect(chunks.join("")).toContain("REATTACH_OK");
-  await svc.kill(NAME);
-  svc.dispose();
+  try {
+    svc.ensure(NAME, { cols: 80, rows: 24 });
+    expect(await waitForPrompt(NAME)).toBe(true);
+    // Detach every client attached to the session; the tmux session must survive.
+    // Scoped by name, so this can no longer detach a concurrent run's client.
+    Bun.spawnSync(["tmux", "detach-client", "-s", NAME]);
+    // The re-attach is what proves the point, so wait for it rather than for a
+    // fixed 600ms: onPtyExit() sees the session is alive and re-attaches, and
+    // the fresh attach client repaints the pane.
+    chunks.length = 0;
+    expect(await waitFor(() => chunks.length > 0)).toBe(true);
+    expect(exited).not.toContain(NAME);          // no exit fired
+    expect((await svc.list()).some((s) => s.name === NAME)).toBe(true); // still listed
+    // And it still streams after re-attach:
+    chunks.length = 0;
+    svc.write(NAME, new TextEncoder().encode("echo REATTACH_OK\n"));
+    expect(await waitFor(() => chunks.join("").includes("REATTACH_OK"))).toBe(true);
+  } finally {
+    await svc.kill(NAME);
+    svc.dispose();
+    killSession(NAME);
+  }
 });
