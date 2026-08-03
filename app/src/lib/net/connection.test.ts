@@ -495,8 +495,20 @@ class FakeWS implements WebSocketLike {
   onclose: (() => void) | null = null;
   sent: Uint8Array[] = [];
   closed = false;
+  // A real WebSocket's close() is asynchronous: readyState flips right away,
+  // but `onclose` only fires on a later tick, not inside the close() call
+  // itself. Every other test in this file relies on the simpler synchronous
+  // default (matches this file's house style); pass { syncClose: false } to
+  // model the real async gap, and call fireClose() to land the event by hand.
+  constructor(private opts: { syncClose?: boolean } = {}) {}
   send(data: Uint8Array) { this.sent.push(data); }
-  close() { this.closed = true; this.onclose?.(); }
+  close() {
+    this.closed = true;
+    if (this.opts.syncClose === false) return;
+    this.onclose?.();
+  }
+  // Land the close event for a socket created with { syncClose: false }.
+  fireClose() { this.onclose?.(); }
   // fire a bytes frame as if the server sent it. The bytes are copied into a
   // fresh ArrayBuffer (not `b.buffer.slice(...)`, whose static type is the
   // wider ArrayBufferLike) so the payload matches a real ws "arraybuffer" event.
@@ -1156,15 +1168,31 @@ describe("dropConnection", () => {
     expect(sched.pending()[0]!.delay).toBeLessThanOrEqual(600);
   });
 
-  it("stops the heartbeat so no ping fires on a dead socket", () => {
-    const { conn, socket, sched } = makeConn();
+  it("stops the heartbeat itself, before the async close event lands", () => {
+    // FakeWS's default close() fires onclose synchronously, so handleDown()
+    // (which also calls stopHeartbeat()) runs inside conn.dropConnection()
+    // itself — a mutation test proved that setup can't tell whether
+    // dropConnection() stops the heartbeat or handleDown() does it for free.
+    // A real WebSocket's close() is async: onclose lands on a later tick, so
+    // there is a real window where a live heartbeat interval would still fire
+    // a ping at a socket that is already going away unless dropConnection()
+    // stops it itself. { syncClose: false } models that gap.
+    const { sched } = makeFakeScheduler();
+    let socket!: FakeWS;
+    const conn = new Connection({
+      url: "ws://x", scheduler: sched,
+      wsFactory: () => (socket = new FakeWS({ syncClose: false })),
+      channelFactory: passthroughInitiator,
+    });
     completeHandshake(socket);                // fully online, heartbeat running
     expect(sched.pending().length).toBe(1);   // just the heartbeat interval
 
     conn.dropConnection();
+    // onclose has NOT fired yet (async) — handleDown() has not run. This only
+    // reads 0 if dropConnection() clears the heartbeat interval itself.
+    expect(sched.pending().length).toBe(0);
 
-    // Heartbeat interval cleared; only the reconnect backoff timer remains —
-    // if dropConnection failed to stop the heartbeat this would be 2.
-    expect(sched.pending().length).toBe(1);
+    socket.fireClose();                       // the close event lands, later
+    expect(sched.pending().length).toBe(1);   // handleDown() scheduled the reconnect
   });
 });
