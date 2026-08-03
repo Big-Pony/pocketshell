@@ -270,9 +270,9 @@ pocketshell-agent devices remove <指纹>         # 吊销设备
 
 `pair` 对常驻 Agent 直接生效，不用重启。`devices remove` 几秒内生效：常驻 Agent 会发现变更，撤销该设备的授权、断开它的在线连接、清掉它的推送订阅。
 
-> **这里原本有一个网页管理页。** v1.7.5 删除，原因是它在所有反向代理部署下都能从公网访问。它唯一的凭证是「请求来自 `127.0.0.1`」这道检查——而同机反向代理（Caddy、Nginx、Cloudflare Tunnel、frp，也就是 [DEPLOYMENT-CN.md](./DEPLOYMENT-CN.md) 推荐的全部四种方式）正是从这个地址连进来的，于是**所有**请求都能通过，包括来自公网的匿名请求；此时 `POST /admin-api/pair` 会把可用的配对串交给任何调用者。该页面按设计只允许本机访问，也就是说它的受众一定有 shell——因此它能做的事上面的命令全都能做，删掉它是消除攻击面，而不是给它加锁。
+> **这里原本有一个网页管理页。** v1.8.0 删除，原因是它在所有反向代理部署下都能从公网访问。它唯一的凭证是「请求来自 `127.0.0.1`」这道检查——而同机反向代理（Caddy、Nginx、Cloudflare Tunnel、frp，也就是 [DEPLOYMENT-CN.md](./DEPLOYMENT-CN.md) 推荐的全部四种方式）正是从这个地址连进来的，于是**所有**请求都能通过，包括来自公网的匿名请求；此时 `POST /admin-api/pair` 会把可用的配对串交给任何调用者。该页面按设计只允许本机访问，也就是说它的受众一定有 shell——因此它能做的事上面的命令全都能做，删掉它是消除攻击面，而不是给它加锁。
 >
-> **如果你在 v1.7.4 或更早版本上跑过反向代理部署**，请排查是否被利用：看 `<keyDir>/audit.log` 里有没有你没触发过的 `admin_pair_new` 事件，以及 `pocketshell-agent devices list` 里有没有不认识的设备。`POCKETSHELL_ADMIN` 已不再被读取。
+> **如果你在 v1.7.x 或更早版本上跑过反向代理部署**，请排查是否被利用：看 `<keyDir>/audit.log` 里有没有你没触发过的 `admin_pair_new` 事件，以及 `pocketshell-agent devices list` 里有没有不认识的设备。`POCKETSHELL_ADMIN` 已不再被读取。
 
 ### 部署
 

@@ -318,7 +318,7 @@ Each terminal session gets three env vars injected into its subprocess environme
 
 ### CLI device management
 
-This is the device-management interface (a web admin page existed until v1.7.5 — see the README for why it was removed). Run these on the Agent host, with the same `POCKETSHELL_KEY_DIR` env var as the resident process:
+This is the device-management interface (a web admin page existed until v1.8.0 — see the README for why it was removed). Run these on the Agent host, with the same `POCKETSHELL_KEY_DIR` env var as the resident process:
 
 ```bash
 # list paired devices (fingerprint, name, added time, last-seen, last IP)
