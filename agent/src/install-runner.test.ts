@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync, symlinkSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractPairingString, backupPath, launchdDomain } from "./install-runner";
@@ -119,6 +119,23 @@ test("pairedDeviceCount treats a corrupt or empty registry as zero", () => {
 // inode. install.sh already did this; the TypeScript path did not.
 import { replaceBinary } from "./install-runner";
 
+// The property under test is that the OLD inode survives the replacement,
+// untouched, so a process still executing it keeps its bytes.
+//
+// It is tempting to assert that on the inode NUMBER (`stat(dst).ino` changed),
+// and that is what this test originally did — but an inode number is a reusable
+// slot, not an identity. `rm` frees it and the very next `copyFileSync` may be
+// handed the same number straight back; whether it is depends entirely on the
+// filesystem's allocator. macOS/APFS hands out monotonically increasing numbers
+// so the assertion held on every developer machine, while ext4 on ubuntu-latest
+// prefers to reuse the just-freed inode and returned the identical number —
+// which is exactly what turned CI red ("Expected: not 9177411"). The old
+// assertion was therefore not merely flaky, it was testing the allocator.
+//
+// A hard link pins the old inode, so its content is readable afterwards and the
+// two implementations are told apart with no allocator dependence:
+//   unlink-then-copy -> the link still reads "OLD" (new inode for dst)
+//   copy-in-place    -> the link reads "NEW" (same inode, overwritten)
 test("replaceBinary unlinks an existing target before copying", () => {
   const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
   try {
@@ -126,14 +143,15 @@ test("replaceBinary unlinks an existing target before copying", () => {
     const dst = join(dir, "dst-bin");
     writeFileSync(src, "NEW", { mode: 0o755 });
     writeFileSync(dst, "OLD", { mode: 0o755 });
-    const inodeBefore = statSync(dst).ino;
+    // Stands in for the running process holding the old binary open.
+    const pinned = join(dir, "pinned-bin");
+    linkSync(dst, pinned);
 
     replaceBinary(src, dst);
 
     expect(readFileSync(dst, "utf8")).toBe("NEW");
-    // A fresh inode is the whole point: the old one stays alive for whoever is
-    // still executing it.
-    expect(statSync(dst).ino).not.toBe(inodeBefore);
+    // The whole point: the old inode was detached, not overwritten.
+    expect(readFileSync(pinned, "utf8")).toBe("OLD");
     expect(statSync(dst).mode & 0o777).toBe(0o755);
   } finally {
     rmSync(dir, { recursive: true, force: true });

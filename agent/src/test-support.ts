@@ -31,6 +31,23 @@ export function hasTmux(): boolean {
   return commandAvailable("tmux", ["-V"]);
 }
 
+/**
+ * True if a usable `bsdtar` (libarchive) is on PATH — the guard for the zip
+ * round-trip tests.
+ *
+ * bsdtar is the only extractor we trust to honor the zip general-purpose bit-11
+ * (UTF-8/EFS) flag, so the CJK-filename tests are written against it rather than
+ * against `unzip`. It is NOT universally present: macOS ships it as the system
+ * `tar`, but a stock Ubuntu has GNU tar and no `bsdtar` at all (it lives in the
+ * separate `libarchive-tools` package) — which is exactly how CI first went red
+ * while every developer machine stayed green. CI installs the package so the
+ * tests really run there; this guard only keeps a bsdtar-less machine from
+ * reporting a missing extractor as a product failure.
+ */
+export function hasBsdtar(): boolean {
+  return commandAvailable("bsdtar", ["--version"]);
+}
+
 // ---------------------------------------------------------------------------
 // tmux integration-test scaffolding
 // ---------------------------------------------------------------------------

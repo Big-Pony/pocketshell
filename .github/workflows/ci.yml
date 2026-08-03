@@ -29,13 +29,26 @@ jobs:
         with:
           bun-version: latest
 
-      # agent tests drive real tmux sessions. Most are guarded by
-      # `test.skipIf(!hasTmux)`, but a couple of TerminalService tests spawn
-      # tmux unconditionally and hard-fail without it (verified locally:
-      # 608 pass with tmux, 593 pass / 4 fail without). ubuntu-latest has no
-      # tmux preinstalled, so install it before running the suite.
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
+      # Two system tools the agent suite needs, neither present on a stock
+      # ubuntu-latest. Both are guarded by `test.skipIf` so a machine without
+      # them reports skips instead of failures — they are installed here so CI
+      # actually EXERCISES that coverage rather than quietly skipping it.
+      #
+      #   tmux             — agent tests drive real tmux sessions. Most are
+      #                      guarded, but a couple of TerminalService tests
+      #                      spawn tmux unconditionally and hard-fail without it
+      #                      (verified locally: 608 pass with tmux, 593 pass /
+      #                      4 fail without).
+      #   libarchive-tools — provides `bsdtar`. The zip tests read their
+      #                      archives back through it because it is the only
+      #                      extractor that honors the zip UTF-8/EFS bit-11 flag
+      #                      (Info-Zip `unzip` mojibakes the CJK names). macOS
+      #                      ships bsdtar as the system `tar`, so every dev
+      #                      machine has it; Ubuntu's `tar` is GNU tar and has
+      #                      no bsdtar at all — this is what the first CI run
+      #                      caught.
+      - name: Install system test dependencies (tmux, bsdtar)
+        run: sudo apt-get update && sudo apt-get install -y tmux libarchive-tools
 
       # Bun's global install cache. `agent/` and `app/` are separate projects
       # (no root package.json, no workspace) — each has its own bun.lock, so
