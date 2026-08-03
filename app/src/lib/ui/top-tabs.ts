@@ -1,0 +1,157 @@
+// P1 unified top-area tab model. Terminal tabs (kind:"term") come from live
+// sessions; file preview tabs (kind:"file") are opened from the file panel.
+// Both share one ordered list so Fn+←/→ cycles across them uniformly.
+export type TermTab = { kind: "term"; id: string; title: string };
+export type FileTab = { kind: "file"; id: string; title: string; path: string; mode: "code" | "diff" };
+export type TopTab = TermTab | FileTab;
+
+export function fileTabId(path: string, mode: "code" | "diff"): string {
+  return `file:${mode}:${path}`;
+}
+
+function baseName(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+
+export function openFileTab(tabs: TopTab[], path: string, mode: "code" | "diff"): TopTab[] {
+  const id = fileTabId(path, mode);
+  if (tabs.some((t) => t.id === id)) return tabs;
+  const title = mode === "diff" ? `${baseName(path)} ✎` : baseName(path);
+  return [...tabs, { kind: "file", id, title, path, mode }];
+}
+
+// Only file tabs carry a path, so the result is narrowed to FileTab — callers
+// can read `.path`/`.mode` without re-discriminating the union.
+export function findTabByPath(
+  tabs: TopTab[], path: string, mode: "code" | "diff",
+): FileTab | undefined {
+  return tabs.find((t): t is FileTab => t.kind === "file" && t.path === path && t.mode === mode);
+}
+
+// In-place navigation: change a file tab's path (and title) while keeping its id
+// as a stable "slot" key, so the FilePreview instance keyed by id is NOT remounted
+// (fullscreen + drawer state survive the file switch).
+export function replaceTabPath(tabs: TopTab[], id: string, newPath: string): TopTab[] {
+  return tabs.map((t) => {
+    if (t.id !== id || t.kind !== "file") return t;
+    const title = t.mode === "diff" ? `${baseName(newPath)} ✎` : baseName(newPath);
+    return { ...t, path: newPath, title };
+  });
+}
+
+// Path-based open: reuse an existing slot for (path,mode); otherwise append a new
+// tab. If the natural id is already taken by a stale slot (one that was navigated
+// in place and still encodes its old path in the id), append "~" until unique so
+// the {#each (t.id)} keys never collide.
+export function openOrReuseFileTab(
+  tabs: TopTab[], path: string, mode: "code" | "diff",
+): { tabs: TopTab[]; id: string } {
+  const existing = findTabByPath(tabs, path, mode);
+  if (existing) return { tabs, id: existing.id };
+  let id = fileTabId(path, mode);
+  const used = new Set(tabs.map((t) => t.id));
+  while (used.has(id)) id = id + "~";
+  const title = mode === "diff" ? `${baseName(path)} ✎` : baseName(path);
+  return { tabs: [...tabs, { kind: "file", id, title, path, mode }], id };
+}
+
+export function closeFileTab(tabs: TopTab[], id: string): TopTab[] {
+  return tabs.filter((t) => t.id !== id);
+}
+
+export function cycle(order: string[], activeId: string, delta: number): string {
+  if (!order.length) return activeId;
+  const i = Math.max(0, order.indexOf(activeId));
+  return order[(i + delta + order.length) % order.length];
+}
+
+export function stepClamp(order: string[], activeId: string, delta: number): string {
+  if (!order.length) return activeId;
+  const i = Math.max(0, order.indexOf(activeId));
+  const next = Math.max(0, Math.min(order.length - 1, i + delta));
+  return order[next];
+}
+
+export function appendOrder(order: string[], id: string): string[] {
+  return order.includes(id) ? order : [...order, id];
+}
+
+export function removeOrder(order: string[], id: string): string[] {
+  return order.filter((x) => x !== id);
+}
+
+export function filePathFromTabId(tabs: TopTab[], id: string): string | null {
+  const t = tabs.find((x) => x.id === id);
+  return t && t.kind === "file" ? t.path : null;
+}
+
+// Tap gesture FSM for a top tab (requirement 11 / phase-9 bug fix). Single tap =
+// select (immediate, no latency), double tap = close, triple tap (file tabs
+// only) = copy absolute path. Long-press was dropped because on phones it
+// triggers the native text-selection / callout menu.
+//
+// A double tap must NOT preempt a possible third, so the close action is
+// DEFERRED: on the 2nd tap of a file tab the component schedules a timer; a 3rd
+// tap within the window cancels it and copies instead. Term tabs have no third
+// action, so their 2nd tap opens the close dialog immediately.
+export type TapKind = "term" | "file";
+export interface TapState { id: string; count: number; at: number }
+export type TapAction =
+  | { type: "select" } // count 1
+  | { type: "deferClose" } // count 2, file: start timer -> open close dialog
+  | { type: "closeNow" } // count 2, term: open close dialog now
+  | { type: "copy" } // count 3, file: cancel pending close, copy path
+  | { type: "none" }; // a drag/scroll, or an unreachable term triple
+
+export const TAP_WINDOW_MS = 300;
+export const TAP_RESET: TapState = { id: "", count: 0, at: 0 };
+
+export function stepTap(
+  prev: TapState,
+  tap: { id: string; kind: TapKind; t: number; dragged: boolean },
+): { state: TapState; action: TapAction } {
+  // A drag/scroll is never a tap; it also breaks any in-progress sequence.
+  if (tap.dragged) return { state: TAP_RESET, action: { type: "none" } };
+
+  const continues = prev.id === tap.id && tap.t - prev.at < TAP_WINDOW_MS;
+  const count = continues ? prev.count + 1 : 1;
+  const state: TapState = { id: tap.id, count, at: tap.t };
+
+  if (count === 1) return { state, action: { type: "select" } };
+  if (count === 2) {
+    return tap.kind === "file"
+      ? { state, action: { type: "deferClose" } }
+      : { state: TAP_RESET, action: { type: "closeNow" } };
+  }
+  // count >= 3: only file tabs have a copy action; reset the sequence either way.
+  return { state: TAP_RESET, action: { type: tap.kind === "file" ? "copy" : "none" } };
+}
+
+// Filter `order` to ids that are still valid, then append any `extras` (e.g.
+// live session names that were never recorded in order — external/adopted
+// sessions) that are valid and not already placed. Dedups, preserves order.
+export function visibleOrder(order: string[], valid: Set<string>, extras: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of order) if (valid.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  for (const id of extras) if (valid.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  return out;
+}
+
+/**
+ * 按类型分组重排 top tab 顺序（需求 4「分类排列标签」开关开启时用）：
+ * 终端 tab 在前、文件 tab 在后，两组各自倒序。
+ *
+ * `order`（= tabOrder）是追加序，最早打开的在最前；倒序后「最近打开」排在
+ * 各自组的最左边，符合需求。判定用 fileIds 集合而不是 id 字符串前缀——
+ * openOrReuseFileTab 会在 id 冲突时追加 "~"，集合判定不受 id 变形影响。
+ *
+ * 纯函数，不修改入参。
+ */
+export function groupByKind(order: string[], fileIds: Set<string>): string[] {
+  const terms: string[] = [];
+  const files: string[] = [];
+  for (const id of order) (fileIds.has(id) ? files : terms).push(id);
+  return [...terms.reverse(), ...files.reverse()];
+}

@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref (a new push obsoletes the previous one).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # agent/ — Bun + TypeScript backend. Runs `bun test`.
+  # ---------------------------------------------------------------------------
+  agent:
+    name: agent (bun test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Two system tools the agent suite needs, neither present on a stock
+      # ubuntu-latest. Both are guarded by `test.skipIf` so a machine without
+      # them reports skips instead of failures — they are installed here so CI
+      # actually EXERCISES that coverage rather than quietly skipping it.
+      #
+      #   tmux             — agent tests drive real tmux sessions. Most are
+      #                      guarded, but a couple of TerminalService tests
+      #                      spawn tmux unconditionally and hard-fail without it
+      #                      (verified locally: 608 pass with tmux, 593 pass /
+      #                      4 fail without).
+      #   libarchive-tools — provides `bsdtar`. The zip tests read their
+      #                      archives back through it because it is the only
+      #                      extractor that honors the zip UTF-8/EFS bit-11 flag
+      #                      (Info-Zip `unzip` mojibakes the CJK names). macOS
+      #                      ships bsdtar as the system `tar`, so every dev
+      #                      machine has it; Ubuntu's `tar` is GNU tar and has
+      #                      no bsdtar at all — this is what the first CI run
+      #                      caught.
+      - name: Install system test dependencies (tmux, bsdtar)
+        run: sudo apt-get update && sudo apt-get install -y tmux libarchive-tools
+
+      # Bun's global install cache. `agent/` and `app/` are separate projects
+      # (no root package.json, no workspace) — each has its own bun.lock, so
+      # each job keys its cache on its own lockfile.
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-agent-${{ runner.os }}-${{ hashFiles('agent/bun.lock') }}
+          restore-keys: |
+            bun-agent-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # No --quiet / --reporter override: bun test prints the "N pass / N fail"
+      # summary, which is used as the regression baseline.
+      - name: Test
+        run: bun test
+
+      # agent/ gained a typecheck script only after a dead-code bug (the A6
+      # backpressure path read a `bufferedAmount` property Bun's ServerWebSocket
+      # does not have) sat undetected for two weeks while tsc had been reporting
+      # it all along. Hard failure from day one: the count is zero, keep it zero.
+      - name: Typecheck
+        run: bun run typecheck
+
+  # ---------------------------------------------------------------------------
+  # app/ — Svelte 5 + Vite frontend. Runs vitest, tsc and the production build.
+  # e2e (app/e2e/, Playwright) is deliberately NOT run here: it needs a real
+  # tmux + agent process and is slow/flaky on a runner.
+  # ---------------------------------------------------------------------------
+  app:
+    name: app (vitest + typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-app-${{ runner.os }}-${{ hashFiles('app/bun.lock') }}
+          restore-keys: |
+            bun-app-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # vitest run — prints "Test Files N passed / Tests N passed", used as the
+      # regression baseline. Do not add --silent / --reporter=dot.
+      - name: Test
+        run: bun run test
+
+      # The 63-error backlog (missing @types/node, no .d.ts from noise-handshake,
+      # plus a handful of real defects) has been cleared to zero, so this is a
+      # hard failure — a single new type error fails the build.
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build

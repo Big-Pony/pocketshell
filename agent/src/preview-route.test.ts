@@ -28,7 +28,11 @@ test("valid token serves file with hardening headers", async () => {
   expect(res.headers.get("content-type")).toBe("image/png");
   expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   expect(res.headers.get("cache-control")).toBe("no-store");
-  expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  // VULN-003: no CORS header at all. It used to be `*`, which let any origin
+  // read a preview once it learned a token. Nothing in the app needs it —
+  // <img>/<video>/<iframe> loads are not CORS reads, and the app is same-origin
+  // with the agent. Asserting null (not "absent-ish") so re-adding it fails.
+  expect(res.headers.get("access-control-allow-origin")).toBeNull();
   // Defence-in-depth headers: CSP sandbox neutralises a top-level HTML load,
   // nosniff stops MIME sniffing octet-stream into an executable document.
   expect(res.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
@@ -98,7 +102,7 @@ test("206 响应同样带全部安全头", async () => {
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   expect(res.headers.get("cache-control")).toBe("no-store");
   expect(res.headers.get("referrer-policy")).toBe("no-referrer");
-  expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  expect(res.headers.get("access-control-allow-origin")).toBeNull(); // VULN-003
 });
 
 test("越界 Range 返回 416 且带 content-range", async () => {

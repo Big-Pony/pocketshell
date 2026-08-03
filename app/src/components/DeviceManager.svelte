@@ -2,10 +2,10 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import type { Connection } from "../lib/connection";
-  import type { DeviceInfo } from "../lib/protocol";
-  import { parsePairingString } from "../lib/pairing";
-  import { applyPairing } from "../lib/keystore";
+  import type { Connection } from "../lib/net/connection";
+  import type { DeviceInfo } from "../lib/net/protocol";
+  import { parsePairingString } from "../lib/net/pairing";
+  import { applyPairing } from "../lib/net/keystore";
 
   let { conn, onClose, prefill = "" }: { conn: Connection; onClose: () => void; prefill?: string } = $props();
 

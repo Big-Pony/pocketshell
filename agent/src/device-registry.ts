@@ -11,16 +11,32 @@ export interface DeviceRegistry {
   add(pub: string, name: string): void;
   remove(pub: string): boolean;
   touch(pub: string, ip?: string): void;
+  /**
+   * Re-read the backing file, discarding the in-memory copy.
+   *
+   * Needed because `pocketshell-agent devices remove` edits devices.json from a
+   * separate process. Mutates in place rather than returning a new registry:
+   * `config.registry` is captured by closures all over server.ts, so swapping
+   * the object would leave most callers on the stale one.
+   */
+  reload(): DeviceRecord[];
 }
 
 export function loadDeviceRegistry(file: string, now: () => number = () => Date.now()): DeviceRegistry {
-  let devices: DeviceRecord[] = [];
-  if (existsSync(file)) {
+  const readFromDisk = (): DeviceRecord[] => {
+    if (!existsSync(file)) return [];
     try {
       const j = JSON.parse(readFileSync(file, "utf8"));
-      if (j && Array.isArray(j.devices)) devices = j.devices;
-    } catch { devices = []; }
-  }
+      return j && Array.isArray(j.devices) ? j.devices : [];
+    } catch {
+      // Malformed/partially-written file: keep whatever we already had rather
+      // than silently de-authorizing every device. A reload racing another
+      // process's write must never look like "the operator removed everyone".
+      return devices;
+    }
+  };
+  let devices: DeviceRecord[] = [];
+  devices = readFromDisk();
   const persist = () => {
     const tmp = join(dirname(file), `.devices.${process.pid}.tmp`);
     writeFileSync(tmp, JSON.stringify({ v: 1, devices }), { mode: 0o600 });
@@ -46,6 +62,10 @@ export function loadDeviceRegistry(file: string, now: () => number = () => Date.
     touch: (pub, ip) => {
       const d = devices.find((x) => x.pubKey === pub);
       if (d) { d.lastSeen = iso(); if (ip) d.lastIp = ip; persist(); }
+    },
+    reload: () => {
+      devices = readFromDisk();
+      return devices.map((d) => ({ ...d }));
     },
   };
 }

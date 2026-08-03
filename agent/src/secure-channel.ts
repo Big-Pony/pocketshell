@@ -53,7 +53,10 @@ export function createResponderChannel(opts: {
         state = "failed";
         return { status: "fail", reason: "handshake_error" };
       }
-      const clientPub = toB64(new Uint8Array(hs.rs));
+      // `rs` is typed nullable because the pattern decides when it is learned.
+      // For the IK *responder* it is filled by the `s` token inside msg1, so a
+      // recv() that did not throw guarantees it is set.
+      const clientPub = toB64(new Uint8Array(hs.rs!));
       const decision = opts.authorize(clientPub);
       if (decision === "reject") {
         state = "failed";

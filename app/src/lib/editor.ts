@@ -2,7 +2,7 @@
 // detection. UI-free so it is unit-testable; FileEditor.svelte stays thin.
 import type { Extension } from "@codemirror/state";
 import { toB64 } from "./bytes";
-import { CHUNK_BYTES, type RpcLike } from "./transfer";
+import { CHUNK_BYTES, type RpcLike } from "./net/transfer";
 
 // fs.read lang ids → CM6 extensions. bash/go/ini have no official 6.x package
 // and go through legacy-modes StreamLanguage (coarser highlight, fine for edits).

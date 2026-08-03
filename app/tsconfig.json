@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["svelte", "vitest/globals"]
+    "types": ["svelte", "vitest/globals", "node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "vitest-setup.ts"]
 }

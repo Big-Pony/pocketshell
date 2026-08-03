@@ -223,7 +223,7 @@ Agent 默认监听 **`8722` 端口**（`POCKETSHELL_PORT` 可改），启动后�
 
 Agent 首次运行会打印：App 访问地址、可粘贴的**配对串**、Agent 公钥。手机打开 App → 粘贴配对串完成一次性配对（默认 TTL 300s）。之后该设备即受信。
 
-配成系统服务后这些输出进的是日志，用 `sudo journalctl -u pocketshell -n 50`（Linux）查看。配对码 TTL 300 秒且只在进程启动时生成一次——过期了不用重启服务，在 Agent 所在机器打开管理页 `http://127.0.0.1:8722/admin` 点一下就能生成新的。
+配成系统服务后这些输出进的是日志，用 `sudo journalctl -u pocketshell -n 50`（Linux）查看。配对码 TTL 300 秒且只在进程启动时生成一次——过期了不用重启服务，在 Agent 所在机器执行 `pocketshell-agent pair` 即可打印新的配对串，常驻的 Agent 会自动拾取。
 
 **常用环境变量**（`agent/src/config.ts`，优先级 env > `<keyDir>/agent.json` > 默认）
 
@@ -234,7 +234,7 @@ Agent 首次运行会打印：App 访问地址、可粘贴的**配对串**、Age
 | `POCKETSHELL_ADVERTISE` | — | 写进配对串的对外地址 |
 | `POCKETSHELL_KEY_DIR` | `~/.pocketshell` | 密钥/设备/审计目录 |
 | `POCKETSHELL_TLS` / `_CERT` / `_KEY` | `0` | Agent 内置 TLS（手供证书） |
-| `POCKETSHELL_ADMIN` | 开启 | 本地管理页（仅 127.0.0.1），`0` 关闭 |
+| `POCKETSHELL_UPDATE_REPO` | `Big-Pony/pocketshell` | 检查更新的 Release 来源；自动更新只从内置仓库应用 |
 | `POCKETSHELL_INSTANCE_NAME` | — | 实例名，装多台时用来区分（见下节）；不设即显示默认的「PocketShell」 |
 
 ### 装多台服务器
@@ -258,15 +258,21 @@ POCKETSHELL_ADVERTISE=wss://home.example.com POCKETSHELL_INSTANCE_NAME=家里 po
 
 > 前提是每台要有自己的域名或地址。手机上的 App 是 HTTPS 页面，浏览器不允许它连明文 `ws://`，而 `wss://` 需要证书、证书签不了裸 IP——所以公网访问的实例都需要一个域名（子域名即可，见[部署指南](./DEPLOYMENT-CN.md)）。局域网内直连 IP 则不受此限。
 
-### 后台管理页
+### 设备管理
 
-Agent 内置一个**仅限本机访问**的管理页：在运行 Agent 的机器上打开 `http://127.0.0.1:8722/admin`（端口随 `POCKETSHELL_PORT`，页面中英双语）。功能：
+设备管理走命令行，在跑 Agent 的那台机器上执行：
 
-- **生成新配对码**：一键生成新的一次性配对串（TTL 300s），给新手机配对，无需重启 Agent；
-- **查看已配对设备**：设备名、公钥、最近访问 IP、在线状态；
-- **删除/吊销设备**：吊销后该设备立即断线，无法再握手。
+```bash
+pocketshell-agent pair [--name <设备名>]        # 生成配对串（TTL 300s）
+pocketshell-agent devices list                  # 设备名、指纹、最近访问、IP
+pocketshell-agent devices remove <指纹>         # 吊销设备
+```
 
-管理页只响应来自 `127.0.0.1` 的请求，经反向代理或公网访问会被拒绝（有意设计，无需额外加固）；设 `POCKETSHELL_ADMIN=0` 可整体关闭。
+`pair` 对常驻 Agent 直接生效，不用重启。`devices remove` 几秒内生效：常驻 Agent 会发现变更，撤销该设备的授权、断开它的在线连接、清掉它的推送订阅。
+
+> **这里原本有一个网页管理页。** v1.8.0 删除，原因是它在所有反向代理部署下都能从公网访问。它唯一的凭证是「请求来自 `127.0.0.1`」这道检查——而同机反向代理（Caddy、Nginx、Cloudflare Tunnel、frp，也就是 [DEPLOYMENT-CN.md](./DEPLOYMENT-CN.md) 推荐的全部四种方式）正是从这个地址连进来的，于是**所有**请求都能通过，包括来自公网的匿名请求；此时 `POST /admin-api/pair` 会把可用的配对串交给任何调用者。该页面按设计只允许本机访问，也就是说它的受众一定有 shell——因此它能做的事上面的命令全都能做，删掉它是消除攻击面，而不是给它加锁。
+>
+> **如果你在 v1.7.x 或更早版本上跑过反向代理部署**，请排查是否被利用：看 `<keyDir>/audit.log` 里有没有你没触发过的 `admin_pair_new` 事件，以及 `pocketshell-agent devices list` 里有没有不认识的设备。`POCKETSHELL_ADMIN` 已不再被读取。
 
 ### 部署
 

@@ -1,5 +1,5 @@
 // req 7-1: pure helpers for the `pocketshell-agent devices|pair` CLI subcommands
-// (Linux headless ops without the /admin web page). server.ts wires these to
+// (headless ops; these are the only device-management interface). server.ts wires these to
 // loadConfig()/registry/pairing.
 import { createHash } from "node:crypto";
 import type { DeviceRecord } from "./device-registry";

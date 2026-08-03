@@ -4,13 +4,12 @@
 // S4a: wrapped in SecureChannel handshake — plaintext message loop unchanged.
 // S4b: in-channel pairing — pending state, pair verify, registry∪env authorize.
 import type { ServerWebSocket } from "bun";
-import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise, advertiseToHttp } from "./config";
+import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise } from "./config";
 import { TerminalService } from "./terminal";
 import { ShellService } from "./shell-service";
 import { ReplayService } from "./replay";
 import { OutputBatcher } from "./output-batcher";
-import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp, fsWrite } from "./fs-service";
-import { gitLog, gitBranches, gitStatus } from "./git-service";
+import { sweepTmp } from "./fs-service";
 import { RPC_FIT_SAFE_BYTES, chunkRpcPayload } from "./rpc-fit";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
 import { sessionListsEqual } from "./sessions-diff";
@@ -19,29 +18,28 @@ import { createResponderChannel, type SecureChannel } from "./secure-channel";
 import { resolveStatic, contentEtag, isNotModified } from "./static-serve";
 import { brandManifest, brandHtml } from "./instance-brand";
 import { ASSETS } from "./embedded-manifest";
-import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
-import { buildReadiness, isNonLocalBind } from "./readiness";
-import { runWarmup } from "./warmup";
-import { createPairing, generatePairingCode, readPendingPairing, writePendingPairing, clearPendingPairing, shouldAdoptDiskPairing } from "./pairing";
-import { parseArgv, formatDeviceList, matchDevice, fingerprint } from "./cli-devices";
-import { isLocalAddr, deviceRows, ADMIN_HTML } from "./admin";
+import { createPairing, readPendingPairing, clearPendingPairing, shouldAdoptDiskPairing } from "./pairing";
+import { isLocalAddr } from "./net-addr";
+import { watchRegistryFile, readStamp } from "./registry-watch";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
 import { AGENT_VERSION } from "./version";
 import { checkLatest } from "./update-check";
-import { readCache, writeCache, isFresh, CHECK_TTL_MS, type CachedCheck } from "./update-cache";
+import { readCache, writeCache, type CachedCheck } from "./update-cache";
 import { downloadAndVerify, type Phase } from "./update-apply";
-import { signBinary, ensureLocalIdentity } from "./codesign-provision";
+import { signBinary } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
 import { NotificationService, type DevicePresence } from "./notify-service";
 import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi, type WireResult } from "./notify-wire";
 import { ContextStore } from "./context-store";
 import { AI_TOOLS, type AiTool } from "./ai-context";
-import { formatDiagReport } from "./diag-report";
+import { dispatchRpc } from "./rpc-router";
+import { runCli } from "./cli-entry";
 
-function isAiTool(t: string): t is AiTool { return (AI_TOOLS as readonly string[]).includes(t); }
-import { parseStatuslinePayload } from "./statusline-payload";
-import { chainPathOf, readChain, wireStatusline, unwireStatusline } from "./statusline-wire";
+// 入参可选：调用点的 `tool` 来自解析后的 JSON body（`tool?: string`）。收窄成
+// 必填 string 会逼调用点加非空断言，而这里本来就该把 undefined 判成「不是 AI
+// 工具」——includes(undefined) 返回 false，运行时语义不变。
+function isAiTool(t: string | undefined): t is AiTool { return (AI_TOOLS as readonly string[]).includes(t as string); }
 import { ensureVapid, realPushSender } from "./web-push";
 import { renameSync, copyFileSync, chmodSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
@@ -56,8 +54,19 @@ export function applyGate(
   repo: string | null,
   cache: CachedCheck | null,
   applying: boolean,
+  official = true,
 ): { started: false; reason: string } | { started: true; latest: string } {
   if (!repo) return { started: false, reason: "disabled" };
+  // RCE-⑥ / VULN-002. `update.apply` fetches a binary and renames it over the
+  // running executable; its only integrity check is a SHA256SUMS.txt from the
+  // same release, so whoever controls the repo controls both sides of the
+  // comparison. Auto-apply is therefore restricted to the built-in repo.
+  //
+  // Checking still works against a fork (`update.check` never calls this gate),
+  // so the version banner and "update available" UI keep functioning — you just
+  // have to install a fork's build deliberately instead of having the agent
+  // swap its own binary on the say-so of an env var.
+  if (!official) return { started: false, reason: "unofficial_repo" };
   if (applying) return { started: false, reason: "in_progress" };
   if (!cache?.canApply || !cache.latest) return { started: false, reason: cache?.reason ?? "no_release_info" };
   return { started: true, latest: cache.latest };
@@ -189,7 +198,26 @@ export function startServer(deps: Deps = {}) {
   // via replay.since(lastSeq).
   const HIGH_WATER_BYTES = 1024 * 1024;
   const LOW_WATER_BYTES = 256 * 1024;
-  const bufferedAmount = (conn: Conn) => conn.ws.bufferedAmount ?? 0;
+  // Bun's server-side socket exposes its queued bytes ONLY through the
+  // `getBufferedAmount()` METHOD — there is no `bufferedAmount` property (that
+  // one belongs to the *client* `WebSocket` API). Reading it yielded
+  // `undefined`, so the previous `conn.ws.bufferedAmount ?? 0` was a constant 0
+  // and silently disabled every branch below: nothing was ever dropped and no
+  // resync was ever issued, i.e. the whole A6 path was dead code. The guard
+  // suite at the bottom of src/server-output.test.ts pins this shape against a
+  // real Bun socket so it cannot drift back.
+  const bufferedAmount = (conn: Conn): number => {
+    const ws = conn.ws as { getBufferedAmount?: () => number };
+    if (typeof ws.getBufferedAmount !== "function") return 0;
+    try {
+      const n = ws.getBufferedAmount();
+      return typeof n === "number" && Number.isFinite(n) ? n : 0;
+    } catch {
+      // Socket already closed/detached: report "not backed up" so delivery keeps
+      // its normal path (the send itself is a no-op on a dead socket).
+      return 0;
+    }
+  };
   const maybeResync = (conn: Conn) => {
     if (conn.needsResyncSessions.size === 0) return;
     if (bufferedAmount(conn) > LOW_WATER_BYTES) return;
@@ -333,6 +361,30 @@ export function startServer(deps: Deps = {}) {
   const previewSweepTimer = setInterval(() => previewTokens.sweep(Date.now()), 300_000);
   (previewSweepTimer as unknown as { unref?: () => void }).unref?.();
 
+  // Everything that must happen when a device loses authorization. Dropping the
+  // registry row alone is not enough: an already-open WebSocket has passed the
+  // handshake and would keep working until it happened to reconnect, and its
+  // push subscriptions would keep delivering. Used by the in-band revokeDevice
+  // RPC and by the CLI-removal watcher, so the two paths cannot drift.
+  const revokeEffects = (pub: string, via: string) => {
+    config.audit.log({ event: "revoke", pub, ip: via });
+    for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
+    notify.removeSubsForDevice(pub);
+  };
+
+  // `pocketshell-agent devices remove` edits devices.json from another process.
+  // Without this poll the resident agent never notices: the device stays in the
+  // in-memory registry, keeps passing authorize(), and the next touch() writes
+  // the removed record back to disk. See registry-watch.ts.
+  const registryWatch = watchRegistryFile({
+    stamp: () => readStamp(config.registryFile),
+    current: () => config.registry.list().map((d) => d.pubKey),
+    reload: () => config.registry.reload().map((d) => d.pubKey),
+    onRemoved: (pubs) => {
+      for (const pub of pubs) revokeEffects(pub, "cli");
+    },
+  });
+
   const pushSnippets = (target?: Conn) => {
     const items = config.snippets.list().map((r) => ({
       id: r.id, group: r.group, label: r.label, command: r.command, autoEnter: r.autoEnter,
@@ -358,7 +410,7 @@ export function startServer(deps: Deps = {}) {
   let applying = false;
   async function runApply(): Promise<{ started: boolean; reason?: string }> {
     const cache = readCache(config.keyDir);
-    const gate = applyGate(config.update.repo, cache, applying);
+    const gate = applyGate(config.update.repo, cache, applying, config.update.official);
     if (!gate.started) return gate;
     applying = true;
     const tag = `v${gate.latest}`;
@@ -609,157 +661,23 @@ export function startServer(deps: Deps = {}) {
         break;
       case "rpc": {
         const { id, method, params } = msg;
-        const p = (params ?? {}) as any;
-        try {
-          let result: unknown;
-          switch (method) {
-            case "hints.list": result = { items: config.hints.list().map((r) => ({ id: r.id, text: r.text })) }; break;
-            case "fs.tree": result = fsTree(String(p.path)); break;
-            case "fs.read": result = fsRead(String(p.path)); break;
-            case "fs.diff": result = fsDiff(String(p.path), p.cwd ? String(p.cwd) : undefined); break;
-            case "fs.op": result = fsOp(p.op, String(p.path), p.to ? String(p.to) : undefined); break;
-            case "fs.uploadCheck": result = fsUploadCheck(String(p.dir), (p.names ?? []) as string[]); break;
-            case "fs.resolveName": result = fsResolveName(String(p.dir), String(p.name)); break;
-            case "fs.uploadChunk": result = fsUploadChunk(config.tmpDir, String(p.uploadId), String(p.dataB64), { first: !!p.first, last: !!p.last, destPath: p.destPath ? String(p.destPath) : undefined }); break;
-            case "fs.write": result = fsWrite(config.tmpDir, String(p.writeId), String(p.dataB64), { first: !!p.first, last: !!p.last, path: p.path ? String(p.path) : undefined, expectMtime: p.expectMtime == null ? undefined : Number(p.expectMtime) }); break;
-            case "fs.downloadChunk": result = fsDownloadChunk(String(p.path), Number(p.offset), Number(p.len)); break;
-            case "fs.archive": result = fsArchive(config.tmpDir, String(p.path)); break;
-            case "git.log": result = gitLog(String(p.cwd), Number(p.limit ?? 30), p.query ? String(p.query) : undefined); break;
-            case "git.branches": result = gitBranches(String(p.cwd)); break;
-            case "git.status": result = gitStatus(String(p.cwd)); break;
-            // 先取号、后快照：capture 期间新到的输出必然拿到 > seq 的序号，
-            // 前端 attach(seq) 会把它们补上。顺序反过来会丢字节。
-            case "term.history": {
-              const sid = String(p.session);
-              const seq = replay.latestSeq(sid);
-              result = shell.has(sid) ? { data: "", seq } : await terminal.history(sid, seq);
-              break;
-            }
-            // 复制路径专用：默认纯文本（无 SGR），可给 back（光标往上第几行）
-            // 只取某一轮命令的输出，再给 endBack 就是一个闭区间（复制模式上翻
-            // 分页靠它，否则每页都要重传底部已有内容）。不取 seq —— 它不接管
-            // 实时流。shell 会话没有 tmux pane，与 term.history 一样退化为空。
-            case "term.capture": {
-              const sid = String(p.session);
-              result = shell.has(sid)
-                ? { data: "", atTop: true }
-                : await terminal.capture(sid, {
-                    colors: !!p.colors,
-                    back: p.back == null ? undefined : Number(p.back),
-                    endBack: p.endBack == null ? undefined : Number(p.endBack),
-                  });
-              break;
-            }
-            case "term.paneInfo": result = shell.has(String(p.session)) ? { currentCommand: "", alternateOn: false, isShell: true } : terminal.paneInfo(String(p.session)); break;
-            case "term.redraw": result = shell.has(String(p.session)) ? { ok: true } : terminal.redraw(String(p.session)); break;
-            case "terminal.pwd": result = shell.has(String(p.session)) ? { pwd: "" } : terminal.pwd(String(p.session)); break;
-            case "preview.mint": {
-              // base is chosen by the client (project-root bookmark or the
-              // file's dir). An authed device can already fs.read anything, so
-              // scoping a token to any dir it names adds no new exposure.
-              const dev = conn.remoteStatic ?? "unknown";
-              result = { token: previewTokens.mint(String(p.base), dev, Date.now()) };
-              break;
-            }
-            // 实例身份：只读，走通用 RPC 信封（不需要新增 protocol 消息类型）。
-            // 天然只在 Noise 握手成功后可得 —— 未配对设备看不到实例名。
-            case "agent.info": result = { instanceName: config.instanceName ?? null }; break;
-            // 客户端诊断上报（docs/bug/终端显示异常2）。整屏文字消失只在真机回
-            // 前台时偶现，而那正是「手边没有电脑、连不上 devtools」的场景，所以
-            // 让 App 每次回前台把图集状态发回来，由 agent 打到 stdout —— launchd
-            // 已把 stdout 落到 ~/Library/Logs/pocketshell/agent.out.log，用户零操作。
-            // 内容经 formatDiagReport 白名单化：只留几个计数器，终端内容一律丢弃
-            // （本仓库公开，日志有可能被贴进 issue）。
-            case "diag.report": console.log(formatDiagReport(p)); result = { ok: true }; break;
-            case "notify.getConfig": result = notify.config(); break;
-            case "notify.setConfig": notify.setConfig(p.config); result = { ok: true }; break;
-            case "notify.getVapidPublicKey": result = { publicKey: notify.vapidPublicKey() }; break;
-            case "notify.subscribeWebPush":
-              if (conn.remoteStatic) notify.addSub(conn.remoteStatic, p.subscription);
-              result = { ok: true }; break;
-            case "notify.unsubscribeWebPush":
-              if (conn.remoteStatic) notify.removeSubsForDevice(conn.remoteStatic);
-              result = { ok: true }; break;
-            case "notify.wire": result = doWire(p.tool, true); break;
-            case "notify.unwire": result = doWire(p.tool, false); break;
-            // 需求 5：接管 CC 的 statusLine 取上下文用量。与 notify.wire 分开
-            // 是因为它不产生通知，只取数字；混进工具列表会让用户以为开了它
-            // 就能收到推送。
-            case "context.wire":
-            case "context.unwire": {
-              const on = method === "context.wire";
-              // chain 路径与 statusline 子命令的读取端同源（chainPathOf），
-              // 两边各写各的会导致解除接线时还原不回用户原来的状态栏。
-              const chainPath = chainPathOf(process.env);
-              const r = on
-                ? wireStatusline(toolPaths.claude, chainPath, agentBin)
-                : unwireStatusline(toolPaths.claude, chainPath, agentBin);
-              if (r.ok) { const c = notify.config(); c.contextStatusline = on; notify.setConfig(c); }
-              result = r;
-              break;
-            }
-            case "notify.testWebhook": {
-              // async self-answer, same pattern as update.check/update.apply
-              // above: sends its own response and returns early rather than
-              // falling through to the post-switch sendRpcResult(...) call.
-              void notify.testWebhook(String(p.id)).then(
-                (r) => sendRpcResult(conn, id, r),
-                (e) => sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } }),
-              );
-              return;
-            }
-            case "update.check": {
-              // checkLatest() needs to await a network call. This case sends its
-              // own response from an async IIFE and returns immediately —
-              // mirroring the `default:` branch below, which already returns
-              // early to bypass the post-switch sendRpcResult(...) call.
-              // (handleClient is async since term.history moved to tmuxAsync, so
-              // the IIFE is no longer strictly required here; it is kept because
-              // returning early also skips the shared post-switch send path.)
-              const force = !!p.force;
-              void (async () => {
-                try {
-                  const cached = readCache(config.keyDir);
-                  let out: CachedCheck;
-                  if (!force && isFresh(cached, Date.now(), CHECK_TTL_MS)) {
-                    out = cached as CachedCheck;
-                  } else {
-                    const r = await checkLatest({ repo: config.update?.repo ?? null, current: AGENT_VERSION });
-                    out = { ...r, checkedAt: Date.now() };
-                    writeCache(config.keyDir, out);
-                  }
-                  sendRpcResult(conn, id, out);
-                } catch (e) {
-                  const code = e instanceof Error && (e as Error & { code?: string }).code === "conflict" ? "conflict" : "rpc_error";
-                  sendSecure(conn, { type: "response", id, ok: false, error: { code, message: String(e) } });
-                }
-              })();
-              return;
-            }
-            case "update.apply": {
-              // runApply is async (readCache/applyGate resolve synchronously,
-              // but it's declared async so the caller always awaits a
-              // Promise) — mirrors the update.check case above: this case
-              // sends its own response and returns early rather than falling
-              // through to the post-switch sendRpcResult(...) call.
-              void runApply().then(
-                (out) => sendRpcResult(conn, id, out),
-                (e) => sendSecure(conn, { type: "response", id, ok: false, error: { code: "rpc_error", message: String(e) } }),
-              );
-              return;
-            }
-            default:
-              sendSecure(conn, { type: "response", id, ok: false, error: { code: "unknown_method", message: `unknown method: ${method}` } });
-              return;
-          }
-          sendRpcResult(conn, id, result);
-        } catch (e) {
-          // Preserve a structured conflict tag so the client can key off the
-          // code instead of pattern-matching the message text.
-          const code = e instanceof Error && (e as Error & { code?: string }).code === "conflict" ? "conflict" : "rpc_error";
-          sendSecure(conn, { type: "response", id, ok: false, error: { code, message: String(e) } });
-        }
-        break;
+        // Table-driven dispatch lives in rpc-router.ts. This stays the only
+        // place that knows how to put bytes on this conn's channel: every
+        // handler answers through sendResult/sendError below — including the
+        // four that answer themselves (notify.testWebhook / update.check /
+        // update.apply, all async) and the unknown-method fallback.
+        return dispatchRpc(
+          {
+            config, terminal, shell, replay, notify, previewTokens,
+            claudeSettingsPath: toolPaths.claude, agentBin, doWire, runApply,
+            id,
+            devicePub: conn.remoteStatic,
+            sendResult: (result) => sendRpcResult(conn, id, result),
+            sendError: (code, message) => sendSecure(conn, { type: "response", id, ok: false, error: { code, message } }),
+          },
+          method,
+          params,
+        );
       }
       default: sendSecure(conn, { type: "error", code: "unknown_type", message: "unknown message type" }); break;
     }
@@ -838,41 +756,6 @@ export function startServer(deps: Deps = {}) {
     });
   };
 
-  const onlineIpByPub = () => {
-    const m = new Map<string, string>();
-    for (const c of conns.values()) if (c.ready && c.remoteStatic) m.set(c.remoteStatic, c.ip);
-    return m;
-  };
-
-  const handleAdmin = async (url: URL, req: Request): Promise<Response> => {
-    if (url.pathname === "/admin") {
-      return new Response(ADMIN_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
-    }
-    if (url.pathname === "/admin-api/devices") {
-      return Response.json(deviceRows(config.registry.list(), onlineIpByPub()));
-    }
-    if (url.pathname === "/admin-api/pair" && req.method === "POST") {
-      config.pairing = createPairing({ now: () => Date.now() });
-      config.pairingMode = true;
-      const pairString = buildPairingString(config.identity.publicKey, resolveAdvertise(config), config.pairing.code);
-      config.audit.log({ event: "admin_pair_new" });
-      return Response.json({ code: config.pairing.code, pairString });
-    }
-    if (url.pathname === "/admin-api/revoke" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { pubKey?: string };
-      const pub = String(body.pubKey ?? "");
-      if (envKeys.has(pub)) return new Response("env keys are read-only", { status: 400 });
-      const removed = config.registry.remove(pub);
-      if (removed) {
-        config.audit.log({ event: "revoke", pub, ip: "admin" });
-        for (const c of conns.values()) if (c.remoteStatic === pub) c.ws.close();
-        notify.removeSubsForDevice(pub);
-      }
-      return Response.json({ ok: removed });
-    }
-    return new Response("Not found", { status: 404 });
-  };
-
   const tlsMaterial = resolveTlsMaterial(config.keyDir, config.tls);
   const server = Bun.serve({
     hostname: config.listen.host,
@@ -904,12 +787,6 @@ export function startServer(deps: Deps = {}) {
       }
       if (url.pathname.startsWith("/preview/")) {
         return buildPreviewResponse(previewTokens, url, Date.now(), req.headers.get("range"));
-      }
-      if (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin-api/")) {
-        if (!config.adminEnabled) return new Response("Not found", { status: 404 });
-        const ip = srv.requestIP(req)?.address ?? "";
-        if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
-        return handleAdmin(url, req);
       }
       const r = resolveStatic(
         url.pathname,
@@ -1008,6 +885,7 @@ export function startServer(deps: Deps = {}) {
       clearInterval(pushTimer);
       clearInterval(sweepTimer);
       clearInterval(previewSweepTimer);
+      registryWatch.stop();
       batcher.clearAll();
       terminal.dispose();
       shell.dispose();
@@ -1023,198 +901,17 @@ export function startServer(deps: Deps = {}) {
       emitExit: onTermExit,
       flushOutput: (name: string) => batcher.flush(name),
       drain: (ws: any) => { const conn = conns.get(ws); if (conn) maybeResync(conn); },
+      pollRegistry: () => registryWatch.poll(),
       config,
     },
   };
 }
 
-// req 7-1: `pocketshell-agent devices|pair` CLI subcommands. Pure helpers from
-// cli-devices.ts wired to loadConfig()/registry/pairing; never boots the server.
-async function runCliDevices(argv: string[]): Promise<number> {
-  const action = parseArgv(argv);
-  if (action.cmd === "unknown") { console.error(action.usage); return 1; }
-  const cfg = loadConfig();
-  if (action.cmd === "devices-list") {
-    console.log(formatDeviceList(cfg.registry.list()));
-    return 0;
-  }
-  if (action.cmd === "devices-remove") {
-    const m = matchDevice(cfg.registry.list(), action.query);
-    if (m.kind === "none") { console.error(`No device matching "${action.query}".`); return 1; }
-    if (m.kind === "ambiguous") { console.error(`Ambiguous: ${m.matches.length} devices match "${action.query}". Use a longer fingerprint.`); return 1; }
-    cfg.registry.remove(m.record.pubKey);
-    console.log(`Removed ${fingerprint(m.record.pubKey)} (${m.record.name}).`);
-    return 0;
-  }
-  // action.cmd === "pair"
-  const now = Date.now();
-  const code = generatePairingCode();
-  writePendingPairing(cfg.keyDir, { code, expiresAt: now + 300_000, maxAttempts: 5, mintedAt: now });
-  const advertise = resolveAdvertise(cfg);
-  console.log(buildPairingString(cfg.identity.publicKey, advertise, code));
-  console.log("\nPairing code valid for 300s. Paste the string above into the app; a running agent picks it up automatically.");
-  return 0;
-}
-
 // Allow `bun run src/server.ts` (or the compiled binary) to boot directly.
+// All subcommand bodies (install/uninstall, notify, statusline, devices/pair,
+// --version, --warmup) and the default boot path now live in cli-entry.ts;
+// this is only the entry hook. startServer is passed in because cli-entry.ts
+// must not import back from here (cycle).
 if (import.meta.main) {
-  const cliArgv = process.argv.slice(2);
-  if (cliArgv[0] === "install" || cliArgv[0] === "uninstall") {
-    // Service install/uninstall never boots the server (same shape as the
-    // devices/pair branch below).
-    void (async () => {
-      const { runInstall, runUninstall } = await import("./install-runner");
-      const code = cliArgv[0] === "install" ? await runInstall(cliArgv) : await runUninstall();
-      process.exit(code);
-    })();
-  } else if (cliArgv[0] === "notify") {
-    void (async () => {
-      try {
-        const { parseNotifyPayload } = await import("./notify-subcommand");
-        let stdin = "";
-        if (!process.stdin.isTTY) {
-          try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
-        }
-        const p = await parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
-        if (!p) { process.exit(0); return; }      // not a PocketShell session
-        const url = process.env.POCKETSHELL_NOTIFY_URL;
-        const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
-        if (url && token) {
-          const ctl = new AbortController();
-          const timeoutId = setTimeout(() => ctl.abort(), 3000);
-          try {
-            await fetch(url, {
-              method: "POST",
-              headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-              body: JSON.stringify({
-                sessionId: p.sessionId,
-                title: p.title,
-                body: p.body,
-                tool: p.tool,
-                ctxUsed: p.ctx?.used,
-                ctxTotal: p.ctx?.total,
-              }),
-              signal: ctl.signal,
-            }).catch(() => {});
-          } finally {
-            clearTimeout(timeoutId);
-          }
-        }
-      } catch { /* never disturb the agent's normal run */ }
-      process.exit(0);
-    })();
-  } else if (cliArgv[0] === "statusline") {
-    void (async () => {
-      try {
-        let stdin = "";
-        if (!process.stdin.isTTY) {
-          try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
-        }
-        const payload = parseStatuslinePayload(stdin);
-        if (payload) {
-          // Claude Code 的 statusLine 是单值字段；我们把用户原命令链式包装后存到
-          // chain 文件，运行时先跑原命令并把它的 stdout 原样打印，保证 CC 界面
-          // 看起来和接线前一样。超时或失败则打印空行，绝不让状态栏挂掉。
-          const chain = readChain(chainPathOf(process.env));
-          if (chain?.command) {
-            try {
-              const proc = Bun.spawn(["/bin/sh", "-c", chain.command], {
-                stdin: new TextEncoder().encode(stdin),
-                stdout: "pipe",
-                stderr: "ignore",
-              });
-              const timeoutId = setTimeout(() => { try { proc.kill(); } catch {} }, 2000);
-              const stdout = await new Response(proc.stdout).text().finally(() => clearTimeout(timeoutId));
-              process.stdout.write(stdout);
-            } catch {
-              process.stdout.write("\n");
-            }
-          } else {
-            process.stdout.write("\n");
-          }
-          const url = process.env.POCKETSHELL_NOTIFY_URL;
-          const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
-          // 上报的 sessionId 必须是 PocketShell 的会话名（tmux 会话名），
-          // 不是 payload.sessionId —— 后者是 Claude Code 自己的 UUID。
-          // ContextStore 按 SessionMeta.name 键控（decorate 用 s.name 查表），
-          // 用 CC 的 UUID 存进去永远查不出来，分割条对 claude 恒不显示。
-          const psSession = process.env.POCKETSHELL_NOTIFY_SESSION;
-          if (url && token && psSession) {
-            const ctl = new AbortController();
-            const timeoutId = setTimeout(() => ctl.abort(), 3000);
-            try {
-              await fetch(url, {
-                method: "POST",
-                headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-                body: JSON.stringify({
-                  sessionId: psSession,
-                  tool: "claude",
-                  ctxUsed: payload.used,
-                  ctxTotal: payload.total,
-                  contextOnly: true,
-                }),
-                signal: ctl.signal,
-              }).catch(() => {});
-            } finally {
-              clearTimeout(timeoutId);
-            }
-          }
-        }
-      } catch { /* never disturb the agent's normal run */ }
-      process.exit(0);
-    })();
-  } else if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
-    // CLI subcommand path never boots the server.
-    void runCliDevices(cliArgv).then((code) => process.exit(code));
-  } else if (process.argv.includes("--version")) {
-    console.log(AGENT_VERSION);
-    process.exit(0);
-  } else if (process.argv.includes("--warmup")) {
-  // `pocketshell-agent --warmup`: foreground TCC warmup, then exit. TCC
-  // prompts from a launchd background process are not always reliable, so
-  // running this once in a real terminal is the dependable fallback (and the
-  // only way to batch the prompts ahead of first use). See warmup.ts.
-    const lines = runWarmup();
-    for (const l of lines) console.log(l);
-    if (lines.length === 0) console.log("[pocketshell] warmup done — no manual steps needed.");
-    // Foreground-only: provisioning a self-signed codesign identity needs an
-    // operator present for the Keychain trust/auth prompts (see
-    // codesign-provision.ts) — never call this from the background startup
-    // path below. Note this exit is async (post-await), so the rest of this
-    // `if (import.meta.main)` block must live in the `else` below rather than
-    // falling through after this branch, or the background agent would also
-    // boot in the same process while this awaits.
-    void (async () => {
-      const ok = await ensureLocalIdentity();
-      console.log(ok ? "[pocketshell] signing identity present — OTA re-signs will run." : "[pocketshell] no signing identity — OTA updates will apply unsigned (see Keychain guidance above).");
-      process.exit(0);
-    })();
-  } else {
-    const cfg = loadConfig();
-    ensureTmux(realTmuxDeps());
-    const advertise = resolveAdvertise(cfg);
-    const appUrl = advertiseToHttp(advertise);
-    startServer({ config: cfg });
-    const pairingString =
-      cfg.pairingMode && cfg.pairing
-        ? buildPairingString(cfg.identity.publicKey, advertise, cfg.pairing.code)
-        : undefined;
-    const lines = buildReadiness({
-      advertise,
-      appUrl,
-      pubKeyB64: toB64(cfg.identity.publicKey),
-      pairingString,
-      pairingTtlSec: 300,
-      advertiseExplicit: !!cfg.advertise,
-      bindNonLocal: isNonLocalBind(cfg.listen.host),
-    });
-    console.log(`[pocketshell] listening on ${cfg.listen.host}:${cfg.listen.port} (TLS ${cfg.tls.enabled ? "on" : "off"})`);
-    for (const l of lines) console.log(l);
-    // macOS TCC warmup after boot: batch any permission prompts at startup.
-    // Async + silent on failure; prints FDA guidance lines when FDA is missing.
-    // Full no-op on non-darwin (see warmup.ts).
-    setTimeout(() => {
-      try { for (const l of runWarmup()) console.log(l); } catch { /* probes must never crash the agent */ }
-    }, 0);
-  }
+  runCli(process.argv, startServer);
 }

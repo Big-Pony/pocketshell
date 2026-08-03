@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fsTree, fsRead, langForExt, fsDiff, fsOp, fsUploadCheck, fsResolveName, MAX_TRANSFER_BYTES, fsUploadChunk, fsDownloadChunk, fsArchive, sweepTmp, fsWrite } from "./fs-service";
 import { runGit, isRepo } from "./git-service";
+import { hasBsdtar } from "./test-support";
+
+// bsdtar is the extractor the archive tests read their assertions through; it is
+// absent on a stock Ubuntu (GNU tar only — bsdtar ships in `libarchive-tools`),
+// so the two tests that shell out to it are guarded. CI installs the package,
+// so they are genuinely exercised there rather than silently skipped.
+const bsdtarAvailable = hasBsdtar();
 
 function tmp() { return mkdtempSync(join(tmpdir(), "ps-fs-")); }
 
@@ -287,19 +294,38 @@ test("fsUploadChunk sanitizes uploadId to keep temp part under tmpDir", () => {
   rmSync(d, { recursive: true, force: true });
 });
 
-test("fsArchive skips symlinks (incl. self-referential cycles) instead of infinite-recursing", () => {
+// A directory holding a self-referential symlink: following it would recurse
+// forever (proj/loop -> proj -> proj/loop -> ...).
+function loopFixture() {
   const { symlinkSync } = require("node:fs");
-  const { spawnSync } = require("node:child_process");
   const d = tmp();
   const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
   const src = join(d, "proj"); mkdirSync(src);
   writeFileSync(join(src, "real.txt"), "hello");
-  // Self-referential symlink pointing back at an ancestor dir: following it
-  // would recurse forever (proj/loop -> proj -> proj/loop -> ...).
   symlinkSync(src, join(src, "loop"), "dir");
+  return { d, tmpDir, src };
+}
+
+// Termination is asserted without an external extractor: if fsArchive followed
+// the cycle it would never return, and the test would die on bun's per-test
+// timeout instead of producing an archive.
+test("fsArchive terminates on a self-referential symlink cycle instead of infinite-recursing", () => {
+  const { d, tmpDir, src } = loopFixture();
   const r = fsArchive(tmpDir, src);
   expect(existsSync(r.archivePath)).toBe(true);
-  const list = spawnSync("bsdtar", ["-tf", r.archivePath], { encoding: "utf8" }).stdout as string;
+  expect(r.size).toBeGreaterThan(0);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// What actually landed in the archive can only be read back through an
+// extractor, hence the bsdtar guard (see the note at the top of this file).
+test.skipIf(!bsdtarAvailable)("fsArchive skips symlinks and keeps real files", () => {
+  const { spawnSync } = require("node:child_process");
+  const { d, tmpDir, src } = loopFixture();
+  const r = fsArchive(tmpDir, src);
+  const listed = spawnSync("bsdtar", ["-tf", r.archivePath], { encoding: "utf8" });
+  expect(listed.status).toBe(0);
+  const list = listed.stdout as string;
   expect(list).toContain("real.txt");
   expect(list).not.toContain("loop");
   rmSync(d, { recursive: true, force: true });
@@ -471,7 +497,7 @@ test("fsOp touch creates empty file; existing → throws; missing parent → thr
 // names regardless (verified independently: `python3 -c zipfile` on the
 // produced archive reports flag_bits=0x800 and decodes the name correctly).
 // bsdtar correctly honors bit-11 and round-trips the CJK name.
-test("fsArchive produces a zip whose CJK filenames extract correctly via bsdtar", () => {
+test.skipIf(!bsdtarAvailable)("fsArchive produces a zip whose CJK filenames extract correctly via bsdtar", () => {
   const { mkdtempSync, mkdirSync, writeFileSync: wf, existsSync: ex, readFileSync: rf } = require("node:fs");
   const { join } = require("node:path");
   const { tmpdir } = require("node:os");

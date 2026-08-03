@@ -2,7 +2,15 @@
 // file writer appends to <keyDir>/audit.log (0600). No command/terminal I/O.
 import { appendFileSync } from "node:fs";
 
-export type AuditEvent = "handshake_ok" | "handshake_fail" | "pair_ok" | "pair_fail" | "connect" | "disconnect" | "revoke" | "ratelimit_lock";
+export type AuditEvent =
+  | "handshake_ok"
+  | "handshake_fail"
+  | "pair_ok"
+  | "pair_fail"
+  | "connect"
+  | "disconnect"
+  | "revoke"
+  | "ratelimit_lock";
 export interface AuditEntry { ts: string; event: AuditEvent; pub?: string | null; ip?: string; reason?: string; detail?: unknown; }
 export interface Audit { log(e: Omit<AuditEntry, "ts">): void; }
 

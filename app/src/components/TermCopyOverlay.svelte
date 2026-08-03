@@ -9,9 +9,9 @@
     pageRange,
     prependPage,
     keepScrollAnchored,
-  } from "../lib/term-clone";
-  import type { Connection } from "../lib/connection";
-  import type { TermCaptureResult } from "../lib/protocol";
+  } from "../lib/term/term-clone";
+  import type { Connection } from "../lib/net/connection";
+  import type { TermCaptureResult } from "../lib/net/protocol";
   import { fromB64 } from "../lib/bytes";
 
   // Copy mode: cover the terminal with plain, selectable text so a mobile

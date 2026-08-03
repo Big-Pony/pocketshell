@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
-  import { stateDotClass } from "../lib/session-view";
-  import { stepTap, TAP_RESET, TAP_WINDOW_MS, type TapState } from "../lib/top-tabs";
-  import type { SessionState } from "../lib/protocol";
+  import { stateDotClass } from "../lib/ui/session-view";
+  import { stepTap, TAP_RESET, TAP_WINDOW_MS, type TapState } from "../lib/ui/top-tabs";
+  import type { SessionState } from "../lib/net/protocol";
 
   type TabView =
     | { kind: "term"; id: string; title: string; state: SessionState; closed: boolean; shell: boolean }

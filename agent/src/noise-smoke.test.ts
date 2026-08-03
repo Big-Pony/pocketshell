@@ -13,8 +13,13 @@ test("noise-handshake IK: handshake + transport + authz readout", () => {
 
   const m1 = client.send();
   server.recv(m1);
-  // responder learns initiator static pubkey (used for authorizedKeys)
-  expect(Buffer.compare(server.rs, client.s.publicKey)).toBe(0);
+  // responder learns initiator static pubkey (used for authorizedKeys).
+  // `rs` is nullable until the pattern supplies it; assert it landed before
+  // comparing, so a regression that leaves it unset fails here rather than
+  // throwing inside Buffer.compare.
+  const rs = server.rs;
+  expect(rs).not.toBeNull();
+  expect(Buffer.compare(rs!, client.s.publicKey)).toBe(0);
 
   const m2 = server.send();
   client.recv(m2);

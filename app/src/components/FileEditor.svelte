@@ -9,7 +9,7 @@
   import { search, openSearchPanel, closeSearchPanel, searchPanelOpen, SearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll } from "@codemirror/search";
   import { tags } from "@lezer/highlight";
   import { langExtension, saveFile, isConflictError } from "../lib/editor";
-  import type { Connection } from "../lib/connection";
+  import type { Connection } from "../lib/net/connection";
 
   let { conn, path, lang, initialContent, mtime, onClose, onDirty, onToast }: {
     conn: Connection; path: string; lang: string; initialContent: string; mtime: number;

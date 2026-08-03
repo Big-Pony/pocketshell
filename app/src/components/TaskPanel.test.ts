@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 import { render } from "@testing-library/svelte";
 import TaskPanel from "./TaskPanel.svelte";
-import type { LocalSession } from "../lib/session-view";
+import type { LocalSession } from "../lib/ui/session-view";
 
 const noop = () => {};
 const sess = (over: Partial<LocalSession>): LocalSession => ({

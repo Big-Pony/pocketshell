@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { stateDotClass, needsKillConfirm, actionLabel } from "../lib/session-view";
+  import { stateDotClass, needsKillConfirm, actionLabel } from "../lib/ui/session-view";
   import ContextMenu from "./ContextMenu.svelte";
 
   let {
@@ -12,7 +12,7 @@
     onCopy,
     onClose,
   }: {
-    sessions: import("../lib/session-view").LocalSession[];
+    sessions: import("../lib/ui/session-view").LocalSession[];
     onSelect: (name: string) => void;
     onRename: (name: string, newName: string) => void;
     onKill: (name: string) => void;
@@ -36,7 +36,7 @@
     closeMenu();
     if (next && next.trim() && next.trim() !== name) onRename(name, next.trim());
   }
-  function requestKill(s: import("../lib/session-view").LocalSession) {
+  function requestKill(s: import("../lib/ui/session-view").LocalSession) {
     closeMenu();
     if (needsKillConfirm(s.state)) confirmKill = s.name;
     else onKill(s.name);

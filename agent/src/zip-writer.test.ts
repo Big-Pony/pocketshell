@@ -4,6 +4,9 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { hasBsdtar } from "./test-support";
+
+const bsdtarAvailable = hasBsdtar();
 
 test("crc32 matches the standard check vector", () => {
   expect(crc32(new TextEncoder().encode("123456789"))).toBe(0xcbf43926);
@@ -24,7 +27,10 @@ test("buildZip sets the UTF-8 (EFS) general-purpose bit-11 in the local header",
 // CJK name regardless (confirmed: `python3 -c zipfile` on the same archive
 // reports flag_bits=0x800 and decodes the name correctly). bsdtar correctly
 // honors bit-11 and round-trips the CJK name.
-test("bsdtar round-trips a CJK entry name without mangling", () => {
+//
+// Skipped when bsdtar is absent (stock Ubuntu: GNU tar only, bsdtar ships in
+// `libarchive-tools`) — CI installs it so this really runs there.
+test.skipIf(!bsdtarAvailable)("bsdtar round-trips a CJK entry name without mangling", () => {
   const dir = mkdtempSync(join(tmpdir(), "ps-zip-"));
   const zip = buildZip([{ name: "中文目录/文件名.txt", data: new TextEncoder().encode("hi") }]);
   const zipPath = join(dir, "a.zip");

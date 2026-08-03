@@ -2,8 +2,8 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import type { Connection } from "../lib/connection";
-  import type { Snippet } from "../lib/protocol";
+  import type { Connection } from "../lib/net/connection";
+  import type { Snippet } from "../lib/net/protocol";
   import { mergeSnippets } from "../lib/snippets";
 
   let { conn, onInsert }: { conn: Connection; onInsert: (text: string) => void } = $props();
