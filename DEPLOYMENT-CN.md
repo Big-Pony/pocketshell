@@ -232,7 +232,7 @@ User=you
 ExecStart=/usr/local/bin/pocketshell-agent
 Environment=POCKETSHELL_HOST=127.0.0.1
 Environment=POCKETSHELL_ADVERTISE=wss://ps.example.com
-# 装了多台时给这台起个名字，手机桌面图标与 App 顶栏都会显示它（见 README「装多台服务器」）
+# 装了多台时给这台起个名字，手机桌面图标与 App 顶栏都会显示它（见下文「装多台服务器」）
 # Environment=POCKETSHELL_INSTANCE_NAME=开发
 WorkingDirectory=/home/you
 Restart=always
@@ -283,6 +283,27 @@ tail -f /tmp/pocketshell.out.log                            # 看日志（含首
 
 > ⚠️ launchd 环境的 `PATH` 极简，**必须**把 tmux 所在目录（Homebrew 为 `/opt/homebrew/bin`）加进 `EnvironmentVariables.PATH`，否则 Agent 启动时找不到 tmux 会直接退出。
 
+### 装多台服务器
+
+在多台机器上各装一个 Agent 是**天然支持**的——它们互不知晓，各自独立：各自的密钥与设备注册表、各自的会话、各自的推送订阅。你要做的只是给每台一个自己的地址，再给它起个名字：
+
+```bash
+# 开发机
+POCKETSHELL_ADVERTISE=wss://dev.example.com POCKETSHELL_INSTANCE_NAME=开发 pocketshell-agent
+# 家里的服务器
+POCKETSHELL_ADVERTISE=wss://home.example.com POCKETSHELL_INSTANCE_NAME=家里 pocketshell-agent
+```
+
+设了 `POCKETSHELL_INSTANCE_NAME` 后，这个名字会出现在三处：
+
+- **手机桌面图标下的文字** —— 显示「开发」（只有实例名，因为这行字被系统截断得最狠）
+- **安装 PWA 时的应用名** —— 显示「开发 · PocketShell」
+- **App 顶栏** —— 品牌名前面加上「开发 ·」
+
+于是手机上就是两个独立的 PWA、两个能一眼分清的桌面图标。因为浏览器按域名隔离数据，两边的标签页、项目根书签、推送订阅也各自独立——**两台的通知都能收到，互不顶替**（同一个域名下做不到这点，浏览器每个域名只允许一个推送订阅）。
+
+> 前提是每台要有自己的域名或地址。手机上的 App 是 HTTPS 页面，浏览器不允许它连明文 `ws://`，而 `wss://` 需要证书、证书签不了裸 IP——所以公网访问的实例都需要一个域名（子域名即可，见上文方式 B/C/D）。局域网内直连 IP 则不受此限。
+
 ### 自动更新（OTA）
 
 Agent 启动时、以及手机端每次连接时，会静默向 GitHub Releases 查询是否有新版本（结果缓存 6 小时，查询失败不影响正常运行）。发现新版本后 App 顶栏品牌旁出现更新徽标，点击打开确认弹窗，点「更新」触发：下载对应平台压缩包 → 按 `SHA256SUMS.txt` 校验完整性 → （仅 macOS）用本机自签名身份重签名 → 原子替换正在运行的二进制 → 重启进程。
@@ -294,7 +315,7 @@ Agent 启动时、以及手机端每次连接时，会静默向 GitHub Releases 
 
 ### 通知与本地回环端点
 
-Agent 内置一个仅本机可访问的通知回环端点 `/internal/notify`（`POST`，`127.0.0.1`-only + Bearer token 双重校验，任一不满足分别返回 403 / 401，请求体缺字段返回 400）。Claude Code / Codex / opencode 的 hook/notify 子进程在一轮任务完成或等待输入时会调用这个端点，触发应用内广播 + Web Push + Webhook 三路分发（功能介绍见 [README「通知」一节](./README-CN.md#通知)）。
+Agent 内置一个仅本机可访问的通知回环端点 `/internal/notify`（`POST`，`127.0.0.1`-only + Bearer token 双重校验，任一不满足分别返回 403 / 401，请求体缺字段返回 400）。Claude Code / Codex / opencode 的 hook/notify 子进程在一轮任务完成或等待输入时会调用这个端点，触发应用内广播 + Web Push + Webhook 三路分发（功能介绍见 [README「通知」一节](./README-CN.md#-通知)）。
 
 每个终端会话启动时，Agent 会往子进程环境里注入三个变量供 hook 使用：
 
@@ -317,7 +338,7 @@ Agent 内置一个仅本机可访问的通知回环端点 `/internal/notify`（`
 
 ### 命令行设备管理
 
-这是设备管理的操作方式（v1.8.0 之前另有一个网页管理页，移除原因见 README）。在 Agent 所在主机上运行，务必用与常驻进程相同的 `POCKETSHELL_KEY_DIR` 环境变量：
+这是设备管理**唯一**的操作方式（v1.8.0 之前另有一个网页管理页，移除原因见本节末）。在 Agent 所在主机上运行，务必用与常驻进程相同的 `POCKETSHELL_KEY_DIR` 环境变量：
 
 ```bash
 # 列出已配对设备（指纹、名称、加入时间、最近在线、最近 IP）
@@ -336,6 +357,16 @@ pocketshell-agent devices remove <pubkey-or-fingerprint>
 > `devices remove` 对常驻 Agent 同样即时生效：Agent 每 3 秒轮询一次 `<keyDir>/devices.json`，删除后数秒内该设备即失去授权、在线连接被断开、推送订阅被清除，无需重启。
 
 > （2026-07-30 修复）此前 `pair` 在服务**刚启动的 5 分钟内**会被进程启动时铸的码盖住，用户拿新码配对只会得到误导性的 `bad_code`。现在磁盘上更新的码会抢占仍存活的启动码，任何时刻跑 `pair` 都即刻生效。
+
+#### 网页管理页为什么被移除（v1.8.0）
+
+v1.8.0 之前，`/admin` 提供了一个网页版设备管理页。它在**所有反向代理部署下都能从公网匿名访问**，因此被整体删除。
+
+它唯一的凭证是「请求来自 `127.0.0.1`」这道检查——而同机反向代理（Caddy、Nginx、Cloudflare Tunnel、frp，也就是本文推荐的全部四种方式）正是从这个地址连进来的，于是**所有**请求都能通过，包括来自公网的匿名请求；此时 `POST /admin-api/pair` 会把可用的配对串交给任何调用者，对方配对后即获得完整操作员权限。此外这些 POST 端点没有 CSRF 防护，可被恶意页面跨域触发。
+
+该页面按设计只允许本机访问，也就是说它的受众一定有 shell——因此它能做的事上面的命令全都能做，删掉它是消除攻击面，而不是给它加锁。
+
+> **如果你在 v1.7.x 或更早版本上跑过反向代理部署**，请排查是否被利用：看 `<keyDir>/audit.log` 里有没有你没触发过的 `admin_pair_new` 事件，以及 `pocketshell-agent devices list` 里有没有不认识的设备。`POCKETSHELL_ADMIN` 环境变量已不再被读取，留在配置里不影响启动。
 
 ### 常见排查
 

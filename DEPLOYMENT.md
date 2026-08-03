@@ -233,7 +233,7 @@ ExecStart=/usr/local/bin/pocketshell-agent
 Environment=POCKETSHELL_HOST=127.0.0.1
 Environment=POCKETSHELL_ADVERTISE=wss://ps.example.com
 # Running more than one install? Name this one — it shows on the home-screen icon
-# and in the app's top bar (see "Running more than one server" in the README).
+# and in the app's top bar (see "Running more than one server" below).
 # Environment=POCKETSHELL_INSTANCE_NAME=Dev
 WorkingDirectory=/home/you
 Restart=always
@@ -284,6 +284,27 @@ tail -f /tmp/pocketshell.out.log                            # logs (incl. pairin
 
 > ⚠️ launchd starts with a minimal `PATH`. You **must** include tmux's directory (Homebrew: `/opt/homebrew/bin`) in `EnvironmentVariables.PATH`, otherwise the Agent exits at startup because it cannot find tmux.
 
+### Running more than one server
+
+Installing an Agent on several machines works out of the box — they know nothing about each other and share nothing: separate keys and device registries, separate sessions, separate push subscriptions. All you do is give each one its own address, plus a name:
+
+```bash
+# work machine
+POCKETSHELL_ADVERTISE=wss://dev.example.com POCKETSHELL_INSTANCE_NAME=Dev pocketshell-agent
+# home server
+POCKETSHELL_ADVERTISE=wss://home.example.com POCKETSHELL_INSTANCE_NAME=Home pocketshell-agent
+```
+
+With `POCKETSHELL_INSTANCE_NAME` set, the name shows up in three places:
+
+- **The label under the home-screen icon** — shows `Dev` (just the instance name; this is where the OS truncates hardest)
+- **The app name when installing the PWA** — shows `Dev · PocketShell`
+- **The app's top bar** — `Dev ·` in front of the brand name
+
+So you end up with two independent PWAs and two home-screen icons you can tell apart at a glance. Because browsers isolate data per domain, each side keeps its own tabs, project-root bookmark, and push subscription — **notifications from both servers reach you, neither displacing the other** (you cannot get this from a single domain; browsers allow only one push subscription per origin).
+
+> Each instance needs its own domain or address. The app is served over HTTPS, browsers refuse to let an HTTPS page open a plaintext `ws://` connection, and `wss://` needs a certificate — which cannot be issued for a bare IP. So any instance reachable over the internet needs a domain name (a subdomain is enough — see options B/C/D above). Direct IP access on a LAN is not affected.
+
 ### Auto-update (OTA)
 
 On startup, and again each time a phone connects, the Agent silently checks GitHub Releases for a newer version (result cached 6h; a failed check never affects normal operation). When a newer version exists, an update badge appears next to the brand in the app's top bar; tapping it opens a confirmation dialog, and tapping "Update" triggers: download the platform's tar.gz → verify it against `SHA256SUMS.txt` → (macOS only) re-sign with a local self-signed identity → atomically swap the running binary → restart the process.
@@ -295,7 +316,7 @@ On startup, and again each time a phone connects, the Agent silently checks GitH
 
 ### Notifications & the local loopback endpoint
 
-The Agent has a built-in, localhost-only notification loopback endpoint, `/internal/notify` (`POST`, gated by both a `127.0.0.1`-only check and a Bearer token — either failing returns 403 / 401, and a missing required field returns 400). When Claude Code / Codex / opencode's hook/notify subprocess fires at the end of a work round or while waiting on input, it calls this endpoint, which fans out to in-app broadcast, Web Push, and webhooks (see [README's "Notifications" section](./README.md#notifications) for the feature overview).
+The Agent has a built-in, localhost-only notification loopback endpoint, `/internal/notify` (`POST`, gated by both a `127.0.0.1`-only check and a Bearer token — either failing returns 403 / 401, and a missing required field returns 400). When Claude Code / Codex / opencode's hook/notify subprocess fires at the end of a work round or while waiting on input, it calls this endpoint, which fans out to in-app broadcast, Web Push, and webhooks (see [README's "Notifications" section](./README.md#-notifications) for the feature overview).
 
 Each terminal session gets three env vars injected into its subprocess environment for the hook to use:
 
@@ -318,7 +339,7 @@ Each terminal session gets three env vars injected into its subprocess environme
 
 ### CLI device management
 
-This is the device-management interface (a web admin page existed until v1.8.0 — see the README for why it was removed). Run these on the Agent host, with the same `POCKETSHELL_KEY_DIR` env var as the resident process:
+This is the **only** device-management interface (a web admin page existed until v1.8.0 — see the end of this section for why it was removed). Run these on the Agent host, with the same `POCKETSHELL_KEY_DIR` env var as the resident process:
 
 ```bash
 # list paired devices (fingerprint, name, added time, last-seen, last IP)
@@ -338,6 +359,16 @@ pocketshell-agent devices remove <pubkey-or-fingerprint>
 > `devices remove` reaches a running Agent too: it polls `<keyDir>/devices.json` every 3 s, so within seconds of the removal the device loses its authorization, its live connection is closed, and its push subscriptions are dropped. No restart needed.
 
 > (Fixed 2026-07-30) Until now, a code minted by `pair` within **the first 5 minutes after the service started** was shadowed by the code minted at process start, so pairing with the fresh code returned a misleading `bad_code`. The newer code on disk now takes over from a still-live startup code, so `pair` takes effect immediately whenever you run it.
+
+#### Why the web admin page was removed (v1.8.0)
+
+Before v1.8.0, `/admin` served a web device-management page. It was **reachable anonymously from the public internet on every reverse-proxied deployment**, so it was removed entirely.
+
+Its only credential was a check that the request came from `127.0.0.1` — but a same-host reverse proxy (Caddy, Nginx, Cloudflare Tunnel, frp — all four setups this guide recommends) connects from exactly that address, so the check passed for *every* request, including anonymous ones from the internet. `POST /admin-api/pair` would then return a working pairing string to anyone who asked, and pairing with it granted full operator access. The admin POST endpoints also had no CSRF protection and could be triggered cross-origin by a malicious page.
+
+The page was localhost-only by design, which means its audience always had a shell — so it could never do anything the commands above cannot, and deleting it removes the attack surface rather than guarding it.
+
+> **If you ran a reverse-proxied deployment on v1.7.x or earlier**, check for unauthorized access: look for `admin_pair_new` events you did not trigger in `<keyDir>/audit.log`, and unfamiliar devices in `pocketshell-agent devices list`. The `POCKETSHELL_ADMIN` environment variable is no longer read; leaving it in a service config does not affect startup.
 
 ### Troubleshooting
 

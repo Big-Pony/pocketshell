@@ -1,194 +1,181 @@
-# PocketShell
+<div align="center">
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![Release](https://img.shields.io/github/v/release/Big-Pony/pocketshell?color=success)](https://github.com/Big-Pony/pocketshell/releases)
-[![Stars](https://img.shields.io/github/stars/Big-Pony/pocketshell?logo=github)](https://github.com/Big-Pony/pocketshell/stargazers)
-![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macOS-blue)
+# 📱 PocketShell
 
-**Run Claude Code on your phone — drop offline, the task keeps running, output replays on reconnect.**
+**Run Claude Code on your phone — drop offline, the task keeps running, output replays on reconnect**
 
-A self-hosted, end-to-end-encrypted mobile terminal for CLI/TUI coding agents (Claude Code, Codex, opencode, …). Launch and babysit long-running agent tasks from your phone; when the network drops the task keeps running server-side and the full output replays the moment you reconnect — and you get a push notification when the agent finishes or needs your input.
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/Big-Pony/pocketshell?color=success)](https://github.com/Big-Pony/pocketshell/releases) [![Stars](https://img.shields.io/github/stars/Big-Pony/pocketshell?logo=github)](https://github.com/Big-Pony/pocketshell/stargazers) ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macOS-blue)
 
-**English** · [中文](./README-CN.md)
+[Quick start](#-quick-start) • [Features](#-features) • [Deployment](#-deployment) • [Cheat sheet](./USAGE.md)
 
-#### One full task — from phone to finished product
+**Language**: English | [中文](./README-CN.md)
 
-<p align="center">
-  <img src="assets/screenshots/01-launch-task.jpg" width="18%" alt="Compose a whole prompt in the IME buffer">
-  <img src="assets/screenshots/02-task-running.jpg" width="18%" alt="Task started, the agent is reading files">
-  <img src="assets/screenshots/03-push-notification.jpg" width="18%" alt="Lock-screen push: Claude is waiting for your input">
-  <img src="assets/screenshots/04-task-done-git.jpg" width="18%" alt="Task done, the Git panel shows the commit">
-  <img src="assets/screenshots/05-fullscreen-preview.jpg" width="18%" alt="Fullscreen preview of the 3D scene the agent wrote">
-</p>
+</div>
 
-<p align="center"><em>① Compose a whole prompt with the system IME, inject it in one shot · ② The task starts — lock your phone and walk away · ③ A push calls you back when it finishes or needs you · ④ Output is already replayed, the code is committed · ⑤ Run the result fullscreen, right on the phone</em></p>
+## 📸 Screenshots
 
-#### Multi-session and drop protection
+<div align="center">
 
-<p align="center">
-  <img src="assets/screenshots/06-task-panel.jpg" width="32%" alt="Task panel: several tmux sessions with running / waiting / background states">
-</p>
+<table>
+  <tr>
+    <td align="center">
+      <a href="assets/screenshots/01-launch-task.jpg"><img src="assets/screenshots/01-launch-task.jpg" alt="Compose a whole prompt in the IME buffer" width="200"/></a><br/>
+      <sub>① Send the whole prompt</sub>
+    </td>
+    <td align="center">
+      <a href="assets/screenshots/03-push-notification.jpg"><img src="assets/screenshots/03-push-notification.jpg" alt="Lock-screen push: Claude is waiting for your input" width="200"/></a><br/>
+      <sub>② A push calls you back</sub>
+    </td>
+    <td align="center">
+      <a href="assets/screenshots/04-task-done-git.jpg"><img src="assets/screenshots/04-task-done-git.jpg" alt="Task done, the Git panel shows the commit" width="200"/></a><br/>
+      <sub>③ Output already replayed</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="assets/screenshots/06-task-panel.jpg"><img src="assets/screenshots/06-task-panel.jpg" alt="Task panel: several tmux sessions with three states" width="200"/></a><br/>
+      <sub>④ Bottom pane: task panel</sub>
+    </td>
+    <td align="center">
+      <a href="assets/screenshots/07-keyboard-full.jpg"><img src="assets/screenshots/07-keyboard-full.jpg" alt="Full keyboard — laptop layout" width="200"/></a><br/>
+      <sub>⑤ Custom full keyboard</sub>
+    </td>
+    <td align="center">
+      <a href="assets/screenshots/10-markdown-preview.jpg"><img src="assets/screenshots/10-markdown-preview.jpg" alt="Rendered Markdown preview" width="200"/></a><br/>
+      <sub>⑥ File preview and Git</sub>
+    </td>
+  </tr>
+</table>
 
-<p align="center"><em>Every tmux session on the host shows up here — running / waiting for input / background at a glance, with a last-line preview. Sessions live server-side; the app is just a screen onto them.</em></p>
+<em>More screens in the <a href="./USAGE.md">interaction cheat sheet</a></em>
 
-#### Custom full keyboard
-
-<p align="center">
-  <img src="assets/screenshots/07-keyboard-full.jpg" width="30%" alt="Full keyboard — laptop layout">
-  <img src="assets/screenshots/08-keyboard-hints.jpg" width="30%" alt="Full keyboard — smart command-hint bar">
-  <img src="assets/screenshots/09-keyboard-quick.jpg" width="30%" alt="Quick actions — arrows, copy and paste">
-</p>
-
-#### Files, preview and Git
-
-<p align="center">
-  <img src="assets/screenshots/10-markdown-preview.jpg" width="30%" alt="Rendered Markdown preview">
-  <img src="assets/screenshots/11-source-view.jpg" width="30%" alt="Source view with highlighting">
-  <img src="assets/screenshots/12-file-menu.jpg" width="30%" alt="File action menu">
-</p>
-
-#### Snippets, themes and notifications
-
-<p align="center">
-  <img src="assets/screenshots/13-snippets.jpg" width="23%" alt="Snippets panel">
-  <img src="assets/screenshots/14-themes.jpg" width="23%" alt="Six theme palettes">
-  <img src="assets/screenshots/15-light-theme.jpg" width="23%" alt="A light theme in actual use">
-  <img src="assets/screenshots/16-notifications.jpg" width="23%" alt="Notification settings and outbound webhooks">
-</p>
+</div>
 
 ---
 
-### Overview
+## 💡 What is this
 
-PocketShell is a **self-hosted mobile-first remote terminal**. It brings your dev machine's terminal sessions into a phone browser, so you can run any **CLI/TUI coding agent** (Claude Code, Codex, opencode, …) or plain shell/vim/htop anywhere.
+PocketShell is a **self-hosted, mobile-first remote terminal**. It brings your dev machine's terminal sessions into a phone browser, so you can run any **CLI/TUI coding agent** (Claude Code, Codex, opencode, Kimi CLI, …) or plain shell/vim/htop from anywhere.
+
+**The core feature is resilient sessions + replay**: run an agent from your phone, drop offline mid-task, and the server-side task keeps going; on reconnect the terminal screen, scrollback and session state are replayed back into sync. When the agent finishes or needs your input, it pushes a notification to your phone.
 
 One binary = the whole product: the frontend is embedded and served on the same port, traffic is end-to-end encrypted, and it runs on a clean machine without Bun installed.
 
-**Core feature — resilient sessions + replay:** run an agent from your phone, drop offline mid-task, and the server-side task keeps going; on reconnect the terminal screen, scrollback and session state are replayed back into sync.
+| | |
+|---|---|
+| ✅ **Good fit** | You have a Linux / macOS machine that stays on; you want to hand work to an AI while commuting, in bed, or in a queue; you care whether the task survives losing signal |
+| ❌ **Not a fit** | You want a zero-config cloud service (this is self-hosted — you bring the machine and the domain); you want to write long code on a phone (it's a terminal, not an IDE); your host runs Windows (not supported yet) |
 
-### Features
+## ✨ Features
 
-- **Multi-session terminal / server-side tmux panel** — lists every tmux session on the host (even ones this app didn't create); attach, rename, kill; three-state dots (run/wait/done) + last-line preview; a persistent terminal per session.
-- **Resilient sessions + replay** — dual-signal offline detection, exponential-backoff reconnect; per-session `lastSeq` accounting replays only the gap; output keeps flowing into replay while offline.
-- **Push notifications** — get pinged on your phone the moment an agent finishes a round or waits for input, even backgrounded / locked (Web Push + outbound webhooks: WeCom / Feishu / Slack / Discord); smart do-not-disturb skips the ping when you're already watching that session.
-- **End-to-end encryption & device security** — full Noise **IK** handshake per connection (mutual auth + forward secrecy); one-time in-channel pairing code; persistent device registry with naming / one-click revoke; rate limiting; structured audit log.
-- **Custom full keyboard** — read-only xterm, all input routed; full laptop layout (F1–F12, arrows, sticky modifiers); Fn app-command layer; IME whole-segment input; keyboard-driven selection/copy/paste; smart command-hint bar.
-- **Snippets** — your own custom entries, tap to insert, add/edit/delete, broadcast-synced across devices.
-- **File + Git panel** — lazy tree with inline git markers; code preview (highlight + line numbers) that switches to an editor (CodeMirror 6 — line numbers, find/replace, native IME, chunked save with mtime-based overwrite guard, new files open straight into the editor); **file preview: images / Markdown (rendered, with code highlight + local images) / static HTML (sandboxed iframe that runs JS + relative assets), with a persistent `Preview｜Source｜Edit` header bar + refresh**; working-tree diff; read-only git log/branches/status; file ops (rename/new/delete with confirm); upload/download (multi-file with progress, dir-as-zip, chunked transfer).
-- **Mobile shell** — split top/bottom panes with a draggable divider (double-tap fullscreen); 5-tab bottom bar; unified top tab bar (terminals + files); persisted layout.
-- **Six themes** — four dark (Graphite Orange / Oscilloscope Cyan / Blackout Silver / Prussian Blue) plus two light (Warm White / Vermilion), switch in settings, applied instantly; can follow the system light/dark setting.
-- **Bilingual** — full i18n (zh/en), follows browser language on first open, switchable in settings.
-- **PWA** — installable on mobile Chrome, standalone launch; static assets are cached in a per-version bucket that is dropped wholesale when the version changes, so a second open costs almost no requests and never serves a stale build.
-- **Zero-dependency distribution** — single-file binary (`bun build --compile`, linux/darwin targets); pure-JS crypto, no native addons; cross-compile all targets from one Mac.
+### 🖥 Terminal and sessions
 
-> Tuned for full-screen TUI agents (classic-renderer switch, alt-screen scrollback normalization) so long output scrolls without limit and the input line stays pinned to the bottom.
+- **Multi-session terminal** — lists every tmux session on the host (even ones this app didn't create); attach, rename, kill
+- **Task panel** — three-state dots (running / waiting for input / background) plus a last-line preview per session
+- **Resilient sessions** — dual-signal offline detection, exponential-backoff reconnect; the task keeps running server-side while you're gone
+- **Precise replay** — per-session `lastSeq` accounting replays only the gap, never resending output you already have
+- **TUI-tuned** — classic-renderer switch and alt-screen scrollback normalization, so long output scrolls without limit and the input line stays pinned to the bottom
+- **Lightweight shell sessions** — an isolated raw PTY for one-off commands, kept out of the task panel
 
-### Interaction cheat sheet
+### ⌨ Phone input
 
-A few mobile gestures and key combos aren't self-evident; they're collected here. In the "Icon / button" column, icon buttons show their glyph and text buttons show their label.
+- **Custom full keyboard** — a full laptop layout with F1–F12, arrows, and three-state sticky modifiers
+- **IME whole-segment input** — compose the entire prompt with the system IME and inject it in one shot; the buffer survives disconnects
+- **Smart command-hint bar** — prefix-based suggestions, tap to complete
+- **Fn app-command layer** — switch tabs, scroll, create sessions, go fullscreen and rename, all from key combos
+- **Quick actions panel** — D-pad layout with `Esc`/`Tab`/`Del`/`Home`/`End` and copy/paste on one screen
+- **Snippets** — your own custom commands, tap to insert, broadcast-synced across devices
 
-**Full keyboard (⌨ tab)**
+### 📁 Files, preview and Git
 
-| Location | Icon / button | What it does |
-|---|---|---|
-| Bottom-row modifiers | `Shift` `Ctrl` `Alt` `Cmd` `Fn` `Caps` | Tap cycles three states: **1 tap = one-shot** (releases after the next key) → **tap again = locked** (stays lit, keeps applying) → **3rd tap = off** |
-| Any character key | Long-press | Auto-repeat while held |
-| Combo | `Ctrl` + letter | Send a control char: `Ctrl+C` interrupt, `Ctrl+D` EOF, `Ctrl+Z` suspend, `Ctrl+L` clear, etc. |
-| Combo | `Alt` + key | Send Meta (ESC prefix, i.e. `\x1b` + char) |
-| Combo | `Shift` / `Caps` + letter | Uppercase (XOR: either one uppercases; both together cancel out) |
-| Function row | after lighting `Fn` | The function row switches from the command-hint bar to `F1`–`F12` |
-| Combo | `Fn` + `F1`–`F12` | Send a function key |
-| Combo | `Fn` + `←` / `→` | Previous / next tab |
-| Combo | `Fn` + `↑` / `↓` | Scroll the terminal up / down |
-| Combo | `Fn` + `1`–`9` | Jump to the Nth tab |
-| Combo | `Fn` + `N` / `D` / `F` / `C` / `R` | New session / background / toggle fullscreen / copy visible output / rename session |
-| Combo | `Cmd` + `←` / `→` | Previous / next tab |
-| Combo | `Cmd` + `A` / `C` / `V` | Select-all-copy / smart copy (selection if any, else visible output) / paste |
-| Combo | `Cmd` + `F` / `N` / `R` / `K` | Page fullscreen / new session / rename session / clear screen |
-| Function row (`Fn` off) | command-hint chip | Smart command suggestions; tap to complete / insert into the input line |
-| Keycap top-right | small superscript | The character this key produces with `Shift` |
+- **File tree** — lazy-loaded directory tree with inline git status markers (`M`/`A`/`D`/`?`)
+- **Code editing** — CodeMirror 6 with line numbers, find/replace, native IME and line wrapping; chunked save with an mtime-based overwrite guard
+- **File preview** — images / rendered Markdown / video (with a working seek bar) / static HTML (sandboxed iframe that runs JS and relative assets)
+- **Git panel** — working-tree diff, read-only log / branches / status, one-tap branch refresh
+- **Upload & download** — multi-file with progress, dir-as-zip, chunked transfer; the RPC deadline scales with queued bytes so slow links don't time out
 
-**IME buffer (✎ tab)**
+### 🔔 Notifications and security
 
-| Location | Icon / button | What it does |
-|---|---|---|
-| Input area | text box | Compose a whole segment with the system IME; before sending it lives only in the local buffer and survives disconnects |
-| Bottom-left | `Clear` | Clear the buffer |
-| Bottom-right | `Send to terminal ⏎` | Inject the whole segment plus Enter; **with an empty buffer, Send = a bare Enter** (no need to switch back to the full keyboard to press Return) |
+- **Push notifications** — get pinged the moment an agent finishes a round or waits for input, even with the app closed, the phone locked, or another session in view
+- **Four supported tools** — Claude Code / Codex / opencode / Kimi CLI, each with its own switch in settings
+- **Outbound webhooks** — built-in templates for WeCom / Feishu (optional signing) / Slack / Discord, plus a custom URL + JSON template
+- **Smart do-not-disturb** — no system notification while you're watching that session; repeated completions within a short window collapse into one
+- **End-to-end encryption** — a full Noise **IK** handshake per connection (mutual auth + forward secrecy); an unregistered device never gets past it
+- **Device management** — one-time pairing codes, a persistent device registry, and one-command revocation (drops the connection and clears push subscriptions within seconds)
 
-**Quick actions (✂ tab)**
+### 📱 App experience
 
-| Location | Icon / button | What it does |
-|---|---|---|
-| Top row | `Esc` `Tab` `Del` | Send the corresponding key |
-| D-pad center | `⏎` | Enter (confirm) |
-| Nav keys | `Home` `End` `PgUp` `PgDn` | The matching cursor / paging keys |
-| Bottom button | `Select text` | Open the copy-mode overlay to long-press and select terminal text manually |
-| Bottom button | `Copy all` | Select the whole terminal and copy it to the clipboard |
-| Bottom button | `Copy output` | Copy the currently visible terminal output |
-| Bottom button | `Paste` | Paste the clipboard into the terminal |
+- **Mobile shell** — split top/bottom panes with a draggable divider (double-tap fullscreen), a 5-tab bottom bar, persisted layout
+- **Context usage** — while an AI is running, the split bar shows that session's context usage (e.g. `⊙ 142k/1M · 14%`)
+- **Six themes** — four dark (Graphite Orange / Oscilloscope Cyan / Blackout Silver / Prussian Blue) plus two light (Warm White / Vermilion); can follow the system light/dark setting
+- **Bilingual** — full i18n (zh/en), follows browser language on first open, switchable in settings
+- **PWA** — installable to the home screen and launched standalone; static assets live in a per-version cache bucket that's dropped wholesale on a version change
+- **Zero-dependency distribution** — a single-file binary, pure-JS crypto with no native addons, all targets cross-compiled from one Mac
 
-**File panel (directory tab)**
+> Mobile gestures and key combos are documented in the **[interaction cheat sheet (USAGE.md)](./USAGE.md)**.
 
-| Location | Icon / button | What it does |
-|---|---|---|
-| Path bar, left | ◉ (ring anchor) | **Single tap**: set the project root to the focused terminal's working dir; **double tap**: toggle "follow focused terminal" (root tracks wherever the terminal `cd`s) |
-| Path bar, middle | path text | Tap to copy the full path to the clipboard |
-| Path bar, right | `⇄` | Switch project root (opens the root history list) |
-| Path bar, right | `⟳` | Refresh the tree (keeps expanded levels) |
-| Tree row, leading | `▸` / `▾` / `·` | Collapsed dir / expanded dir / file; tap a dir row to expand, a file row to open preview |
-| Tree row, trailing | `⋯` | Open that item's action menu (copy path, cd, rename, new, upload, download, delete, …) |
-| Tree row, inline | `M` `A` `D` `?` | git status markers: modified / added / deleted / untracked |
-| Sub-tab bar | branch beside `Git` | The current git branch |
+## 🚀 Quick start
 
-**Top tab bar (terminals + files)**
+**Requirements**: the host running the Agent needs `tmux` and `git`.
 
-| Location | Gesture | What it does |
-|---|---|---|
-| Any top tab | Single tap | Select / switch to that tab (immediate, no latency) |
-| The same top tab | Double tap | Open that tab's close-confirmation dialog |
-| ↳ terminal tab | on confirm | Only closes the tab — the tmux session keeps running in the background and can be reopened from the task panel |
-| ↳ shell tab | on confirm | The shell session is closed and destroyed permanently |
-| ↳ file tab | on confirm | Closes the file preview tab (warns first if it has unsaved edits) |
-| Tab bar, right | `+` | New tmux session (prompts for a name) |
-
-### Quick start
-
-**Requirements**
-- Host running the Agent: `tmux`, `git`.
-- Build: [Bun](https://bun.sh) ≥ 1.3.
-
-**Option A — run from source**
-
-```bash
-cd agent && bun install && bun run start     # backend (needs tmux)
-cd app   && bun install && bun run dev        # frontend, http://localhost:5173
-```
-
-**Option B — one-line install (fastest, recommended)**
+**Step 1 — one-line install**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
 ```
 
-The script detects your platform, downloads the matching binary, verifies its SHA256 and installs it into `/usr/local/bin` (or `~/.local/bin`). One more command turns it into a service that starts on boot:
+The script detects your platform, downloads the matching binary, verifies its SHA256 and installs it into `/usr/local/bin` (or `~/.local/bin`).
+
+**Step 2 — turn it into a service that starts on boot**
 
 ```bash
 # Linux
 sudo pocketshell-agent install --advertise wss://your.domain --name my-server
+
 # macOS — no sudo: a LaunchAgent lives in your user domain
 pocketshell-agent install --advertise wss://your.domain --name my-mac
 ```
 
-That writes the systemd/launchd service config → enables it at boot and starts it now → and **prints the pairing string right there on a first install**. Open the URL on your phone and paste it.
+This writes the systemd/launchd service config → enables it at boot and starts it now → and **prints the pairing string right there on a first install**.
 
-`--advertise` is required: it decides which address goes into the pairing string, and without it your phone has nowhere to connect. The rest are optional — `--name` (an instance name, to tell several machines apart), `--user` (who the service runs as; defaults to whoever invoked sudo), `--host` (`127.0.0.1` by default; use `0.0.0.0` for a phone connecting straight over the LAN) and `--port` (`8722`).
+**Step 3 — pair your phone**
+
+Open the URL in your phone's browser → paste the pairing string → name the device, done (the pairing string has a 300-second TTL). The device is trusted afterward, and you can "add to home screen" to use it as an app.
+
+Once installed as a service that output goes to the log instead — read it with `sudo journalctl -u pocketshell -n 50` on Linux. If the code expires you don't need to restart: run `pocketshell-agent pair` and a running Agent picks up the fresh string automatically.
+
+<details>
+<summary><b>install subcommand options</b></summary>
+
+`--advertise` is required: it decides which address goes into the pairing string, and without it your phone has nowhere to connect. The rest are optional:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--name` | — | an instance name, to tell several machines apart |
+| `--user` | whoever invoked sudo | which user the service runs as |
+| `--host` | `127.0.0.1` | bind address; use `0.0.0.0` for a phone connecting straight over the LAN |
+| `--port` | `8722` | listening port |
 
 To change a setting or move to a new version, just run the same command again: the old config is backed up first and **your key directory is left alone, so already-paired phones keep working** (which is also why a reinstall won't print a pairing string — run `pocketshell-agent pair` to add a new phone).
 
 Pin a version with `VERSION=1.5.0 curl -fsSL … | sh`. To remove it: `pocketshell-agent uninstall` (stops the service and deletes the config, keeping your key directory and the binary).
 
-**Option C — download the binary manually**
+</details>
+
+<details>
+<summary><b>Other install methods (from source / manual download / build it yourself)</b></summary>
+
+**Run from source (development)**
+
+```bash
+# 1) backend Agent (needs tmux)
+cd agent && bun install && bun run start
+
+# 2) frontend (in another terminal)
+cd app && bun install && bun run dev      # http://localhost:5173
+```
+
+**Download the binary manually**
 
 Grab the archive for your platform (`linux-x64` / `linux-arm64` / `darwin-arm64` / `darwin-x64`) from [Releases](https://github.com/Big-Pony/pocketshell/releases), then extract and run:
 
@@ -199,28 +186,27 @@ tar -xzf pocketshell-agent-linux-x64.tar.gz
 
 Optional: verify integrity with the `SHA256SUMS.txt` shipped in the same Release (`shasum -a 256 -c SHA256SUMS.txt`). The target host only needs `tmux`. On macOS, if Gatekeeper blocks the first run, allow it under System Settings → Privacy & Security.
 
-> **Run that way it's a foreground process**: Ctrl+C or closing your SSH session stops it, and it won't come back after a reboot. For anything long-lived, use the `install` subcommand above, or wire it up by hand following [deployment guide § Running as a service](./DEPLOYMENT.md#running-as-a-service-systemd--launchd).
+> Run that way it's a **foreground process**: Ctrl+C or closing your SSH session stops it, and it won't come back after a reboot. For anything long-lived, use the `install` subcommand above, or wire it up by hand following [deployment guide § Running as a service](./DEPLOYMENT.md#running-as-a-service-systemd--launchd).
 
-**Option D — build the binary from source**
+**Build the binary from source**
 
 ```bash
-cd app   && bun install && bun run build      # build embedded frontend first
-cd agent && bun install && bun run build:bin  # single-file binaries, all platforms
+# build the embedded frontend first (the Agent serves it on the same port)
+cd app && bun install && bun run build
+# then produce single-file binaries for every platform
+cd ../agent && bun install && bun run build:bin
 ```
 
-Copy the binary for your platform to the target host (only `tmux` required) and run it.
+Copy the binary for your platform to the target host (only `tmux` required) and run it. Building needs [Bun](https://bun.sh) ≥ 1.3.
 
-**URL & default port**
+</details>
 
-The Agent listens on port **`8722`** by default (change with `POCKETSHELL_PORT`); once started, open `http://127.0.0.1:8722` in a browser on the host machine. Note it binds to `127.0.0.1` only by default — to reach it from your phone over LAN/internet, set `POCKETSHELL_HOST=0.0.0.0` plus `POCKETSHELL_ADVERTISE`, or put it behind a reverse proxy — see the [deployment guide](./DEPLOYMENT.md).
+<details>
+<summary><b>URL, port and common environment variables</b></summary>
 
-**First pairing**
+The Agent listens on port **`8722`** by default; once started, open `http://127.0.0.1:8722` in a browser on the host machine. Note it binds to `127.0.0.1` only by default — to reach it from your phone over LAN/internet, set `POCKETSHELL_HOST=0.0.0.0` plus `POCKETSHELL_ADVERTISE`, or put it behind a reverse proxy — see the [deployment guide](./DEPLOYMENT.md).
 
-On first run the Agent prints the App URL, a pasteable **pairing string**, and the Agent public key. Open the App on your phone, paste the pairing string to complete a one-time pairing (default TTL 300s). The device is trusted afterward.
-
-Once installed as a service, that output goes to the log instead — read it with `sudo journalctl -u pocketshell -n 50` on Linux. The pairing code has a 300-second TTL and is minted only at process start; if it expires you don't need to restart the service — run `pocketshell-agent pair` on the Agent's own machine and it prints a fresh pairing string, which a running Agent picks up automatically.
-
-**Common environment variables** (`agent/src/config.ts`; precedence env > `<keyDir>/agent.json` > default)
+Precedence: env > `<keyDir>/agent.json` > default (see `agent/src/config.ts`).
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -229,86 +215,116 @@ Once installed as a service, that output goes to the log instead — read it wit
 | `POCKETSHELL_ADVERTISE` | — | external address baked into the pairing string |
 | `POCKETSHELL_KEY_DIR` | `~/.pocketshell` | keys / devices / audit dir |
 | `POCKETSHELL_TLS` / `_CERT` / `_KEY` | `0` | Agent built-in TLS (bring your own cert) |
-| `POCKETSHELL_UPDATE_REPO` | `Big-Pony/pocketshell` | release source for update checks; auto-update only applies from the built-in repo |
-| `POCKETSHELL_INSTANCE_NAME` | — | instance label, used to tell multiple installs apart (see below); unset shows the default "PocketShell" |
+| `POCKETSHELL_UPDATE_REPO` | `Big-Pony/pocketshell` | release source for update checks |
+| `POCKETSHELL_INSTANCE_NAME` | — | instance label, used to tell multiple installs apart |
 
-### Running more than one server
+**Running more than one server**: installing an Agent on several machines works out of the box — they know nothing about each other and share nothing (separate keys, sessions, push subscriptions). Give each one a `POCKETSHELL_INSTANCE_NAME` and it shows up under the home-screen icon, in the PWA's app name and in the app's top bar, so you get two independent PWAs you can tell apart at a glance — and **notifications from both servers reach you, neither displacing the other**. See the [deployment guide](./DEPLOYMENT.md).
 
-Installing an Agent on several machines works out of the box — they know nothing about each other and share nothing: separate keys and device registries, separate sessions, separate push subscriptions. All you do is give each one its own address, plus a name:
+</details>
 
-```bash
-# work machine
-POCKETSHELL_ADVERTISE=wss://dev.example.com POCKETSHELL_INSTANCE_NAME=Dev pocketshell-agent
-# home server
-POCKETSHELL_ADVERTISE=wss://home.example.com POCKETSHELL_INSTANCE_NAME=Home pocketshell-agent
-```
+## 🔒 Security
 
-With `POCKETSHELL_INSTANCE_NAME` set, the name shows up in three places:
+Every connection performs a Noise IK handshake with mutual authentication and forward secrecy; an unregistered device never gets past the handshake, and any tunnel/proxy in between only carries ciphertext. Crypto keys live only in `KEY_DIR` and are never committed.
 
-- **The label under the home-screen icon** — shows `Dev` (just the instance name; this is where the OS truncates hardest)
-- **The app name when installing the PWA** — shows `Dev · PocketShell`
-- **The app's top bar** — `Dev ·` in front of the brand name
-
-So you end up with two independent PWAs and two home-screen icons you can tell apart at a glance. Because browsers isolate data per domain, each side keeps its own tabs, project-root bookmark, and push subscription — **notifications from both servers reach you, neither displacing the other** (you cannot get this from a single domain; browsers allow only one push subscription per origin).
-
-> Each instance needs its own domain or address. The app is served over HTTPS, browsers refuse to let an HTTPS page open a plaintext `ws://` connection, and `wss://` needs a certificate — which cannot be issued for a bare IP. So any instance reachable over the internet needs a domain name (a subdomain is enough — see the [deployment guide](./DEPLOYMENT.md)). Direct IP access on a LAN is not affected.
-
-### Managing devices
+**The auth boundary is the security boundary** — a paired device can browse files within the Agent process's own permissions (no extra sandbox), so constrain access via process permissions. In production, terminate TLS at the edge (Cloudflare / Caddy).
 
 Device management is a command-line interface, run on the machine hosting the Agent:
 
 ```bash
 pocketshell-agent pair [--name <device-name>]   # mint a pairing string (TTL 300s)
 pocketshell-agent devices list                  # name, fingerprint, last seen, IP
-pocketshell-agent devices remove <fingerprint>  # revoke a device
+pocketshell-agent devices remove <fingerprint>  # revoke a device (drops it within seconds)
 ```
 
-`pair` works against a running Agent — no restart needed. `devices remove` takes effect within a few seconds: the resident Agent notices the change, drops the device's authorization, closes its live connection, and clears its push subscriptions.
+> v1.8.0 removed the web admin page (it was reachable anonymously from the public internet on every reverse-proxied deployment). **If you ran a reverse-proxied deployment on v1.7.x or earlier**, check `<keyDir>/audit.log` for `admin_pair_new` events you did not trigger, and `devices list` for devices you do not recognise. Details in [deployment guide § CLI device management](./DEPLOYMENT.md#cli-device-management).
 
-> **There used to be a web admin page here.** It was removed in v1.8.0 because it was reachable from the public internet on every reverse-proxied deployment. Its only credential was a check that the request came from `127.0.0.1` — but a same-host reverse proxy (Caddy, Nginx, Cloudflare Tunnel, frp — all four setups [DEPLOYMENT.md](./DEPLOYMENT.md) recommends) connects from exactly that address, so the check passed for *every* request, including anonymous ones from the internet. `POST /admin-api/pair` would then return a working pairing string to anyone who asked. The page was localhost-only by design, which means its audience always had a shell — so it could never do anything the commands above cannot, and deleting it removes the attack surface rather than guarding it.
->
-> **If you ran a reverse-proxied deployment on v1.7.x or earlier**, check for unauthorized access: `<keyDir>/audit.log` for `admin_pair_new` events you did not trigger, and `pocketshell-agent devices list` for devices you do not recognise. `POCKETSHELL_ADMIN` is no longer read.
+## 🔔 Notifications
 
-### Deployment
+When an agent (Claude Code / Codex / opencode / Kimi CLI) finishes a work round or is waiting on your input, it can push a notification to your phone — even if the app isn't open, the phone is locked, or you're looking at a different session.
 
-Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)** — it covers four setups: bare IP+port, direct server deployment behind Caddy / Nginx, Cloudflare Tunnel (no public IP needed), and an frp relay server, plus systemd / launchd service examples.
+Toggle it per tool under **Settings → Notifications**; the Agent idempotently writes one hook/notify entry into that tool's config (Claude Code → `~/.claude/settings.json`, Codex → `~/.codex/config.toml`, opencode → its plugin directory). Turning it off removes exactly that entry and leaves any other config you wrote by hand untouched.
 
-### Auto-update
+Two delivery channels, both can be on:
 
-The Agent has built-in in-app auto-update backed by GitHub Releases: it silently checks for a newer version on startup and again every time a phone connects (result cached 6h; a failed check never breaks normal use). When a newer version exists, an update badge appears next to the brand in the top bar; tap it to open a confirmation dialog, then tap "Update" — download, verify, (on macOS) re-sign, swap the binary, and restart all happen automatically, no manual binary handling required.
+- **Web Push** — needs to be opened from a PWA that's been added to the home screen, with notification permission granted. On iOS you must add it to the home screen first (a plain Safari tab can't receive push); on Android without Google Play Services, delivery may fail since it depends on reaching FCM.
+- **Outbound webhooks** — built-in templates for WeCom / Feishu (optional signing secret) / Slack / Discord, plus a custom URL + JSON template; configure any number and test-send each one.
 
-- Set `POCKETSHELL_UPDATE=0` to disable it; point `POCKETSHELL_UPDATE_REPO` at your own fork, or set it to `off` for the same effect as disabling.
-- The self-restart after an in-app update relies on the process being supervisor-managed (systemd / launchd); on macOS, a Full Disk Access grant made before an update survives OTA. Details: **[DEPLOYMENT.md § Auto-update (OTA)](./DEPLOYMENT.md#auto-update-ota)**.
+> **Privacy note**: notifications include an agent-output summary by default (you can turn that off). Web Push travels over the browser's standard encrypted channel, but **webhooks send the message in plaintext to third-party providers** — keep that in mind if the summary could contain sensitive output.
 
-### Notifications
+## 🌐 Deployment
 
-When an agent (Claude Code / Codex / opencode) finishes a work round or is waiting on your input, it can push a notification to your phone — even if the App isn't open, the phone is locked, or you're looking at a different session.
+Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)**, which covers four setups:
 
-**Enabling it**: Settings → Notifications, toggle per tool (Claude Code / Codex / opencode each have their own switch). Turning one on idempotently writes a hook/notify entry into that tool's config:
+| Setup | When to use it |
+|---|---|
+| Bare IP + port | LAN-only access, no domain needed |
+| Caddy / Nginx reverse proxy | A server with a public IP and a domain |
+| Cloudflare Tunnel | Home connection with no public IP, no open ports |
+| frp relay | No public IP, but you want to own the whole path |
 
-- Claude Code → `~/.claude/settings.json` (`hooks.Notification`)
-- Codex → `~/.codex/config.toml` (the `notify` field)
-- opencode → its plugin directory (`~/.config/opencode/plugin/pocketshell-notify.js`)
+The guide also includes systemd / launchd service examples and a troubleshooting table.
 
-Turning it off removes exactly that entry and leaves any other hooks/config you wrote by hand untouched; a failed write (JSON parse error, a conflicting existing `notify` config, opencode not installed, etc.) shows the specific reason in settings instead of failing silently.
+## 🔄 Auto-update
 
-**Two delivery channels, can both be on:**
+The Agent has built-in in-app auto-update backed by GitHub Releases: it silently checks on startup and each time a phone connects (result cached 6h; a failed check never breaks normal use). When a newer version exists, an update badge appears in the top bar; tap "Update" and download → SHA256 verification → (on macOS) re-signing → binary swap → restart all happen automatically.
 
-- **Web Push** — needs to be opened from a PWA that's been "added to home screen," with notification permission granted; on iOS you must add it to the home screen first (a plain Safari tab can't receive push); on Android without Google Play Services (common in mainland China), delivery may fail since it depends on reaching FCM.
-- **Outbound webhooks** — built-in templates for WeCom / Feishu (optional signing secret) / Slack / Discord, plus a custom URL + JSON template; configure any number of them, and test-send each one individually.
+- Set `POCKETSHELL_UPDATE=0` to disable it; `POCKETSHELL_UPDATE_REPO` can point at your own fork (checks still run, but the binary is no longer replaced automatically).
+- The self-restart relies on the process being supervisor-managed (systemd / launchd); on macOS, a Full Disk Access grant made before an update survives OTA. Details in [deployment guide § Auto-update (OTA)](./DEPLOYMENT.md#auto-update-ota).
 
-**Smart do-not-disturb**: if you're currently viewing a session in the foreground, its completion won't trigger a system notification (just a lightweight in-app hint); it does push once you're in the background, the screen is locked, or you're viewing a different session. Repeated completions on the same session within a short window (10s by default, adjustable) collapse into a single notification.
+## 🛠 Tech stack
 
-**Privacy note**: notifications include an agent-output summary by default — you can turn that off in settings. Web Push travels over the browser's standard encrypted channel, but **webhooks send the message in plaintext to third-party providers like WeCom/Feishu** — keep that in mind if the summary could contain sensitive output and you've configured a webhook.
+| Layer | Choice |
+|---|---|
+| Frontend | Svelte 5 (runes) + Vite 5 + [xterm.js](https://github.com/xtermjs/xterm.js) (WebGL renderer) + CodeMirror 6 + svelte-i18n |
+| Backend | [Bun](https://bun.sh) + TypeScript, serving the embedded frontend and the WebSocket on one port |
+| Sessions | tmux-managed PTYs — the session lives server-side, the app is just a screen onto it |
+| Crypto | [noise-handshake](https://github.com/holepunchto/noise-handshake) Noise IK over pure-JS `sodium-javascript` (no native addons) |
+| Storage | `bun:sqlite` (snippets) + atomically-written JSON (keys / devices / notification config) |
+| Distribution | `bun build --compile` single-file binaries, cross-compiled for linux/darwin ×64/arm64 from one Mac |
+| Testing | Vitest 2 + @testing-library/svelte (frontend) · Bun test (backend) · agent-browse MCP (e2e) |
 
-### Security
+## 📦 Version
 
-Every connection performs a Noise IK handshake with mutual authentication and forward secrecy; an unregistered device never gets past the handshake, and any tunnel/proxy in between only carries ciphertext. **The auth boundary is the security boundary** — a paired device can browse files within the Agent process's own permissions (no extra sandbox), so constrain access via process permissions. In production, terminate TLS at the edge (Cloudflare/Caddy). Crypto keys live only in `KEY_DIR` and are never committed.
+Current release **v1.8.0** (2026-08-03) · full changelog in [Releases](https://github.com/Big-Pony/pocketshell/releases)
 
-### Performance
+**v1.8.0** — removed the web admin page (it was anonymously reachable from the internet); device management is now CLI-only; `devices remove` takes effect on a running Agent; in-app updates install only from the official repository.
+
+**v1.7.0** — AI context usage on the split bar (four tools); Kimi CLI push notifications; video preview with a working seek bar; a refresh button on the Git branch row.
+
+**v1.6.0** — `install` / `uninstall` subcommands to set up a boot-start service in one command; one-line installer with SHA256 verification; fixed `pair` doing nothing for the first five minutes after service start.
+
+## ⚡ Performance
 
 Tuned for flaky mobile networks: PTY output is batched by time/size and fanned out only to subscribers with backpressure drop/recover; large RPC responses are auto-chunked and reassembled; reconnect replays only the missing gap; static assets are precompressed (br/gz) with ETag/304; hidden terminals stop writing and background tabs detach.
 
-### License
+## 🤝 Contributing
+
+Issues and pull requests are welcome.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feat/your-feature`)
+3. Commit your changes (`git commit -m 'feat: your feature'`)
+4. Push the branch (`git push origin feat/your-feature`)
+5. Open a Pull Request
+
+Protocol changes start in the backend at `agent/src/protocol.ts`; `app/src/lib/protocol.ts` is its verbatim mirror. `bun test` and `bun run typecheck` must pass on both sides.
+
+## 📄 License
 
 [Apache-2.0](./LICENSE)
+
+## 🙏 Acknowledgements
+
+- [xterm.js](https://github.com/xtermjs/xterm.js) — terminal rendering in the browser
+- [tmux](https://github.com/tmux/tmux) — the server-side session that makes drop-and-resume possible
+- [Bun](https://bun.sh) — the runtime and single-file binary compiler
+- [noise-handshake](https://github.com/holepunchto/noise-handshake) — the Noise IK implementation
+- [CodeMirror](https://codemirror.net/) — a code editor that actually works on a phone
+
+---
+
+<div align="center">
+
+**⭐ If this project helps you, please give it a Star!**
+
+</div>
