@@ -94,7 +94,9 @@ header {
 }
 .phone:nth-child(2) { transform: translateY(28px); }
 .phone:nth-child(3) { transform: translateY(56px); }
-.phone img { display: block; width: 100%; border-radius: 26px; aspect-ratio: 9/19.2; object-fit: cover; object-position: top; }
+/* height:auto 是必需的：HTML 上有 width/height 属性（给浏览器算 CLS 用），
+   不显式置 auto 的话 height 会取属性值 2712px，aspect-ratio 直接失效，图被拉成细条 */
+.phone img { display: block; width: 100%; height: auto; border-radius: 26px; aspect-ratio: 9/19.2; object-fit: cover; object-position: top; }
 @media (max-width: 860px) {
   .phones { gap: 16px; }
   .phone { width: 31%; }

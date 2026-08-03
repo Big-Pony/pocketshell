@@ -15,7 +15,12 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
 
-# 样式与脚本没有内容哈希文件名，跟着页面一起更新，不能长缓存
+# 样式与脚本没有内容哈希文件名，跟着页面一起更新，不能长缓存。
+# 注意：这条 Cache-Control 在 pages.dev 上生效，但裸域会被 zone 的
+# Browser Cache TTL（4h）盖掉，实测边缘节点返回 max-age=14400 且各节点
+# 新旧不一。因此 HTML 里对这两个文件带 ?v=<日期> 查询串——查询串换了
+# 就是新的缓存键，任何 TTL 都绕不过去。**改这两个文件必须同时改 HTML
+# 里的 v= 值**，否则线上是旧的且不报错。
 /site.css
   Cache-Control: public, max-age=0, must-revalidate
 
