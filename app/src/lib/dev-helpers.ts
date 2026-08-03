@@ -11,11 +11,11 @@ import { saveProjectRoot, clearProjectRoot, loadProjectRoot } from "./ui/file-tr
 import { toB64 } from "./bytes";
 import type { BottomPanel } from "./ui/shell";
 
-// Switch: enabled by default in both dev and production builds to support
-// browser automation / AI testing. Set VITE_POCKETSHELL_DEV_HELPERS=0 at build
-// time to disable.
+// Switch: off by default so production builds ship no automation surface.
+// Set VITE_POCKETSHELL_DEV_HELPERS=1 at build time to opt in — used by e2e
+// runs and by anything driving the app programmatically.
 export const DEV_HELPERS_ENABLED =
-  import.meta.env.VITE_POCKETSHELL_DEV_HELPERS !== "0";
+  import.meta.env.VITE_POCKETSHELL_DEV_HELPERS === "1";
 
 export interface DevHelperOpts {
   openFile: (path: string, mode?: "code" | "diff") => void;
