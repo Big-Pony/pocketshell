@@ -12,9 +12,13 @@
 
 </div>
 
-## 📸 截图
+## 📸 演示
 
 <div align="center">
+
+<img src="assets/demo.gif" alt="在手机上派活给 Claude Code：整段写需求 → 注入运行 → 完成后直接预览成品" width="270"/>
+
+<em>手机上新建会话 → 用输入法整段写需求 → 一次性注入 → 跑完直接在手机上预览成品（原速录屏，1.5× 播放）</em>
 
 <table>
   <tr>

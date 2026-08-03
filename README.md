@@ -12,9 +12,13 @@
 
 </div>
 
-## 📸 Screenshots
+## 📸 Demo
 
 <div align="center">
+
+<img src="assets/demo.gif" alt="Hand a task to Claude Code from your phone: compose the whole prompt, inject it, preview the result" width="270"/>
+
+<em>Start a session on your phone → compose the whole prompt with the IME → inject it in one shot → preview the finished result right there (screen recording, played at 1.5×)</em>
 
 <table>
   <tr>
