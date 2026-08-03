@@ -51,6 +51,10 @@ describe("DEV_HELPERS_ENABLED", () => {
         fileTabs: [],
         activeId: "",
       }),
+      newSession: () => {},
+      enterSession: () => {},
+      getSessions: () => [],
+      dropConnection: () => {},
     });
     expect((window as unknown as { pocketshell?: unknown }).pocketshell).toBeUndefined();
   });

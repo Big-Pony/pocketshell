@@ -28,6 +28,10 @@ export interface DevHelperOpts {
     fileTabs: string[];
     activeId: string;
   };
+  newSession: (name: string, kind?: "tmux" | "shell") => void;
+  enterSession: (name: string) => void;
+  getSessions: () => Array<{ name: string; state: string }>;
+  dropConnection: () => void;
 }
 
 let appHelpers: DevHelperOpts | null = null;
@@ -119,6 +123,42 @@ function getState() {
   };
 }
 
+function newSession(name: string, kind: "tmux" | "shell" = "tmux") {
+  ensureEnabled();
+  if (!appHelpers) {
+    console.error("[pocketshell] App not mounted yet");
+    return;
+  }
+  appHelpers.newSession(name, kind);
+}
+
+function enterSession(name: string) {
+  ensureEnabled();
+  if (!appHelpers) {
+    console.error("[pocketshell] App not mounted yet");
+    return;
+  }
+  appHelpers.enterSession(name);
+}
+
+function getSessions() {
+  ensureEnabled();
+  if (!appHelpers) {
+    console.error("[pocketshell] App not mounted yet");
+    return null;
+  }
+  return appHelpers.getSessions();
+}
+
+function dropConnection() {
+  ensureEnabled();
+  if (!appHelpers) {
+    console.error("[pocketshell] App not mounted yet");
+    return;
+  }
+  appHelpers.dropConnection();
+}
+
 export function registerDevHelpers(opts: DevHelperOpts) {
   if (!DEV_HELPERS_ENABLED) return;
   appHelpers = opts;
@@ -135,6 +175,10 @@ export function registerDevHelpers(opts: DevHelperOpts) {
       appHelpers?.sendInput(text);
     },
     getState,
+    newSession,
+    enterSession,
+    getSessions,
+    dropConnection,
   };
   (window as any).pocketshell = api;
   console.log(

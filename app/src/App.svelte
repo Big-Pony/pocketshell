@@ -365,6 +365,10 @@
         fileTabs: fileTabs.map((t) => t.id),
         activeId: activeTopId,
       }),
+      newSession,
+      enterSession,
+      getSessions: () => sessions.map((s) => ({ name: s.name, state: s.state })),
+      dropConnection: () => conn.dropConnection(),
     });
     topEl?.addEventListener("pointerdown", onTopPointerDown, { capture: true });
     topEl?.addEventListener("pointerup", onTopPointerUp, { capture: true });
