@@ -153,7 +153,7 @@
     border-radius: 38px;
     overflow: hidden;
     background: var(--bg-deep);
-    box-shadow: 0 24px 60px rgb(0 0 0 / 0.35);
+    box-shadow: var(--pop-shadow);
   }
   .phone iframe { width: 100%; height: 100%; border: 0; display: block; }
 

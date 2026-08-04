@@ -20,8 +20,8 @@ test("演示分支走 createDemoConnection，真实分支仍是 new Connection",
 test("横幅与断线按钮的文案都有中英双语词条", () => {
   const keys = ["banner", "tryOffline", "installCta"] as const;
   for (const k of keys) {
-    expect((zh as any).demo.banner_group?.[k] ?? (zh as any).demo[k], `zh 缺 demo.${k}`).toBeTruthy();
-    expect((en as any).demo.banner_group?.[k] ?? (en as any).demo[k], `en 缺 demo.${k}`).toBeTruthy();
+    expect(zh.demo[k], `zh 缺 demo.${k}`).toBeTruthy();
+    expect(en.demo[k], `en 缺 demo.${k}`).toBeTruthy();
   }
 });
 
