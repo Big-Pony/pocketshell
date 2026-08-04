@@ -147,6 +147,13 @@ test("demo.html 有分流脚本，且 index.html 没有", () => {
   expect(HTML).not.toContain("location.replace");
 });
 
+test("分流判据是「窄屏 && 触控」，不是 ||", () => {
+  // || 会把触屏笔电与 iPad 横屏（宽屏但 pointer: coarse）踢到手机版，
+  // 于是看不到展台页的二维码和安装 CTA——那正是展台页存在的理由。
+  expect(DEMO_HTML).toMatch(/innerWidth\s*<\s*900\s*&&\s*matchMedia/);
+  expect(DEMO_HTML).not.toMatch(/innerWidth\s*<\s*900\s*\|\|/);
+});
+
 test("分流与 iframe 都指向无扩展名的 /app，不是 /app.html", () => {
   // Cloudflare Pages 会剥掉 .html 扩展名：请求 /app.html 得到 308 → /app。
   // 功能上能跑通，但每个访客（尤其手机——那是主要受众）白付一次跳转往返。

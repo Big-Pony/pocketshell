@@ -31,14 +31,19 @@
       html { background: var(--boot-bg); }
     </style>
     <script>
-      // 桌面/手机分流。窄屏或触控设备 → 换成 app 全屏。
+      // 桌面/手机分流。窄屏**且**触控设备 → 换成 app 全屏。
+      //
+      // 两个条件是 && 而不是 ||：触屏笔电、iPad 横屏都是 pointer: coarse，但屏
+      // 幕足够宽，展台页放得下。用 || 会把它们踢到手机版，于是看不到二维码和
+      // 安装 CTA——那正是展台页存在的理由。反过来，窄窗口的桌面浏览器（精细
+      // 指针）留在展台页也是对的：竖排布局本来就能容。
       //
       // 目标写成无扩展名的 /app（构建后置改名产出的是 dist/app.html，而
       // Cloudflare Pages 会剥掉 .html：请求 /app.html 得到 308 → /app）。
       // 直接写 /app 省掉这次跳转往返——手机是主要受众，那一跳全落在它们头上。
       //
       // **只有展台页带这段**：app 入口自身不带，否则手机上会 replace 到自己。
-      if (innerWidth < 900 || matchMedia("(pointer: coarse)").matches) {
+      if (innerWidth < 900 && matchMedia("(pointer: coarse)").matches) {
         location.replace("/app");
       }
     </script>
