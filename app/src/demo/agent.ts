@@ -170,15 +170,15 @@ export class DemoAgent {
       case "cd": {
         const target = resolvePath(cwd, arg || DEMO_ROOT);
         const node = lookup(target);
-        if (!node) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { name: arg }) + PROMPT); return; }
-        if (node.type !== "dir") { this.emitOutput(sessionId, tr("demo.shell.notADirectory", { name: arg }) + PROMPT); return; }
+        if (!node) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { cmd, name: arg }) + PROMPT); return; }
+        if (node.type !== "dir") { this.emitOutput(sessionId, tr("demo.shell.notADirectory", { cmd, name: arg }) + PROMPT); return; }
         this.cwd.set(sessionId, target);
         this.emitOutput(sessionId, PROMPT);
         return;
       }
       case "ls": {
         const entries = listDir(resolvePath(cwd, arg));
-        if (!entries) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { name: arg || "." }) + PROMPT); return; }
+        if (!entries) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { cmd, name: arg || "." }) + PROMPT); return; }
         // 目录加尾斜杠，与真 shell 的 ls -F 观感一致
         const names = entries.map((e) => (e.node.type === "dir" ? `${e.name}/` : e.name));
         this.emitOutput(sessionId, names.join("  ") + PROMPT);
@@ -186,7 +186,7 @@ export class DemoAgent {
       }
       case "cat": {
         const f = readFile(resolvePath(cwd, arg));
-        if (!f) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { name: arg }) + PROMPT); return; }
+        if (!f) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { cmd, name: arg }) + PROMPT); return; }
         this.emitOutput(sessionId, f.content + PROMPT);
         return;
       }

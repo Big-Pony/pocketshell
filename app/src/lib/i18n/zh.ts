@@ -57,8 +57,8 @@ export default {
   demo: {
     shell: {
       fallback: "这是演示沙盘，随便敲——真实环境里这条命令会直接跑在你自己的机器上。",
-      noSuchFile: "cat: {name}: No such file or directory",
-      notADirectory: "cd: {name}: Not a directory",
+      noSuchFile: "{cmd}: {name}: No such file or directory",
+      notADirectory: "{cmd}: {name}: Not a directory",
     },
     scene: {
       prompt: "把 auth.ts 的会话校验补一下，缺 claims 判空",

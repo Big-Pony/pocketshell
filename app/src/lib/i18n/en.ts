@@ -57,8 +57,8 @@ export default {
   demo: {
     shell: {
       fallback: "This is a demo sandbox — type anything. On a real machine this command would just run on your own box.",
-      noSuchFile: "cat: {name}: No such file or directory",
-      notADirectory: "cd: {name}: Not a directory",
+      noSuchFile: "{cmd}: {name}: No such file or directory",
+      notADirectory: "{cmd}: {name}: Not a directory",
     },
     scene: {
       prompt: "Fix the session check in auth.ts — it never guards against a missing claims object",

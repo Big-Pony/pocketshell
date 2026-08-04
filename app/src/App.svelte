@@ -111,11 +111,14 @@
   // Persistent pubkey reminder stays reactive to the locale (uses $t inside
   // $derived); transient notices (resync/error) go through `flash`.
   let flash = $state("");
-  const notice = $derived(!getAgentPubKey() ? $t("app.notice.noPubkey") : flash);
 
   // 演示构建：整个传输层换成同页面内的假 agent。这个比较是编译期常量，
   // 真实构建里 vite 会把演示分支连同 src/demo/** 整个剪掉。
   const DEMO = import.meta.env.VITE_POCKETSHELL_DEMO === "1";
+
+  // 演示态没有（也不需要）Agent 公钥：连接是同页面内的假 agent，本来就通。
+  // 不门控的话演示站首屏永远顶着一条红字，还把访客指向一个已被禁用的入口。
+  const notice = $derived(!DEMO && !getAgentPubKey() ? $t("app.notice.noPubkey") : flash);
   const demo = DEMO ? createDemoConnection(wsUrl) : null;
   const conn = demo ? demo.conn : new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");

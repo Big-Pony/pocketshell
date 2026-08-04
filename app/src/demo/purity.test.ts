@@ -55,15 +55,27 @@ test("demo 目录不 import 任何组件（保持纯 TS，可单测、不拖 UI 
 test("预览 fixture 与假树一一对应（缺一个，对应的预览分支就演示不到）", () => {
   // FilePreview 走真 HTTP 取这些文件（设计文档 4.5）——假树里有、public 下没有，
   // 表现是预览区一片空白且无报错。
-  const pub = resolve(SRC, "../public/preview/demo");
+  const pub = resolve(SRC, "../public-demo/preview/demo");
   for (const rel of ["docs/logo.png", "docs/report.html"]) {
     expect(existsSync(join(pub, rel)), `缺 fixture: ${rel}`).toBe(true);
   }
 });
 
+test("演示资产不在 public/ 里（否则会被打进真实构建并嵌入 agent 二进制）", () => {
+  // vite 无条件把整个 publicDir 拷进 dist，而 publicDir 只能指一个目录——
+  // rollupOptions.input 的门控只管 JS 模块图，管不到静态资产。放进 public/
+  // 的演示资产会跟着真实构建走，再被 agent/scripts/gen-embedded.ts 嵌进每个
+  // 发布的二进制。故它们必须待在 public-demo/，由 vite.config 的 demoAssets()
+  // 插件只在演示构建里拷过去。
+  const pub = resolve(SRC, "../public");
+  for (const leaked of ["qr-demo.svg", "preview"]) {
+    expect(existsSync(join(pub, leaked)), `${leaked} 不该在 public/，应放 public-demo/`).toBe(false);
+  }
+});
+
 test("report.html 的 fixture 与 fs.ts 里的源码常量一致", () => {
   // 两处漂移的话，访客切「预览 / 源码」会看到不同内容。
-  const onDisk = readFileSync(resolve(SRC, "../public/preview/demo/docs/report.html"), "utf8").trim();
+  const onDisk = readFileSync(resolve(SRC, "../public-demo/preview/demo/docs/report.html"), "utf8").trim();
   const inSrc = readFileSync(resolve(SRC, "demo/fs.ts"), "utf8");
   const m = /const REPORT_HTML = `([\s\S]*?)`;/.exec(inSrc);
   expect(m, "fs.ts 里没找到 REPORT_HTML").toBeTruthy();

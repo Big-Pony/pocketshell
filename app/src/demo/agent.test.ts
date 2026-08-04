@@ -279,6 +279,19 @@ test("脚本化档：claude 分段流出（不是一坨吐完）", () => {
   expect(h.only("output").length).toBeGreaterThan(first); // 后续分段还在陆续到达
 });
 
+test("错误消息用各自的命令名做前缀，不串台", () => {
+  // 词条原本硬编码了 `cat:` 前缀，导致 `cd nope` 报出 "cat: nope: No such file"。
+  // 现改为 {cmd} 占位符由调用方传入。
+  for (const [cmd, want] of [["cd", "cd: nope:"], ["ls", "ls: nope:"], ["cat", "cat: nope:"]] as const) {
+    const h = harness();
+    h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+    for (const ch of `${cmd} nope\r`) h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa(ch) });
+    h.tick();
+    const text = h.only("output").map((o) => decode(o.data)).join("");
+    expect(text, `${cmd} 的错误前缀串台了`).toContain(want);
+  }
+});
+
 test("兜底档：任意乱输入回友好提示，且提示是 i18n 译出的中文（不是 key）", () => {
   const h = harness();
   h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
