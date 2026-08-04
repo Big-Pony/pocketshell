@@ -37,8 +37,9 @@ const enc = new TextEncoder();
 // 环形缓冲上限。演示不需要真 agent 那样按字节算，条数足够——一幕戏几十帧。
 export const REPLAY_CAP = 500;
 
-// 演示的预览 token 是个常量：配合演示包里真实存在的 public/preview/demo/**
-// 静态文件，FilePreview 拼出的 /preview/demo/<relpath> 就是一个普通静态请求。
+// 演示的预览 token 是个常量：配合演示包里真实存在的 public-demo/preview/demo/**
+// 静态文件（由 vite.config 的 demoAssets() 插件只在演示构建里拷进 dist），
+// FilePreview 拼出的 /preview/demo/<relpath> 就是一个普通静态请求。
 export const DEMO_PREVIEW_TOKEN = "demo";
 
 interface Frame { sessionId: string; seq: number; data: string }

@@ -67,10 +67,12 @@ test("演示资产不在 public/ 里（否则会被打进真实构建并嵌入 a
   // 的演示资产会跟着真实构建走，再被 agent/scripts/gen-embedded.ts 嵌进每个
   // 发布的二进制。故它们必须待在 public-demo/，由 vite.config 的 demoAssets()
   // 插件只在演示构建里拷过去。
+  // 判据是**白名单**而非黑名单：枚举已知的泄漏名字只能堵住今天这两处，
+  // 明天有人把资产放进 public/assets/demo/ 就静默放行了。锁死顶层条目集合，
+  // 任何新增都会炸出来，由加的人决定它该进 public/ 还是 public-demo/。
   const pub = resolve(SRC, "../public");
-  for (const leaked of ["qr-demo.svg", "preview"]) {
-    expect(existsSync(join(pub, leaked)), `${leaked} 不该在 public/，应放 public-demo/`).toBe(false);
-  }
+  expect(readdirSync(pub).sort(), "public/ 顶层多了东西：演示资产应放 public-demo/")
+    .toEqual(["fonts", "icons", "manifest.webmanifest", "sw.js"]);
 });
 
 test("report.html 的 fixture 与 fs.ts 里的源码常量一致", () => {
