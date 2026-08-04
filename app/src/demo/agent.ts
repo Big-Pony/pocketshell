@@ -7,8 +7,9 @@
 // 一次性吐出缺口（见 Task 3 的 replay 缓冲）。
 import type { ClientMsg, ServerMsg, SessionMeta } from "../lib/net/protocol";
 import { toB64 } from "../lib/bytes";
-import { DEMO_ROOT, resolvePath, listDir, readFile, lookup } from "./fs";
+import { DEMO_ROOT, resolvePath, listDir, readFile, lookup, treeAt } from "./fs";
 import { tr } from "../lib/i18n";
+import { GIT_BRANCHES, GIT_STATUS, GIT_LOG, DIFF_HUNKS, DEMO_HINTS, DEMO_SNIPPETS } from "./git";
 
 export interface DemoScheduler {
   setTimeout(fn: () => void, ms: number): number;
@@ -35,6 +36,10 @@ const enc = new TextEncoder();
 
 // 环形缓冲上限。演示不需要真 agent 那样按字节算，条数足够——一幕戏几十帧。
 export const REPLAY_CAP = 500;
+
+// 演示的预览 token 是个常量：配合演示包里真实存在的 public/preview/demo/**
+// 静态文件，FilePreview 拼出的 /preview/demo/<relpath> 就是一个普通静态请求。
+export const DEMO_PREVIEW_TOKEN = "demo";
 
 interface Frame { sessionId: string; seq: number; data: string }
 
@@ -94,7 +99,9 @@ export class DemoAgent {
         this.sessions = this.sessions.map((s) => (s.name === msg.sessionId ? { ...s, name: msg.name } : s));
         this.broadcastSessions();
         break;
-      // resize / presence 无副作用；其余（rpc、snippets、hints、pair…）在 Task 5 接。
+      case "rpc":        this.onRpc(msg.id, msg.method, msg.params); break;
+      case "listSnippets": this.send({ type: "snippets", items: DEMO_SNIPPETS }); break;
+      // resize / presence 无副作用；其余（hints、pair…）在后续任务接。
       default: break;
     }
   }
@@ -212,6 +219,46 @@ export class DemoAgent {
     for (const f of mine) {
       if (f.seq <= lastSeq) continue;
       this.send({ type: "output", ...f });
+    }
+  }
+
+  /**
+   * rpc 分发。**每一条都必须有 response** —— 没有的话前端会挂到 rpc 超时
+   * （connection.ts 的 10s 死线），表现为面板一直转圈，比明确报错糟得多。
+   */
+  private onRpc(id: string, method: string, params?: unknown): void {
+    const p = (params ?? {}) as Record<string, unknown>;
+    const ok = (result: unknown) => this.send({ type: "response", id, ok: true, result });
+    const fail = (code: string, message: string) => this.send({ type: "response", id, ok: false, error: { code, message } });
+
+    switch (method) {
+      case "fs.tree": {
+        const t = treeAt(String(p.path ?? DEMO_ROOT));
+        return t ? ok(t) : fail("enoent", "no such directory");
+      }
+      case "fs.read": {
+        const path = String(p.path ?? "");
+        const f = readFile(path);
+        return f ? ok({ path, ...f }) : fail("enoent", "no such file");
+      }
+      case "fs.diff":     return ok(DIFF_HUNKS);
+      case "git.status":  return ok(GIT_STATUS);
+      case "git.branches":return ok(GIT_BRANCHES);
+      case "git.log":     return ok(GIT_LOG);
+      case "hints.list":  return ok(DEMO_HINTS);
+      case "preview.mint":return ok({ token: DEMO_PREVIEW_TOKEN });
+      case "agent.info":  return ok({ instanceName: null });
+      case "terminal.pwd":return ok({ pwd: this.cwd.get(String(p.session ?? "")) ?? DEMO_ROOT });
+      case "term.paneInfo": return ok({ currentCommand: "", alternateOn: false, isShell: false });
+      // 演示不做历史快照：回空 + 当前 seq，前端 attach(seq) 之后接实时流。
+      case "term.history":  return ok({ data: "", seq: this.seq });
+      case "term.capture":  return ok({ data: "", atTop: true });
+      // 无副作用的控制类：认了但什么都不做，回 ok 让调用方继续。
+      case "term.redraw":   return ok({});
+      case "update.check":  return ok({ current: __APP_VERSION__, latest: __APP_VERSION__, hasUpdate: false });
+      default:
+        // 写操作、通知接线、OTA 应用、上传下载，以及任何没见过的 method。
+        return fail("demo_unsupported", "not available in the demo sandbox");
     }
   }
 
