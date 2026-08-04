@@ -160,7 +160,10 @@
    */
   .phone {
     /* 一处算出高度，宽度乘比例跟随——两处各写一遍 clamp 迟早漂移。 */
-    --phone-h: clamp(700px, calc(100dvh - 100px), 844px); /* 100px = 留白 40×2 + 边框 10×2 */
+    /* 160px = .stage 留白 40×2 + 边框 10×2 + 60px。那 60px 是实测补的：app 底部
+       的键盘/工具条那一段不在 iframe 的 100% 高度账里（安全区 + 底栏），只按
+       100px 扣的话框底那一截 tab 会被切掉。 */
+    --phone-h: clamp(700px, calc(100dvh - 160px), 844px);
     height: var(--phone-h);
     width: calc(var(--phone-h) * 390 / 844);
     border: 10px solid var(--line);

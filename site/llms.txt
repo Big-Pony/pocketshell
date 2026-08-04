@@ -8,6 +8,7 @@ PocketShell is not a cloud service and not an IDE. It assumes you already have t
 
 - [Home (English)](https://pocketshell.net/): what it is, how resilient sessions and replay work, feature overview, comparison with a mobile SSH client, three-step install
 - [首页（中文）](https://pocketshell.net/zh): the same page in Chinese
+- [Live demo](https://demo.pocketshell.net): the real frontend running against a simulated agent — no install, no host, no signup. Best on a phone; a desktop visit shows the app inside a phone frame. Includes a "try going offline" button that drops the connection for real and replays the missed output on reconnect
 
 ## Documentation
 

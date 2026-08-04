@@ -85,6 +85,8 @@ header {
 .btn-dark:hover { box-shadow: 0 14px 34px rgba(26,27,25,.3); }
 .btn-light { background: var(--paper); border: 1px solid var(--line2); color: var(--ink); }
 .btn-light:hover { border-color: var(--ink); }
+/* 演示站按钮下的一行小注：说明「点进去不用装东西」，降低点击门槛 */
+.cta-note { margin: 14px 0 0; text-align: center; font-size: 13.5px; color: var(--ink2); }
 
 /* 手机样机 */
 .phones { position: relative; display: flex; justify-content: center; gap: 28px; margin-top: 72px; }
