@@ -18,6 +18,9 @@ import { schemeOf, THEME_SWATCHES, type ResolvedTheme } from "./lib/theme";
 
 const HTML = readFileSync(resolve(__dirname, "../index.html"), "utf8");
 const CSS = readFileSync(resolve(__dirname, "./app.css"), "utf8");
+// demo.html 复用了同一段内联防闪烁脚本（CLAUDE.md 第 4 条的手工镜像之一）。
+// 不校验的话，新增主题时展台页会静默闪错色 —— 与 index.html 同类的坑。
+const DEMO_HTML = readFileSync(resolve(__dirname, "../demo.html"), "utf8");
 
 /** 抽出内联脚本里 `var NAME = [...]` 的字符串字面量。 */
 function inlineList(name: string): string[] {
@@ -114,4 +117,42 @@ test("解析器自身有效性自检", () => {
   expect(inlineList("LIGHT")).toContain("light");
   expect(BOOT.size).toBe(THEME_SWATCHES.length);
   expect(BOOT.get("blackout")).toBe("#000000");
+});
+
+// ── demo.html：与 index.html 的内联脚本必须逐字一致 ──
+
+/** 抽出内联防闪烁脚本的主体（从 THEMES 声明到该 IIFE 结束）。 */
+function themeScript(html: string): string {
+  const start = html.indexOf('var THEMES');
+  expect(start, "内联脚本里没找到 var THEMES").toBeGreaterThan(-1);
+  const end = html.indexOf("</script>", start);
+  return html.slice(start, end).replace(/\s+/g, " ").trim();
+}
+
+test("demo.html 的主题防闪烁脚本与 index.html 逐字一致", () => {
+  // 两处漂移是静默的：只在展台页首帧闪那么一下，CI 与人眼走查都抓不到。
+  expect(themeScript(DEMO_HTML)).toBe(themeScript(HTML));
+});
+
+test("demo.html 的 --boot-bg 声明块与 index.html 一致", () => {
+  const bootBlock = (html: string) =>
+    [...html.matchAll(/:root(?:\[data-theme="[a-z]+"\])?\s*\{\s*--boot-bg:\s*[^;]+;/g)].map((m) => m[0].replace(/\s+/g, " ")).join("|");
+  expect(bootBlock(DEMO_HTML)).toBe(bootBlock(HTML));
+});
+
+test("demo.html 有分流脚本，且 index.html 没有", () => {
+  // 两边都有的话，手机落到 /app.html 后会再 replace 到自己、白白多一次导航。
+  expect(DEMO_HTML).toContain("/app.html");
+  expect(DEMO_HTML).toMatch(/pointer:\s*coarse/);
+  expect(HTML).not.toContain("/app.html");
+});
+
+test("demo.html 不引 manifest 与 apple-touch-icon（演示站不做 PWA）", () => {
+  expect(DEMO_HTML).not.toContain("manifest.webmanifest");
+  expect(DEMO_HTML).not.toContain("apple-touch-icon");
+});
+
+test("demo.html 的入口指向 demo-main.ts", () => {
+  expect(DEMO_HTML).toContain("/src/demo-main.ts");
+  expect(DEMO_HTML).not.toContain("/src/main.ts");
 });
