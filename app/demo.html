@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>PocketShell Demo</title>
+    <!-- Default (石墨橙) --bg-deep; the inline script below rewrites it per theme. -->
+    <meta name="theme-color" content="#0c0d0e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+    <!-- Terminal font is render-blocking; start the fetch before the CSS asks for it (Bold stays lazy). -->
+    <link rel="preload" href="/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- iOS does not read the manifest; these keep "Add to Home Screen" decent there too -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PocketShell Demo" />
+    <!--
+      First-paint background per theme. app.css arrives a moment later; without
+      this the first frame is white (or the previous theme's colour) and then
+      snaps. Only --bg-deep is inlined — one declaration per theme, mirroring
+      the same token in app.css. Setting data-theme below is enough to pick the
+      right one, so no colour is hardcoded in the script.
+    -->
+    <style>
+      :root                          { --boot-bg: #0c0d0e; }  /* 石墨橙 */
+      :root[data-theme="light"]      { --boot-bg: #efeee9; }  /* 暖白仪表 */
+      :root[data-theme="osc"]        { --boot-bg: #080b0d; }  /* 示波青 */
+      :root[data-theme="blackout"]   { --boot-bg: #000000; }  /* 纯黑银 */
+      :root[data-theme="prussian"]   { --boot-bg: #080b12; }  /* 普鲁士蓝 */
+      :root[data-theme="vermilion"]  { --boot-bg: #f0ece1; }  /* 朱砂宣纸 */
+      html { background: var(--boot-bg); }
+    </style>
+    <script>
+      // 桌面/手机分流。窄屏或触控设备 → 换成 app 全屏（/app.html 是构建后置
+      // 改名产出的 app 入口）。**只有展台页带这段**：app.html 自身不带，否则
+      // 手机上会 replace 到自己、白白多一次导航。
+      if (innerWidth < 900 || matchMedia("(pointer: coarse)").matches) {
+        location.replace("/app.html");
+      }
+    </script>
+    <script>
+      // Apply the persisted theme + language before first paint (FOUC guard).
+      // Mirrors app/src/lib/theme.ts + app/src/lib/settings.ts — keep the
+      // storage key, the theme list and the light-theme set in sync. (Same
+      // hand-mirroring arrangement as sw.js <-> lib/sw-cache.ts: this file
+      // cannot import modules and still run before paint.)
+      (function () {
+        var THEMES = ["dark", "light", "osc", "blackout", "prussian", "vermilion", "system"];
+        var LIGHT = ["light", "vermilion"];
+        var pref = "dark";
+        var lang = "";
+        try {
+          var s = JSON.parse(localStorage.getItem("ps.settings") || "{}");
+          if (THEMES.indexOf(s.theme) !== -1) pref = s.theme;
+          if (s.language === "zh" || s.language === "en") lang = s.language;
+        } catch (e) {}
+        var resolved = pref === "system"
+          ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+          : pref;
+        document.documentElement.dataset.theme = resolved;
+        document.documentElement.dataset.scheme = LIGHT.indexOf(resolved) !== -1 ? "light" : "dark";
+        // Android Chrome tints the address bar from this; the manifest's
+        // theme_color is only a static install-time snapshot.
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) {
+          meta.setAttribute("content",
+            getComputedStyle(document.documentElement).getPropertyValue("--boot-bg").trim());
+        }
+        if (!lang) lang = (navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      })();
+    </script>
+  </head>
+  <body style="margin:0">
+    <div id="app"></div>
+    <script type="module" src="/src/demo-main.ts"></script>
+  </body>
+</html>

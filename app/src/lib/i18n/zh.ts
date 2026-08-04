@@ -65,6 +65,7 @@ export default {
       pushTitle: "Claude 等待你的输入",
       pushBody: "已改完 src/auth.ts，需要你确认是否提交",
     },
+    showcase: { title: "PocketShell 演示沙盘" },
   },
   settings: {
     theme: {

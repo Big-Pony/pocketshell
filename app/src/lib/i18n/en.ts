@@ -65,6 +65,7 @@ export default {
       pushTitle: "Claude is waiting for you",
       pushBody: "src/auth.ts is edited; confirm whether to commit",
     },
+    showcase: { title: "PocketShell demo sandbox" },
   },
   settings: {
     theme: {
