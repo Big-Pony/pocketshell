@@ -60,6 +60,11 @@ export default {
       noSuchFile: "cat: {name}: No such file or directory",
       notADirectory: "cd: {name}: Not a directory",
     },
+    scene: {
+      prompt: "把 auth.ts 的会话校验补一下，缺 claims 判空",
+      pushTitle: "Claude 等待你的输入",
+      pushBody: "已改完 src/auth.ts，需要你确认是否提交",
+    },
   },
   settings: {
     theme: {

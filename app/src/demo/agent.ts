@@ -121,6 +121,11 @@ export class DemoAgent {
     this.send({ type: "output", ...frame });
   }
 
+  /** 推一条系统通知（第三幕）。ts 用固定值以免测试与截图漂移。 */
+  pushNotification(sessionId: string, title: string, body: string): void {
+    this.send({ type: "notification", sessionId, title, body, ts: T0 });
+  }
+
   private onInput(sessionId: string, dataB64: string): void {
     const text = new TextDecoder().decode(Uint8Array.from(atob(dataB64), (c) => c.charCodeAt(0)));
     const cur = this.lines.get(sessionId) ?? "";

@@ -60,6 +60,11 @@ export default {
       noSuchFile: "cat: {name}: No such file or directory",
       notADirectory: "cd: {name}: Not a directory",
     },
+    scene: {
+      prompt: "Fix the session check in auth.ts — it never guards against a missing claims object",
+      pushTitle: "Claude is waiting for you",
+      pushBody: "src/auth.ts is edited; confirm whether to commit",
+    },
   },
   settings: {
     theme: {
