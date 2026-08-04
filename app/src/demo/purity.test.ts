@@ -5,7 +5,7 @@
 // 故整棵 src/demo/** 不可达）。这个测试是**第二道**——它校验的是源码层面的
 // 引用关系，不需要真的跑一次构建，所以在本地 `bun run test` 里就能挡住。
 import { test, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 const SRC = resolve(__dirname, "..");
@@ -50,4 +50,22 @@ test("demo 目录不 import 任何组件（保持纯 TS，可单测、不拖 UI 
     if (/from\s+["'][^"']*\.svelte["']/.test(text)) offenders.push(file.slice(SRC.length + 1));
   }
   expect(offenders).toEqual([]);
+});
+
+test("预览 fixture 与假树一一对应（缺一个，对应的预览分支就演示不到）", () => {
+  // FilePreview 走真 HTTP 取这些文件（设计文档 4.5）——假树里有、public 下没有，
+  // 表现是预览区一片空白且无报错。
+  const pub = resolve(SRC, "../public/preview/demo");
+  for (const rel of ["docs/logo.png", "docs/report.html"]) {
+    expect(existsSync(join(pub, rel)), `缺 fixture: ${rel}`).toBe(true);
+  }
+});
+
+test("report.html 的 fixture 与 fs.ts 里的源码常量一致", () => {
+  // 两处漂移的话，访客切「预览 / 源码」会看到不同内容。
+  const onDisk = readFileSync(resolve(SRC, "../public/preview/demo/docs/report.html"), "utf8").trim();
+  const inSrc = readFileSync(resolve(SRC, "demo/fs.ts"), "utf8");
+  const m = /const REPORT_HTML = `([\s\S]*?)`;/.exec(inSrc);
+  expect(m, "fs.ts 里没找到 REPORT_HTML").toBeTruthy();
+  expect(m![1].trim()).toBe(onDisk);
 });
