@@ -186,6 +186,9 @@
     const r = await conn.notifyTestWebhook(id);
     testMsg = { ...testMsg, [id]: r.ok ? { ok: true, text: tr("notify.webhook.testOk") } : { ok: false, text: r.error || tr("notify.wireFailed") } };
   }
+
+  // 演示态：这几个入口在沙盘里没有意义（没有真设备、没有真二进制可更新）。
+  const DEMO = import.meta.env.VITE_POCKETSHELL_DEMO === "1";
 </script>
 
 <div class="stg-scroll">
@@ -290,7 +293,7 @@
       <div class="label">{$t('settings.devices.label')}</div>
       <div class="desc">{$t('settings.devices.desc')}</div>
     </div>
-    <button class="btn" onclick={openDevices}>
+    <button class="btn" disabled={DEMO} title={DEMO ? $t('demo.disabled') : undefined} onclick={openDevices}>
       {showDevices ? $t('settings.devices.close') : $t('settings.devices.manage')}
     </button>
   </div>
@@ -454,7 +457,7 @@
       <div class="label">{$t('update.checkNow')}</div>
       <div class="desc">v{currentVersion}</div>
     </div>
-    <button class="btn" disabled={checkingUpdate} onclick={checkNow}>
+    <button class="btn" disabled={DEMO || checkingUpdate} title={DEMO ? $t('demo.disabled') : undefined} onclick={checkNow}>
       {checkingUpdate ? $t('update.checking') : $t('update.checkNow')}
     </button>
   </div>
