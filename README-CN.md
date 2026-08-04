@@ -6,9 +6,14 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/Big-Pony/pocketshell?color=success)](https://github.com/Big-Pony/pocketshell/releases) [![Stars](https://img.shields.io/github/stars/Big-Pony/pocketshell?logo=github)](https://github.com/Big-Pony/pocketshell/stargazers) ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macOS-blue)
 
-[快速开始](#-快速开始) • [功能特性](#-功能特性) • [部署](#-部署) • [交互速查表](./USAGE-CN.md)
+[**在线演示**](https://demo.pocketshell.net) • [快速开始](#-快速开始) • [功能特性](#-功能特性) • [部署](#-部署) • [交互速查表](./USAGE-CN.md)
 
 **Language**: 中文 | [English](./README.md)
+
+### 🎮 [立刻试试 → demo.pocketshell.net](https://demo.pocketshell.net)
+
+真的前端，假的后端 —— 不用装、不用配，手机上体验最佳。
+敲个 `claude`，再点 **「试试断网」**，看断开期间的输出如何在重连后补齐。
 
 </div>
 
@@ -115,6 +120,9 @@ PocketShell 是一个**面向移动端的自托管远程终端**。它把开发�
 > 移动端手势与组合键详解见 **[交互速查表 USAGE-CN.md](./USAGE-CN.md)**。
 
 ## 🚀 快速开始
+
+> 想先看看再装？[**demo.pocketshell.net**](https://demo.pocketshell.net) 跑的是真实前端 + 模拟 agent，
+> 不用注册，也不需要一台常开的机器。
 
 **环境要求**：开发机（跑 Agent 的一端）需要 `tmux` 和 `git`。
 

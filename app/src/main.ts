@@ -18,7 +18,9 @@ export default app;
 // as a new worker and runs install/activate, which is how a release swaps cache
 // buckets. Same version => identical URL => no-op, which is exactly the
 // "no version change, just serve from cache" case.
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+// 演示站不注册 SW：① 访客把「演示沙盘」装到桌面会认错产品；② 版本桶缓存会
+// 让改完的演示推上去、访客仍看旧的。
+if (import.meta.env.PROD && import.meta.env.VITE_POCKETSHELL_DEMO !== "1" && "serviceWorker" in navigator) {
   window.addEventListener("load", () =>
     void navigator.serviceWorker.register(`/sw.js?v=${__APP_VERSION__}`),
   );

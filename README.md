@@ -6,9 +6,14 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/Big-Pony/pocketshell?color=success)](https://github.com/Big-Pony/pocketshell/releases) [![Stars](https://img.shields.io/github/stars/Big-Pony/pocketshell?logo=github)](https://github.com/Big-Pony/pocketshell/stargazers) ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macOS-blue)
 
-[Quick start](#-quick-start) • [Features](#-features) • [Deployment](#-deployment) • [Cheat sheet](./USAGE.md)
+[**Live demo**](https://demo.pocketshell.net) • [Quick start](#-quick-start) • [Features](#-features) • [Deployment](#-deployment) • [Cheat sheet](./USAGE.md)
 
 **Language**: English | [中文](./README-CN.md)
+
+### 🎮 [Try it now → demo.pocketshell.net](https://demo.pocketshell.net)
+
+Real frontend, fake backend — no install, nothing to configure. Best on a phone.
+Type `claude`, hit **"Try going offline"** and watch the output replay on reconnect.
 
 </div>
 
@@ -115,6 +120,9 @@ One binary = the whole product: the frontend is embedded and served on the same 
 > Mobile gestures and key combos are documented in the **[interaction cheat sheet (USAGE.md)](./USAGE.md)**.
 
 ## 🚀 Quick start
+
+> Want to look before you install? [**demo.pocketshell.net**](https://demo.pocketshell.net) runs the real
+> frontend against a simulated agent — no signup, no host required.
 
 **Requirements**: the host running the Agent needs `tmux` and `git`.
 

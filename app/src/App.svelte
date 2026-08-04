@@ -48,6 +48,7 @@
   import { CATALOG } from "./lib/command-catalog";
   import { t } from "svelte-i18n";
   import { applyLanguage, tr } from "./lib/i18n";
+  import { createDemoConnection } from "./demo";
 
   const wsUrl = getAgentAddr() ?? defaultAgentUrl(import.meta.env.DEV, location);
 
@@ -110,9 +111,16 @@
   // Persistent pubkey reminder stays reactive to the locale (uses $t inside
   // $derived); transient notices (resync/error) go through `flash`.
   let flash = $state("");
-  const notice = $derived(!getAgentPubKey() ? $t("app.notice.noPubkey") : flash);
 
-  const conn = new Connection({ url: wsUrl });
+  // 演示构建：整个传输层换成同页面内的假 agent。这个比较是编译期常量，
+  // 真实构建里 vite 会把演示分支连同 src/demo/** 整个剪掉。
+  const DEMO = import.meta.env.VITE_POCKETSHELL_DEMO === "1";
+
+  // 演示态没有（也不需要）Agent 公钥：连接是同页面内的假 agent，本来就通。
+  // 不门控的话演示站首屏永远顶着一条红字，还把访客指向一个已被禁用的入口。
+  const notice = $derived(!DEMO && !getAgentPubKey() ? $t("app.notice.noPubkey") : flash);
+  const demo = DEMO ? createDemoConnection(wsUrl) : null;
+  const conn = demo ? demo.conn : new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");
   let updInfo = $state<CheckResult | null>(null);
   let updOpen = $state(false);
@@ -324,6 +332,36 @@
   const unwatchSystem = watchSystem(() => settings.theme, () => applyTheme(settings.theme));
 
   onMount(() => {
+    let offDemoMsg: (() => void) | null = null;
+    let offDemoInput: (() => void) | null = null;
+    if (demo) {
+      demo.director.armAutoPlay();
+      // 展台页（桌面）经 postMessage 触发同一个入口。同源，故 origin 可校验。
+      const onMsg = (e: MessageEvent) => {
+        if (e.origin !== location.origin) return;
+        const d = e.data as { source?: string; action?: string } | null;
+        if (d?.source === "pocketshell-demo" && d.action === "drop") demo.director.playDropScene();
+      };
+      window.addEventListener("message", onMsg);
+      // 任何输入立即停自动播放（设计文档 2.5）。
+      //
+      // conn.onInput 只覆盖「真的发出了输入」，而 xterm 是 display-only
+      // （Terminal.svelte:439）——桌面访客点一下手机框、用物理键盘敲字，
+      // 一个 sendInput 都不会产生，自动播放于是停不下来：访客明明在操作，
+      // 断线那一幕仍会按点上演，看起来就是「自己一直在断」。
+      // 故再挂一层真实交互信号：指针按下与按键，捕获阶段拿，谁先来算谁。
+      const stop = () => demo.director.notifyUserInput();
+      const offInput = conn.onInput(stop);
+      const opts = { capture: true } as const;
+      window.addEventListener("pointerdown", stop, opts);
+      window.addEventListener("keydown", stop, opts);
+      offDemoMsg = () => {
+        window.removeEventListener("message", onMsg);
+        window.removeEventListener("pointerdown", stop, opts);
+        window.removeEventListener("keydown", stop, opts);
+      };
+      offDemoInput = offInput;
+    }
     const saved = loadTabs();
     if (saved) {
       fileTabs = saved.fileTabs;
@@ -399,6 +437,8 @@
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("visibilitychange", onVisibility);
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
+      offDemoMsg?.();
+      offDemoInput?.();
     };
   });
 
@@ -832,6 +872,14 @@
     </button>
   </div>
 
+  {#if DEMO}
+    <div class="demo-banner">
+      <span class="demo-banner-text">{$t('demo.banner')}</span>
+      <button class="demo-drop" onclick={() => demo?.director.playDropScene()}>{$t('demo.tryOffline')}</button>
+      <a class="demo-cta" href="https://pocketshell.net/#quickstart" target="_blank" rel="noopener">{$t('demo.installCta')}</a>
+    </div>
+  {/if}
+
   <div class="tabs-wrap">
     <TopTabs tabs={topTabsView} activeId={activeTopId} onSelect={selectTop} onNew={newSession} onCloseTab={closeTopTab} onCopyPath={copyTabPath} dirtyIds={fileDirty} />
   </div>
@@ -971,6 +1019,36 @@
     padding: 0 13px;
     background: transparent;
     border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .demo-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 13px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    font-size: 11px;
+    flex: 0 0 auto;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .demo-banner-text { color: var(--dim); }
+  .demo-drop {
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: transparent;
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-size: 11px;
+    line-height: 1.4;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .demo-cta {
+    color: var(--accent);
+    text-decoration: none;
+    margin-left: auto;
     flex: 0 0 auto;
   }
   .brand {
