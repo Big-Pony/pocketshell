@@ -141,10 +141,14 @@ export class DemoAgent {
    * 语义下发 resync，让前端知道「这段补不全」而不是假装完整。
    */
   private replayFrom(sessionId: string, lastSeq: number): void {
-    const oldest = this.replay.length ? this.replay[0].seq : lastSeq + 1;
+    // `this.replay` 是跨会话共享的单一环形缓冲，replay[0] 可能属于别的会话——
+    // 「最老一帧」必须限定在该 sessionId 自己的帧里，否则别的会话把缓冲挤爆时
+    // 会误伤这个会话（明明没漏任何帧也被判定为有缺口而下发 resync）。
+    const mine = this.replay.filter((f) => f.sessionId === sessionId);
+    const oldest = mine.length ? mine[0].seq : lastSeq + 1; // 该会话缓冲里没有帧：没有缺口可报
     if (lastSeq + 1 < oldest) this.send({ type: "resync", sessionId, from: oldest });
-    for (const f of this.replay) {
-      if (f.sessionId !== sessionId || f.seq <= lastSeq) continue;
+    for (const f of mine) {
+      if (f.seq <= lastSeq) continue;
       this.send({ type: "output", ...f });
     }
   }

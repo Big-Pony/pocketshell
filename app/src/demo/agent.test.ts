@@ -203,3 +203,36 @@ test("attach 不带 lastSeq 时不补齐（首次挂载不该重放历史）", (
   h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
   expect(after.filter((m) => m.type === "output")).toEqual([]);
 });
+
+test("修复：resync 判定按该会话自己的最老帧，不被别的会话挤爆缓冲误伤", () => {
+  // 会话 A 早期发一帧后转静默；会话 B 狂产 REPLAY_CAP 帧把共享缓冲挤满。
+  // A 用 lastSeq=1（对 A 而言一帧没漏）重连时不该被 B 的帧牵连误判缺口。
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" }); // A
+  h.agent.handle({ type: "attach", sessionId: "kimi-docs" });       // B
+  h.agent.emitOutput("claude-refactor", "a-1"); // seq 1，A 唯一的一帧
+  for (let i = 0; i < REPLAY_CAP; i++) h.agent.emitOutput("kimi-docs", `b${i}`); // 挤满缓冲，A 的帧被挤出
+
+  h.agent.detachTransport();
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 1 });
+
+  expect(after.filter((m) => m.type === "resync")).toEqual([]);
+  expect(after.filter((m) => m.type === "output")).toEqual([]);
+});
+
+test("题眼验证：未 attach 时产出的帧仍先入缓冲，attach(lastSeq) 才能补齐——钉死顺序", () => {
+  // 变异测试发现：把 emitOutput 里的 attached 判断挪到 replay.push 之前，
+  // 之前的测试全部照样通过（因为断线测试里 attached 全程为 true）。这条
+  // 测试用「从未 attach 就先产出」把顺序真正钉死：写反了这条必挂。
+  const h = harness();
+  h.agent.emitOutput("claude-refactor", "silent-1");
+  h.agent.emitOutput("claude-refactor", "silent-2");
+  expect(h.only("output")).toEqual([]); // 确实没投递（未 attach）
+
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 0 });
+  const replayed = h.only("output");
+  expect(replayed.map((o) => o.seq)).toEqual([1, 2]);
+  expect(replayed.map((o) => decode(o.data))).toEqual(["silent-1", "silent-2"]);
+});
