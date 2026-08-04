@@ -31,6 +31,11 @@ export const DEMO_SESSIONS: readonly SessionMeta[] = [
 const PROMPT = "\r\n\x1b[38;5;208m~/demo\x1b[0m $";
 const enc = new TextEncoder();
 
+// 环形缓冲上限。演示不需要真 agent 那样按字节算，条数足够——一幕戏几十帧。
+export const REPLAY_CAP = 500;
+
+interface Frame { sessionId: string; seq: number; data: string }
+
 export class DemoAgent {
   private push: ((msg: ServerMsg) => void) | null;
   private readonly sched: DemoScheduler;
@@ -40,6 +45,8 @@ export class DemoAgent {
   private seq = 0;
   /** 每会话的当前输入行，用于回车时解析命令。 */
   private lines = new Map<string, string>();
+  /** 断线补齐用的环形缓冲。emitOutput 无论是否在线都入缓冲。 */
+  private replay: Frame[] = [];
 
   constructor(opts: DemoAgentOpts) {
     this.push = opts.push;
@@ -61,7 +68,10 @@ export class DemoAgent {
     switch (msg.type) {
       case "ping":         this.send({ type: "pong" }); break;
       case "listSessions": this.broadcastSessions(); break;
-      case "attach":       this.attached.add(msg.sessionId); break;
+      case "attach":
+        this.attached.add(msg.sessionId);
+        if (msg.lastSeq !== undefined) this.replayFrom(msg.sessionId, msg.lastSeq);
+        break;
       case "detach":       this.attached.delete(msg.sessionId); break;
       case "input":        this.onInput(msg.sessionId, msg.data); break;
       case "newSession":
@@ -85,11 +95,19 @@ export class DemoAgent {
     }
   }
 
-  /** 推一段输出。文本按 UTF-8 → base64，与真 agent 的线格式一致。 */
+  /**
+   * 推一段输出。文本按 UTF-8 → base64，与真 agent 的线格式一致。
+   *
+   * **先入缓冲、后判投递**：断线期间 push 为 null，但帧必须已经在缓冲里，
+   * 否则重连时补不出来——这正是整个演示的题眼所在。
+   */
   emitOutput(sessionId: string, text: string): void {
     const seq = ++this.seq;
+    const frame: Frame = { sessionId, seq, data: toB64(enc.encode(text)) };
+    this.replay.push(frame);
+    if (this.replay.length > REPLAY_CAP) this.replay.shift();
     if (!this.attached.has(sessionId)) return; // 未订阅不投递（对齐真 agent）
-    this.send({ type: "output", sessionId, seq, data: toB64(enc.encode(text)) });
+    this.send({ type: "output", ...frame });
   }
 
   private onInput(sessionId: string, dataB64: string): void {
@@ -114,6 +132,21 @@ export class DemoAgent {
   protected runCommand(sessionId: string, line: string): void {
     if (line === "ls") this.emitOutput(sessionId, "README.md  src  package.json");
     this.emitOutput(sessionId, PROMPT);
+  }
+
+  /**
+   * 断线补齐：吐出该会话所有 seq > lastSeq 的缓冲帧。
+   *
+   * 若 lastSeq 早于缓冲里最老的一帧，说明中间有内容已被挤掉——按真 agent 的
+   * 语义下发 resync，让前端知道「这段补不全」而不是假装完整。
+   */
+  private replayFrom(sessionId: string, lastSeq: number): void {
+    const oldest = this.replay.length ? this.replay[0].seq : lastSeq + 1;
+    if (lastSeq + 1 < oldest) this.send({ type: "resync", sessionId, from: oldest });
+    for (const f of this.replay) {
+      if (f.sessionId !== sessionId || f.seq <= lastSeq) continue;
+      this.send({ type: "output", ...f });
+    }
   }
 
   private broadcastSessions(): void {

@@ -1,6 +1,6 @@
 // app/src/demo/agent.test.ts
 import { test, expect } from "vitest";
-import { DemoAgent, DEMO_SESSIONS } from "./agent";
+import { DemoAgent, DEMO_SESSIONS, REPLAY_CAP } from "./agent";
 import type { ServerMsg } from "../lib/net/protocol";
 
 /** 收集 agent 推出的所有帧，便于断言。 */
@@ -118,4 +118,88 @@ test("renameSession 改名后 sessions 反映新名字", () => {
   const last = h.only("sessions").at(-1)!;
   expect(last.sessions.map((s) => s.name)).toContain("kimi-notes");
   expect(last.sessions.map((s) => s.name)).not.toContain("kimi-docs");
+});
+
+test("题眼：断线期间继续产出，重连后完整补齐、不重不漏", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+
+  h.agent.emitOutput("claude-refactor", "before-1");
+  h.agent.emitOutput("claude-refactor", "before-2");
+  const seenBeforeDrop = h.only("output").at(-1)!.seq;
+  expect(seenBeforeDrop).toBe(2);
+
+  // —— 断线：传输层没了，但 agent 内部照跑 ——
+  h.agent.detachTransport();
+  h.agent.emitOutput("claude-refactor", "during-1");
+  h.agent.emitOutput("claude-refactor", "during-2");
+  h.agent.emitOutput("claude-refactor", "during-3");
+
+  // 断线期间一帧都不该推出去
+  expect(h.only("output").length).toBe(2);
+
+  // —— 重连：新 socket + attach(lastSeq) ——
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: seenBeforeDrop });
+
+  const replayed = after.filter((m) => m.type === "output") as Extract<ServerMsg, { type: "output" }>[];
+  expect(replayed.map((o) => o.seq)).toEqual([3, 4, 5]);            // 不重不漏
+  expect(replayed.map((o) => decode(o.data))).toEqual(["during-1", "during-2", "during-3"]);
+});
+
+test("补齐是幂等的：同一个 lastSeq 再 attach 一次不会重放两遍", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.emitOutput("claude-refactor", "a");
+  h.agent.detachTransport();
+  h.agent.emitOutput("claude-refactor", "b");
+
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 1 });
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 2 });
+
+  const seqs = (after.filter((m) => m.type === "output") as Extract<ServerMsg, { type: "output" }>[]).map((o) => o.seq);
+  expect(seqs).toEqual([2]);
+});
+
+test("补齐只吐该会话的帧，不串会话", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.handle({ type: "attach", sessionId: "kimi-docs" });
+  h.agent.detachTransport();
+  h.agent.emitOutput("claude-refactor", "mine");
+  h.agent.emitOutput("kimi-docs", "theirs");
+
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 0 });
+
+  const outs = after.filter((m) => m.type === "output") as Extract<ServerMsg, { type: "output" }>[];
+  expect(outs.map((o) => decode(o.data))).toEqual(["mine"]);
+});
+
+test("lastSeq 早于缓冲最老一帧时下发 resync（对齐真 agent 的 gap 语义）", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.detachTransport();
+  // 塞满并溢出缓冲
+  for (let i = 0; i < REPLAY_CAP + 5; i++) h.agent.emitOutput("claude-refactor", `x${i}`);
+
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 0 });
+
+  expect(after.some((m) => m.type === "resync")).toBe(true);
+});
+
+test("attach 不带 lastSeq 时不补齐（首次挂载不该重放历史）", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.emitOutput("claude-refactor", "a");
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  expect(after.filter((m) => m.type === "output")).toEqual([]);
 });
