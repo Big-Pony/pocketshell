@@ -141,10 +141,23 @@ test("demo.html 的 --boot-bg 声明块与 index.html 一致", () => {
 });
 
 test("demo.html 有分流脚本，且 index.html 没有", () => {
-  // 两边都有的话，手机落到 /app.html 后会再 replace 到自己、白白多一次导航。
-  expect(DEMO_HTML).toContain("/app.html");
+  // 两边都有的话，手机落到 app 入口后会再 replace 到自己、白白多一次导航。
+  expect(DEMO_HTML).toContain('location.replace("/app")');
   expect(DEMO_HTML).toMatch(/pointer:\s*coarse/);
-  expect(HTML).not.toContain("/app.html");
+  expect(HTML).not.toContain("location.replace");
+});
+
+test("分流与 iframe 都指向无扩展名的 /app，不是 /app.html", () => {
+  // Cloudflare Pages 会剥掉 .html 扩展名：请求 /app.html 得到 308 → /app。
+  // 功能上能跑通，但每个访客（尤其手机——那是主要受众）白付一次跳转往返。
+  // 线上实测得来的，本地 `serve dist` 不会剥扩展名，所以复现不出。
+  // 判据只看**代码**里的引用，不看注释——注释里正需要提到 /app.html 才能
+  // 解释清楚为什么不用它（`dist/app.html` 确实是改名产物的真实文件名）。
+  const showcase = readFileSync(resolve(__dirname, "./components/Showcase.svelte"), "utf8");
+  expect(DEMO_HTML).toContain('location.replace("/app")');
+  expect(DEMO_HTML).not.toContain('location.replace("/app.html")');
+  expect(showcase).toContain('src="/app"');
+  expect(showcase).not.toContain('"/app.html"');
 });
 
 test("demo.html 不引 manifest 与 apple-touch-icon（演示站不做 PWA）", () => {

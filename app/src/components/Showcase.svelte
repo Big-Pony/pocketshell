@@ -50,13 +50,13 @@
     <div class="cta">
       <a class="btn primary" href="https://pocketshell.net/#quickstart" target="_blank" rel="noopener">{$t("demo.showcase.install")}</a>
       <a class="btn" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">{$t("demo.showcase.github")}</a>
-      <a class="btn ghost" href="/app.html">{$t("demo.showcase.openFull")}</a>
+      <a class="btn ghost" href="/app">{$t("demo.showcase.openFull")}</a>
     </div>
   </section>
 
   <section class="device">
     <div class="phone">
-      <iframe bind:this={frame} src="/app.html" title={$t("demo.showcase.frameLabel")}></iframe>
+      <iframe bind:this={frame} src="/app" title={$t("demo.showcase.frameLabel")}></iframe>
     </div>
   </section>
 </main>
