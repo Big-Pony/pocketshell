@@ -58,18 +58,35 @@ test("DemoSocket：重连延迟 2500ms 才 open —— 让「重连中」看得�
   expect(opened).toHaveBeenCalledTimes(1);
 });
 
-test("DemoSocket：收到 HELLO 立刻回 HELLO_ACK（演完握手）", () => {
+test("DemoSocket：收到 HELLO 回 HELLO_ACK（演完握手）", async () => {
   const { sched } = makeSched();
   const s = new DemoSocket({ onFrame: () => {}, isReconnect: false, scheduler: sched });
   const got: ArrayBuffer[] = [];
   s.onmessage = (ev) => got.push(ev.data);
   s.start();
   s.send(HELLO);
+  await Promise.resolve();
   expect(got.length).toBe(1);
   expect(new Uint8Array(got[0])).toEqual(HELLO_ACK);
 });
 
+test("DemoSocket：回帧不在 send() 的调用栈里交付（真 WebSocket 也做不到）", async () => {
+  // 同步交付会让 Connection 的握手超时定时器变成孤儿：established 的
+  // clearHsTimer() 跑在 hsTimer 装上之前，那个 5 秒 kill 定时器就没人清了。
+  // 线上表现是演示站每 ~8 秒自己断一次。
+  const { sched } = makeSched();
+  const s = new DemoSocket({ onFrame: () => {}, isReconnect: false, scheduler: sched });
+  const got: ArrayBuffer[] = [];
+  s.onmessage = (ev) => got.push(ev.data);
+  s.start();
+  s.send(HELLO);
+  expect(got, "HELLO_ACK 同步就交付了").toEqual([]);
+  await Promise.resolve();
+  expect(got.length).toBe(1);
+});
+
 test("DemoSocket：握手后 send 的字节被解析成 JSON 交给 onFrame", () => {
+  // onFrame 是上行（Connection → agent），仍是同步的，不受回帧异步化影响。
   const { sched } = makeSched();
   const frames: unknown[] = [];
   const s = new DemoSocket({ onFrame: (m) => frames.push(m), isReconnect: false, scheduler: sched });
@@ -80,19 +97,21 @@ test("DemoSocket：握手后 send 的字节被解析成 JSON 交给 onFrame", ()
   expect(frames).toEqual([{ type: "listSessions" }]);
 });
 
-test("DemoSocket：push 把对象编码成 UTF-8 JSON 经 onmessage 送出", () => {
+test("DemoSocket：push 把对象编码成 UTF-8 JSON 经 onmessage 送出", async () => {
   const { sched } = makeSched();
   const s = new DemoSocket({ onFrame: () => {}, isReconnect: false, scheduler: sched });
   const got: ArrayBuffer[] = [];
   s.onmessage = (ev) => got.push(ev.data);
   s.start();
   s.send(HELLO);
+  await Promise.resolve();
   got.length = 0;
   s.push({ type: "pong" });
+  await Promise.resolve();
   expect(new TextDecoder().decode(new Uint8Array(got[0]))).toBe('{"type":"pong"}');
 });
 
-test("DemoSocket：close 后 push 不再送出（防止已关闭的 socket 继续喂数据）", () => {
+test("DemoSocket：close 后 push 不再送出（防止已关闭的 socket 继续喂数据）", async () => {
   const { sched } = makeSched();
   const s = new DemoSocket({ onFrame: () => {}, isReconnect: false, scheduler: sched });
   const got: ArrayBuffer[] = [];
@@ -101,10 +120,28 @@ test("DemoSocket：close 后 push 不再送出（防止已关闭的 socket 继�
   s.onclose = closed;
   s.start();
   s.send(HELLO);
+  await Promise.resolve();
   got.length = 0;
   s.close();
   expect(closed).toHaveBeenCalledTimes(1);
   s.push({ type: "pong" });
+  await Promise.resolve();
+  expect(got).toEqual([]);
+});
+
+test("DemoSocket：已入队的帧在 close 之后不再交付", async () => {
+  // 回帧异步化之后多了个窗口：帧已排队、还没交付时 socket 被关掉。
+  const { sched } = makeSched();
+  const s = new DemoSocket({ onFrame: () => {}, isReconnect: false, scheduler: sched });
+  const got: ArrayBuffer[] = [];
+  s.onmessage = (ev) => got.push(ev.data);
+  s.start();
+  s.send(HELLO);
+  await Promise.resolve();
+  got.length = 0;
+  s.push({ type: "pong" }); // 入队
+  s.close();                // 同一个同步段里关掉
+  await Promise.resolve();
   expect(got).toEqual([]);
 });
 

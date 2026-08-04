@@ -99,6 +99,17 @@ test("playDropScene 可重复调用：第二次不会与第一次的定时器打
   expect(s.drop.mock.calls.length).toBeGreaterThanOrEqual(1);
 });
 
+test("停演之后 playDropScene 仍能开演（按钮自己的 pointerdown 会先停一次）", () => {
+  // 「试试断网」按钮在 app 内部，点它必然先触发 window 上的 pointerdown →
+  // notifyUserInput()。若 playDropScene 不重置 stopped，按钮就会变成死的。
+  const s = stage();
+  s.director.armAutoPlay();
+  s.director.notifyUserInput();  // 按钮按下
+  s.director.playDropScene();    // 紧接着的 click
+  s.tick(3);
+  expect(s.drop).toHaveBeenCalledTimes(1);
+});
+
 test("notifyUserInput 在演出中途也能叫停后续幕次", () => {
   const s = stage();
   s.director.armAutoPlay();

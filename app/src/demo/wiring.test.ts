@@ -31,6 +31,15 @@ test("横幅文案没有硬编码中文（必须走 $t）", () => {
   expect(template).not.toMatch(/演示沙盘|demo sandbox/i);
 });
 
+test("停自动播放不只依赖 conn.onInput（xterm 是 display-only，物理键盘不产生 sendInput）", () => {
+  // 回归 2026-08-04：只挂 conn.onInput 时，桌面访客点手机框+敲键盘不会产生
+  // 任何 sendInput，自动播放停不下来，断线那一幕照演——表现为「一直在断」。
+  const block = APP.slice(APP.indexOf("armAutoPlay"), APP.indexOf("const saved = loadTabs()"));
+  expect(block, "缺指针交互兜底").toContain("pointerdown");
+  expect(block, "缺按键交互兜底").toContain("keydown");
+  expect(block).toContain("notifyUserInput");
+});
+
 test("演示态禁用设备管理与检查更新（避免访客点到必然报错的入口）", () => {
   const panel = readFileSync(resolve(__dirname, "../components/SettingsPanel.svelte"), "utf8");
   expect(panel).toMatch(/VITE_POCKETSHELL_DEMO\s*===\s*["']1["']/);

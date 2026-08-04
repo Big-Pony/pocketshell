@@ -70,11 +70,30 @@ export class DemoSocket implements WebSocketLike {
     this.onclose?.();
   }
 
+  /**
+   * 送一帧给 Connection。**必须异步**——真 WebSocket 绝不可能在 send() 的调用
+   * 栈里就把回帧交出来，Connection 是按这个前提写的：
+   *
+   *   socket.onopen = () => {
+   *     if (m1) socket.send(m1);                   // 我们同步回了 HELLO_ACK
+   *     this.hsTimer = setTimeout(…, 5000);        // 握手超时定时器在这之后才装
+   *   }
+   *
+   * 同步回帧会让 established 的 clearHsTimer() 跑在 hsTimer 还是 undefined 的
+   * 时候，随后装上的那个 5 秒定时器就没人清了——到点 ws.close()，掉线、重连、
+   * 再来一遍，周期约 8 秒（5s 超时 + ~0.5s 退避 + 2.5s 延迟 open）。表现是演示
+   * 站每 8 秒自己断一次，且与访客有没有操作无关。
+   *
+   * 微任务足够：它在 onopen 整个同步段跑完之后才执行，定时器那时已经装好。
+   */
   private emit(bytes: Uint8Array): void {
     // 复制到独立的 ArrayBuffer：Connection 会读 ev.data 的 byteLength 做流量
     // 记账（connection.ts:379），共享底层 buffer 会算错。
     const buf = new ArrayBuffer(bytes.byteLength);
     new Uint8Array(buf).set(bytes);
-    this.onmessage?.({ data: buf });
+    queueMicrotask(() => {
+      if (this.closed) return; // 排队期间被关掉：已关的 socket 不该再喂数据
+      this.onmessage?.({ data: buf });
+    });
   }
 }

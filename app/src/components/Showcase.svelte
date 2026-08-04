@@ -146,20 +146,37 @@
   }
   .btn.ghost { color: var(--dim); }
 
+  /*
+   * 手机框跟着视口高度伸缩，宽度由 390:844 的比例算出来。
+   *
+   * 之前是写死的 390×844：加上 10px 边框和 .stage 的 40px 上下留白，一共要
+   * 944px，而常见笔电视口只有 ~800-900px——框底被切掉，页面还多出竖向滚动。
+   * 原来的 @media 只看**宽度**，所以宽屏矮窗（笔电全屏、浏览器带书签栏）根本
+   * 不触发。
+   *
+   *   上限 844px：再高也不放大，免得在大屏上变成一台失真的巨型手机
+   *   下限 700px：低于这个高度 app 自身的布局就挤了，宁可让页面滚动
+   *   之间：100dvh 减掉边框与留白，能给多少给多少
+   */
   .phone {
-    width: 390px;
-    height: 844px;
+    /* 一处算出高度，宽度乘比例跟随——两处各写一遍 clamp 迟早漂移。 */
+    --phone-h: clamp(700px, calc(100dvh - 100px), 844px); /* 100px = 留白 40×2 + 边框 10×2 */
+    height: var(--phone-h);
+    width: calc(var(--phone-h) * 390 / 844);
     border: 10px solid var(--line);
     border-radius: 38px;
     overflow: hidden;
     background: var(--bg-deep);
     box-shadow: var(--pop-shadow);
+    box-sizing: content-box;          /* 高度是内容区（iframe）的，边框另算 */
+    flex: none;                       /* 竖排时别被 flex 压扁 */
   }
   .phone iframe { width: 100%; height: 100%; border: 0; display: block; }
 
-  /* 窄一点的桌面（或缩放）下改成竖排，手机框整体缩小，不出现横向滚动。 */
+  /* 窄桌面（或缩放）改竖排。高度已由上面的 clamp 管住，这里只管排列方向；
+     不再用 transform: scale + 负 margin 那套魔法数字——它撑出的空白高度和视觉
+     高度对不上，正是竖排下多出一截滚动的原因。 */
   @media (max-width: 1100px) {
     .stage { flex-direction: column; gap: 32px; }
-    .phone { transform: scale(0.78); transform-origin: top center; margin-bottom: -180px; }
   }
 </style>

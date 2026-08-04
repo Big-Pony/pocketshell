@@ -344,8 +344,22 @@
       };
       window.addEventListener("message", onMsg);
       // 任何输入立即停自动播放（设计文档 2.5）。
-      const offInput = conn.onInput(() => demo.director.notifyUserInput());
-      offDemoMsg = () => window.removeEventListener("message", onMsg);
+      //
+      // conn.onInput 只覆盖「真的发出了输入」，而 xterm 是 display-only
+      // （Terminal.svelte:439）——桌面访客点一下手机框、用物理键盘敲字，
+      // 一个 sendInput 都不会产生，自动播放于是停不下来：访客明明在操作，
+      // 断线那一幕仍会按点上演，看起来就是「自己一直在断」。
+      // 故再挂一层真实交互信号：指针按下与按键，捕获阶段拿，谁先来算谁。
+      const stop = () => demo.director.notifyUserInput();
+      const offInput = conn.onInput(stop);
+      const opts = { capture: true } as const;
+      window.addEventListener("pointerdown", stop, opts);
+      window.addEventListener("keydown", stop, opts);
+      offDemoMsg = () => {
+        window.removeEventListener("message", onMsg);
+        window.removeEventListener("pointerdown", stop, opts);
+        window.removeEventListener("keydown", stop, opts);
+      };
       offDemoInput = offInput;
     }
     const saved = loadTabs();
