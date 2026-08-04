@@ -7,6 +7,8 @@
 // 一次性吐出缺口（见 Task 3 的 replay 缓冲）。
 import type { ClientMsg, ServerMsg, SessionMeta } from "../lib/net/protocol";
 import { toB64 } from "../lib/bytes";
+import { DEMO_ROOT, resolvePath, listDir, readFile, lookup } from "./fs";
+import { tr } from "../lib/i18n";
 
 export interface DemoScheduler {
   setTimeout(fn: () => void, ms: number): number;
@@ -47,6 +49,8 @@ export class DemoAgent {
   private lines = new Map<string, string>();
   /** 断线补齐用的环形缓冲。emitOutput 无论是否在线都入缓冲。 */
   private replay: Frame[] = [];
+  /** 每会话的 cwd。cd 改它，pwd/ls/cat 读它。 */
+  private cwd = new Map<string, string>();
 
   constructor(opts: DemoAgentOpts) {
     this.push = opts.push;
@@ -128,10 +132,68 @@ export class DemoAgent {
     this.emitOutput(sessionId, text); // 本地回显
   }
 
-  /** Task 4 会把它换成真正的分级分发；此刻先保证「有输出且收在提示符」。 */
+  /**
+   * 分级响应（设计文档 2.4）：
+   *   真实模拟 —— 由假 FS 真实计算
+   *   脚本化   —— 播预录分段输出，带打字机节奏
+   *   兜底     —— 友好提示，鼓励乱试
+   */
   protected runCommand(sessionId: string, line: string): void {
-    if (line === "ls") this.emitOutput(sessionId, "README.md  src  package.json");
-    this.emitOutput(sessionId, PROMPT);
+    const cwd = this.cwd.get(sessionId) ?? DEMO_ROOT;
+    const [cmd, ...args] = line.split(/\s+/).filter(Boolean);
+    const arg = args.join(" ");
+
+    if (!cmd) { this.emitOutput(sessionId, PROMPT); return; }
+
+    switch (cmd) {
+      case "pwd":
+        this.emitOutput(sessionId, cwd + PROMPT);
+        return;
+      case "clear":
+        this.emitOutput(sessionId, "\x1b[2J\x1b[H" + PROMPT.replace(/^\r\n/, ""));
+        return;
+      case "echo":
+        this.emitOutput(sessionId, arg + PROMPT);
+        return;
+      case "cd": {
+        const target = resolvePath(cwd, arg || DEMO_ROOT);
+        const node = lookup(target);
+        if (!node) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { name: arg }) + PROMPT); return; }
+        if (node.type !== "dir") { this.emitOutput(sessionId, tr("demo.shell.notADirectory", { name: arg }) + PROMPT); return; }
+        this.cwd.set(sessionId, target);
+        this.emitOutput(sessionId, PROMPT);
+        return;
+      }
+      case "ls": {
+        const entries = listDir(resolvePath(cwd, arg));
+        if (!entries) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { name: arg || "." }) + PROMPT); return; }
+        // 目录加尾斜杠，与真 shell 的 ls -F 观感一致
+        const names = entries.map((e) => (e.node.type === "dir" ? `${e.name}/` : e.name));
+        this.emitOutput(sessionId, names.join("  ") + PROMPT);
+        return;
+      }
+      case "cat": {
+        const f = readFile(resolvePath(cwd, arg));
+        if (!f) { this.emitOutput(sessionId, tr("demo.shell.noSuchFile", { name: arg }) + PROMPT); return; }
+        this.emitOutput(sessionId, f.content + PROMPT);
+        return;
+      }
+      case "help":
+        this.emitOutput(sessionId, "ls  cd  pwd  cat  echo  clear  claude  git  npm" + PROMPT);
+        return;
+    }
+
+    const script = SCRIPTED[line] ?? SCRIPTED[cmd];
+    if (script) { this.playScript(sessionId, script); return; }
+
+    this.emitOutput(sessionId, tr("demo.shell.fallback") + PROMPT);
+  }
+
+  /** 分段播放：每段之间隔一拍，观感是「在跑」而不是「贴了一坨」。 */
+  private playScript(sessionId: string, chunks: readonly string[], i = 0): void {
+    if (i >= chunks.length) { this.emitOutput(sessionId, PROMPT); return; }
+    this.emitOutput(sessionId, chunks[i]);
+    this.sched.setTimeout(() => this.playScript(sessionId, chunks, i + 1), 420);
   }
 
   /**
@@ -161,3 +223,34 @@ export class DemoAgent {
     this.push?.(msg);
   }
 }
+
+// 脚本化档的预录输出。**刻意不走 i18n**：这是模拟的 CLI 输出，真实工具本来
+// 就只有英文，翻译反而失真。兜底提示那种「我们对访客说的话」才走 i18n。
+const SCRIPTED: Record<string, readonly string[]> = {
+  claude: [
+    "\x1b[38;5;208m⏺\x1b[0m Analyzing the repository…",
+    "  Read src/auth.ts (18 lines)",
+    "  Read src/crypto.ts (21 lines)",
+    "\x1b[38;5;208m⏺\x1b[0m The session check looks fine, but verify() compares MACs\n  of different lengths before timingSafeEqual — that throws.",
+    "\x1b[38;5;208m⏺\x1b[0m Editing src/auth.ts …",
+  ],
+  "git status": [
+    "On branch main",
+    "Changes not staged for commit:",
+    "  \x1b[31mmodified:   src/auth.ts\x1b[0m",
+    "Untracked files:",
+    "  \x1b[31mtests/auth.test.ts\x1b[0m",
+  ],
+  "git diff": [
+    "\x1b[1mdiff --git a/src/auth.ts b/src/auth.ts\x1b[0m",
+    "@@ -8,6 +8,7 @@ export function checkSession(token: string) {",
+    "\x1b[32m+  if (!claims) return null;\x1b[0m",
+    "   if (claims.expiresAt < Date.now()) return null;",
+  ],
+  "npm test": [
+    "> demo-project@0.3.1 test",
+    "> vitest run",
+    " \x1b[32m✓\x1b[0m tests/auth.test.ts (1 test) 12ms",
+    "\x1b[32m Test Files  1 passed (1)\x1b[0m",
+  ],
+};

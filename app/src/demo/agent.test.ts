@@ -236,3 +236,73 @@ test("题眼验证：未 attach 时产出的帧仍先入缓冲，attach(lastSeq)
   expect(replayed.map((o) => o.seq)).toEqual([1, 2]);
   expect(replayed.map((o) => decode(o.data))).toEqual(["silent-1", "silent-2"]);
 });
+
+test("真实模拟档：pwd / cd / ls 由假 FS 真实计算", () => {
+  const h = harness();
+  const run = (line: string) => {
+    for (const ch of line + "\r") h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa(ch) });
+    h.tick();
+  };
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  run("cd src");
+  h.out.length = 0;
+  run("pwd");
+  expect(h.only("output").map((o) => decode(o.data)).join("")).toContain("/home/demo/project/src");
+  h.out.length = 0;
+  run("ls");
+  const listed = h.only("output").map((o) => decode(o.data)).join("");
+  expect(listed).toContain("auth.ts");
+  expect(listed).toContain("crypto.ts");
+});
+
+test("真实模拟档：cat 读到真内容，读不存在的文件报错但不崩", () => {
+  const h = harness();
+  const run = (line: string) => {
+    for (const ch of line + "\r") h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa(ch) });
+    h.tick();
+  };
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  run("cat README.md");
+  expect(h.only("output").map((o) => decode(o.data)).join("")).toContain("demo-project");
+  h.out.length = 0;
+  run("cat nope.txt");
+  expect(h.only("output").map((o) => decode(o.data)).join("")).toContain("No such file");
+});
+
+test("脚本化档：claude 分段流出（不是一坨吐完）", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  for (const ch of "claude\r") h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa(ch) });
+  h.tick();
+  const first = h.only("output").length;
+  h.tick();
+  expect(h.only("output").length).toBeGreaterThan(first); // 后续分段还在陆续到达
+});
+
+test("兜底档：任意乱输入回友好提示，且提示是 i18n 译出的中文（不是 key）", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  for (const ch of "sudo rm -rf /\r") h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa(ch) });
+  h.tick();
+  const text = h.only("output").map((o) => decode(o.data)).join("");
+  expect(text).not.toContain("demo.shell.fallback"); // 漏翻会把 key 直接铺给用户
+  expect(text).toContain("沙盘");                     // vitest-setup.ts 固定 zh
+});
+
+test("clear 发送清屏控制序列", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  for (const ch of "clear\r") h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa(ch) });
+  h.tick();
+  expect(h.only("output").map((o) => decode(o.data)).join("")).toContain("\x1b[2J");
+});
+
+test("空回车只给提示符，不报错", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.handle({ type: "input", sessionId: "claude-refactor", data: btoa("\r") });
+  h.tick();
+  const text = h.only("output").map((o) => decode(o.data)).join("");
+  expect(text).not.toContain("No such file");
+  expect(text.trimEnd().endsWith("$")).toBe(true);
+});

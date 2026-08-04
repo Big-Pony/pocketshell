@@ -54,6 +54,13 @@ export default {
       pwdFailed: "Unable to get the session's working directory",
     },
   },
+  demo: {
+    shell: {
+      fallback: "This is a demo sandbox — type anything. On a real machine this command would just run on your own box.",
+      noSuchFile: "cat: {name}: No such file or directory",
+      notADirectory: "cd: {name}: Not a directory",
+    },
+  },
   settings: {
     theme: {
       label: "Appearance",

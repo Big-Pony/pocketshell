@@ -54,6 +54,13 @@ export default {
       pwdFailed: "无法获取该会话的工作目录",
     },
   },
+  demo: {
+    shell: {
+      fallback: "这是演示沙盘，随便敲——真实环境里这条命令会直接跑在你自己的机器上。",
+      noSuchFile: "cat: {name}: No such file or directory",
+      notADirectory: "cd: {name}: Not a directory",
+    },
+  },
   settings: {
     theme: {
       label: "界面风格",
