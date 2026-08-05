@@ -72,6 +72,37 @@ test("picking a theme reports it through onChange", async () => {
   await vi.waitFor(() => expect(changes.at(-1)?.theme).toBe("nord"));
 });
 
+test("a custom theme shows its file name, not the slugged id, and deletes by file name", async () => {
+  // The whole point of splitting id from display name: `Tokyo Night.ghostty`
+  // gets the id `tokyo-night`, and showing that in the menu — or sending it to
+  // theme.remove, which keys on the file — would be renaming the user's theme.
+  const CSS: Record<string, string> = {
+    "--ps-custom-themes": '"tokyo-night"',
+    "--ps-name-custom-tokyo-night": '"Tokyo Night"',
+    "--ps-scheme-custom-tokyo-night": "dark",
+  };
+  const origCS = window.getComputedStyle;
+  window.getComputedStyle = ((el: Element) => {
+    const real = origCS.call(window, el);
+    return { getPropertyValue: (p: string) => CSS[p] ?? real.getPropertyValue(p) } as CSSStyleDeclaration;
+  }) as typeof window.getComputedStyle;
+  const origConfirm = window.confirm;
+  window.confirm = () => true;
+  try {
+    const calls: Array<[string, unknown]> = [];
+    const c = { rpc: async (m: string, p: unknown) => { calls.push([m, p]); return { removed: true }; } } as any;
+    const { getByText, getByLabelText } = render(SettingsPanel, {
+      props: { conn: c, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+    });
+    expect(getByText("Tokyo Night")).toBeInTheDocument();
+    await fireEvent.click(getByLabelText("删除主题"));
+    await vi.waitFor(() => expect(calls[0]).toEqual(["theme.remove", { name: "Tokyo Night" }]));
+  } finally {
+    window.getComputedStyle = origCS;
+    window.confirm = origConfirm;
+  }
+});
+
 test("the import form is collapsed until asked for, and sends theme.import", async () => {
   // The main path is `cp` into the agent's themes dir; this is the away-from-
   // your-computer fallback, so it must not take up room by default.
@@ -79,7 +110,7 @@ test("the import form is collapsed until asked for, and sends theme.import", asy
   const c = {
     rpc: async (m: string, p: unknown) => {
       calls.push([m, p]);
-      return { ok: true, id: "mine", overwritten: false };
+      return { ok: true, id: "mine", name: "mine", overwritten: false };
     },
   } as any;
   const { getByText, getByPlaceholderText, queryByPlaceholderText } = render(SettingsPanel, {
@@ -87,7 +118,7 @@ test("the import form is collapsed until asked for, and sends theme.import", asy
   });
   expect(queryByPlaceholderText("粘贴 .ghostty 文件内容")).not.toBeInTheDocument();
   await fireEvent.click(getByText("导入主题"));
-  await fireEvent.input(getByPlaceholderText("主题名（字母、数字、- 和 _）"), { target: { value: "mine" } });
+  await fireEvent.input(getByPlaceholderText("主题名（随便起，空格和点都行）"), { target: { value: "mine" } });
   await fireEvent.input(getByPlaceholderText("粘贴 .ghostty 文件内容"), { target: { value: "background = 000000" } });
   await fireEvent.click(getByText("导入"));
   await vi.waitFor(() => expect(calls[0]).toEqual(["theme.import", { name: "mine", text: "background = 000000" }]));
@@ -101,7 +132,7 @@ test("a rejected import shows the reason for that reason, not a generic failure"
     props: { conn: c, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
   });
   await fireEvent.click(getByText("导入主题"));
-  await fireEvent.input(getByPlaceholderText("主题名（字母、数字、- 和 _）"), { target: { value: "mine" } });
+  await fireEvent.input(getByPlaceholderText("主题名（随便起，空格和点都行）"), { target: { value: "mine" } });
   await fireEvent.input(getByPlaceholderText("粘贴 .ghostty 文件内容"), { target: { value: "x" } });
   await fireEvent.click(getByText("导入"));
   expect(await findByText(/上限/)).toBeInTheDocument();
@@ -113,7 +144,7 @@ test("no connection: importing says so instead of failing silently", async () =>
     props: { conn: c, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
   });
   await fireEvent.click(getByText("导入主题"));
-  await fireEvent.input(getByPlaceholderText("主题名（字母、数字、- 和 _）"), { target: { value: "mine" } });
+  await fireEvent.input(getByPlaceholderText("主题名（随便起，空格和点都行）"), { target: { value: "mine" } });
   await fireEvent.input(getByPlaceholderText("粘贴 .ghostty 文件内容"), { target: { value: "x" } });
   await fireEvent.click(getByText("导入"));
   expect(await findByText(/没连上 agent/)).toBeInTheDocument();

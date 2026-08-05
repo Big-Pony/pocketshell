@@ -37,9 +37,13 @@
   let themes = $derived.by((): ThemeEntry[] => { void themeTick; return listThemes(); });
   let themeInfo = $derived.by(() => { void themeTick; return customThemeInfo(); });
 
-  /** Built-ins have an i18n name; a custom theme's name is its file name. */
+  /**
+   * Built-ins have an i18n name; a custom theme shows its **file name**, not
+   * its id — the id is a slug of the file name (`Tokyo Night` → `tokyo-night`)
+   * and showing that would rename the user's theme on screen.
+   */
   function themeLabel(e: ThemeEntry): string {
-    return e.custom ? customThemeName(e.id) ?? e.id : tr(`settings.theme.${e.id}`);
+    return e.custom ? e.name ?? customThemeName(e.id) ?? e.id : tr(`settings.theme.${e.id}`);
   }
 
   // Switching is async for custom themes only: the agent ships the full token
@@ -68,14 +72,19 @@
       // Over the authed WS rather than POST /theme/import: that route is
       // loopback + bearer (a local-script path), and a phone is neither.
       const r = await conn.rpc("theme.import", { name, text: impText }) as
-        { ok: true; id: string; overwritten: boolean } | { ok: false; reason: string };
+        { ok: true; id: string; name: string; overwritten: boolean } | { ok: false; reason: string };
       if (!r.ok) {
         impMsg = { ok: false, text: tr(`settings.theme.importErr.${r.reason}`) };
         return;
       }
+      // Report the name the user typed, but name the id too when the two differ
+      // — the id is what the theme is addressed by, and silently storing
+      // "Tokyo Night" as `tokyo-night` with no word about it is the kind of
+      // thing that turns into "why is my theme called that".
       impMsg = {
         ok: true,
-        text: tr(r.overwritten ? "settings.theme.importReplaced" : "settings.theme.importOk", { name: r.id }),
+        text: tr(r.overwritten ? "settings.theme.importReplaced" : "settings.theme.importOk", { name: r.name })
+          + (r.id === r.name ? "" : tr("settings.theme.importSlugged", { id: r.id })),
       };
       impText = "";
       // Re-pull the stylesheet so the new theme is in the manifest, then switch
@@ -90,7 +99,10 @@
   }
 
   async function deleteTheme(e: ThemeEntry) {
-    const name = customThemeName(e.id);
+    // The **file name**, not the id: the id is a lossy slug, so it cannot name
+    // a file (`Tokyo Night` and `tokyo_night` share one). The agent's
+    // `remove()` takes the file name for the same reason.
+    const name = e.name ?? customThemeName(e.id);
     if (!name || !confirm(tr("settings.theme.deleteConfirm", { name }))) return;
     try {
       const r = await conn.rpc("theme.remove", { name }) as { removed: boolean };

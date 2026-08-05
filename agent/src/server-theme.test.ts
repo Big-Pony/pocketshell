@@ -171,19 +171,55 @@ describe("buildThemeCss", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("a name that parses on disk but cannot be a CSS ident is skipped, not half-rendered", () => {
-    // theme-store allows spaces and dots (they are fine in a file name and in a
-    // quoted attribute selector), but `--sw-custom-3024 Day-bg` ends at the
-    // space. Rendering it would give a theme with a blank swatch and the wrong
-    // scheme — worse than an explicit skip the panel can explain.
+  test("names with spaces and dots are slugged into ids, not refused", () => {
+    // The old behaviour: `--sw-custom-3024 Day-bg` truncates at the space, so
+    // these were reported as unusable names and the user was told to rename an
+    // official theme. Now the id is derived and the file name is untouched.
     const { root, listing } = listingOf({
       "3024 Day.ghostty": themeText(),
       "gruvbox.2.ghostty": themeText(),
       "fine_one-2.ghostty": themeText(),
     });
     const built = buildThemeCss(listing, null);
-    expect(built.names).toEqual(["fine_one-2"]);
-    expect(built.skipped.map((s) => s.reason)).toEqual(["name", "name"]);
+    expect(built.names).toEqual(["3024-day", "fine-one-2", "gruvbox-2"]);
+    expect(built.skipped).toEqual([]);
+    // Every token name is a legal ident — the thing that used to break.
+    expect(built.css).toContain("--sw-custom-3024-day-bg:");
+    expect(built.css).not.toContain("3024 Day-bg");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("the manifest carries the display name so the panel does not show the slug", () => {
+    const { root, listing } = listingOf({ "Tokyo Night.ghostty": themeText() });
+    const built = buildThemeCss(listing, "tokyo-night");
+    expect(decl(built.css, "--ps-custom-themes")).toBe('"tokyo-night"');
+    expect(decl(built.css, "--ps-name-custom-tokyo-night")).toBe('"Tokyo Night"');
+    expect(built.css).toContain(':root[data-theme="custom:tokyo-night"]');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("a display name cannot break out of its CSS string", () => {
+    // The name comes from a file the user created with `cp`; a quote would end
+    // the declaration and take the whole manifest rule with it.
+    const { root, listing } = listingOf({ 'ev"il;}.ghostty': themeText(), "ok.ghostty": themeText() });
+    const built = buildThemeCss(listing, null);
+    // The hostile name never becomes a theme (theme-store rejects it outright),
+    // but the check that matters is that the rule survived intact.
+    expect(built.names).toEqual(["ok"]);
+    expect(built.css.match(/\{/g)).toHaveLength(1);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("collisions from the store ride through to the stylesheet as skips", () => {
+    const { root, listing } = listingOf({
+      "Tokyo Night.ghostty": themeText(),
+      "tokyo_night.ghostty": themeText(),
+      "nord.ghostty": themeText(),
+    });
+    const built = buildThemeCss(listing, null);
+    expect(built.names).toEqual(["tokyo-night"]);
+    expect(decl(built.css, "--ps-custom-skipped"))
+      .toBe('"builtin:nord.ghostty,dup:tokyo_night.ghostty"');
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -249,16 +285,35 @@ describe("buildThemeCss", () => {
 });
 
 describe("isCssIdentSafe", () => {
-  test("accepts what a token name can hold", () => {
-    for (const ok of ["mine", "My_Theme", "gruvbox-dark", "v2", "a"]) {
+  // No longer a user-facing rule — ids are slugged, so this is the internal
+  // assertion that catches a bug in the slug before it reaches a stylesheet.
+
+  test("accepts every shape slugThemeId can produce", () => {
+    for (const ok of ["mine", "tokyo-night", "3024-day", "gruvbox-2", "theme-1a2b3c4d", "a"]) {
       expect(isCssIdentSafe(ok), ok).toBe(true);
     }
   });
 
   test("rejects what would silently truncate the token name", () => {
-    for (const bad of ["", "3024 Day", "gruvbox.2", "a:b", "-lead", "_lead", "a/b", "a\\b", 'a"b']) {
+    for (const bad of ["", "3024 Day", "gruvbox.2", "a:b", "-lead", "_lead", "a/b", "a\\b", 'a"b',
+      "My_Theme", "Mine"]) {
       expect(isCssIdentSafe(bad), JSON.stringify(bad)).toBe(false);
     }
+  });
+
+  test("a theme whose id somehow fails the check is reported as internal, not as the user's fault", () => {
+    // Synthesised: the store cannot produce this id, which is the point — if it
+    // ever does, the cost is one theme and a bug report, not a mangled manifest.
+    const bad = {
+      id: "3024 Day", name: "3024 Day", file: "3024 Day.ghostty",
+      theme: parseGhostty(themeText()),
+    };
+    const built = buildThemeCss(
+      { themes: [bad], total: 1, truncated: false, skipped: [] }, null,
+    );
+    expect(built.names).toEqual([]);
+    expect(built.skipped.map((s) => s.reason)).toEqual(["internal"]);
+    expect(built.css).not.toContain("3024 Day-bg");
   });
 });
 
@@ -358,9 +413,9 @@ describe("importTheme", () => {
   test("stores a valid theme and reports whether it replaced one", () => {
     const { root, s } = store();
     expect(importTheme(s, { name: "mine", text: themeText() }))
-      .toEqual({ ok: true, id: "mine", overwritten: false });
+      .toEqual({ ok: true, id: "mine", name: "mine", overwritten: false });
     expect(importTheme(s, { name: "mine", text: themeText("222222") }))
-      .toEqual({ ok: true, id: "mine", overwritten: true });
+      .toEqual({ ok: true, id: "mine", name: "mine", overwritten: true });
     expect(s.list().themes.map((t) => t.id)).toEqual(["mine"]);
     rmSync(root, { recursive: true, force: true });
   });
@@ -375,13 +430,39 @@ describe("importTheme", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("rejects names the stylesheet could not render, not just unsafe ones", () => {
-    // theme-store would accept "3024 Day" as a file; this layer refuses it
-    // because the token name would truncate at the space. Refusing at import
-    // beats saving a theme that shows up broken.
+  test("accepts a spaced name and slugs the id — the import box used to refuse these", () => {
+    // This layer used to add its own CSS-ident check on top of the store's,
+    // which made the import box reject the very names the upstream theme
+    // repository uses. Now it defers entirely to the store.
     const { root, s } = store();
-    expect(importTheme(s, { name: "3024 Day", text: themeText() })).toMatchObject({ ok: false, reason: "name" });
-    expect(s.list().themes).toEqual([]);
+    expect(importTheme(s, { name: "3024 Day", text: themeText() }))
+      .toEqual({ ok: true, id: "3024-day", name: "3024 Day", overwritten: false });
+    expect(s.list().themes.map((t) => [t.name, t.id])).toEqual([["3024 Day", "3024-day"]]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("import and cp agree: the same theme lands under the same file name and id", () => {
+    // The two paths must not produce different directory contents, or "I
+    // imported it on my phone" and "I copied it in" become different themes.
+    const { root, s } = store();
+    importTheme(s, { name: "Tokyo Night", text: themeText() });
+    const viaImport = s.list().themes[0];
+
+    const { root: root2, store: s2 } = withThemes({ "Tokyo Night.ghostty": themeText() });
+    const viaCp = s2.list().themes[0];
+    expect([viaImport.name, viaImport.id, viaImport.file])
+      .toEqual([viaCp.name, viaCp.id, viaCp.file]);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(root2, { recursive: true, force: true });
+  });
+
+  test("collision reasons reach the caller distinctly", () => {
+    const { root, s } = store();
+    importTheme(s, { name: "Tokyo Night", text: themeText() });
+    expect(importTheme(s, { name: "tokyo_night", text: themeText() }))
+      .toMatchObject({ ok: false, reason: "dup" });
+    expect(importTheme(s, { name: "Nord", text: themeText() }))
+      .toMatchObject({ ok: false, reason: "builtin" });
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -489,7 +570,7 @@ describe("routes on a live server", () => {
       body: JSON.stringify({ name: "mine", text: themeText() }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, id: "mine", overwritten: false });
+    expect(await res.json()).toEqual({ ok: true, id: "mine", name: "mine", overwritten: false });
     expect(await (await fetch(`${s.base}/theme/custom.css`)).text()).toContain('--ps-custom-themes: "mine";');
     stop(s);
   });
@@ -546,7 +627,8 @@ describe("theme.import / theme.remove over the authed WS", () => {
     const s = start();
     const reply = rpc(s.srv, s.ws, "t1", "theme.import", { name: "phone", text: themeText() });
     expect(reply).toMatchObject({ type: "response", ok: true, id: "t1" });
-    expect((reply as { result: unknown }).result).toEqual({ ok: true, id: "phone", overwritten: false });
+    expect((reply as { result: unknown }).result)
+      .toEqual({ ok: true, id: "phone", name: "phone", overwritten: false });
     const css = await (await fetch(`http://127.0.0.1:${s.srv.port}/theme/custom.css`)).text();
     expect(css).toContain('--ps-custom-themes: "phone";');
     stop(s);

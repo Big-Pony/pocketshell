@@ -3,8 +3,12 @@ import { test, expect } from "vitest";
 import {
   parseThemeList, parseCustomThemeList, schemeFromCss, swatchFromCss, isSafeThemeId,
   customThemeId, customThemeName, isCustomTheme, tokenIdOf, parseSkips, totalFromCss,
-  truncatedFromCss, type CssReader,
+  truncatedFromCss, slugThemeId, nameFromCss, type CssReader,
 } from "./theme-css";
+// 跨包 import：agent 侧的 slug 是同一条规则的另一份实现，两份漂移不会编译报错，
+// 只会让同一个文件在「拷进 keyDir」和「前端算 id」两条路径上得到不同的 id。
+// 与 gen-themes.ts import theme-derive 同理，这是构建/测试期 import，不进 bundle。
+import { slugThemeId as agentSlug } from "../../../agent/src/theme-store";
 
 /** 用一个普通对象假装 CSS——这正是把读取函数做成参数的理由。 */
 function reader(map: Record<string, string>): CssReader {
@@ -48,15 +52,17 @@ test("parseThemeList 认自定义主题 id", () => {
   expect(parseThemeList("cream-dark,custom:my-theme")).toEqual(["cream-dark", "custom:my-theme"]);
 });
 
-test("parseCustomThemeList 给不带前缀的名字补上 custom:", () => {
-  // agent 的 --ps-custom-themes 列的是 keyDir 里的文件名，不带前缀。
-  expect(parseCustomThemeList('"paper,My_Theme,gruvbox.2"'))
-    .toEqual(["custom:paper", "custom:My_Theme", "custom:gruvbox.2"]);
+test("parseCustomThemeList 给不带前缀的 id 补上 custom:", () => {
+  // agent 的 --ps-custom-themes 列的是 slug 化之后的 id，不带前缀。
+  expect(parseCustomThemeList('"paper,tokyo-night,3024-day"'))
+    .toEqual(["custom:paper", "custom:tokyo-night", "custom:3024-day"]);
 });
 
-test("parseCustomThemeList 用自定义名的规则校验，不是内置 id 的规则", () => {
-  // 内置 id 只认小写 kebab；用户的 .ghostty 文件名常带大写/下划线/点，不能一刀切。
-  expect(parseCustomThemeList('"Ok_Name,bad name,../escape,a\\"b"')).toEqual(["custom:Ok_Name"]);
+test("parseCustomThemeList 只认 slug 形状，agent 发来别的形状即视为坏数据", () => {
+  // 2026-08-05 之后 id 一定是 slugThemeId() 的产物（小写 kebab）。大写/下划线/点
+  // 出现在这里说明 agent 与前端的 slug 规则漂移了，放行只会让它更难查。
+  expect(parseCustomThemeList('"ok-name,My_Theme,gruvbox.2,bad name,../escape,a\\"b"'))
+    .toEqual(["custom:ok-name"]);
 });
 
 // ── id 编解码 ──
@@ -81,12 +87,22 @@ test("tokenIdOf 把冒号换成连字符（CSS 属性名里冒号不合法）", 
 
 // ── isSafeThemeId ──
 
-test("isSafeThemeId 放行内置 kebab id 与自定义名", () => {
+test("isSafeThemeId 放行内置 id 与 slug 化的自定义 id", () => {
   for (const id of ["cream-dark", "nord", "gruvbox-dark", "tokyonight", "blackout"]) {
     expect(isSafeThemeId(id), id).toBe(true);
   }
-  for (const id of ["custom:foo", "custom:My_Theme", "custom:gruvbox.2", "custom:a-b_c.d"]) {
+  for (const id of ["custom:foo", "custom:tokyo-night", "custom:3024-day", "custom:theme-1a2b3c4d"]) {
     expect(isSafeThemeId(id), id).toBe(true);
+  }
+});
+
+test("isSafeThemeId 对自定义 id 与内置 id 同一套语法", () => {
+  // 以前自定义名额外放行大写/下划线/点（那时 id 就是文件名）。现在 id 是
+  // slugThemeId() 的产物，一定是小写 kebab；放宽只会让「两侧 slug 规则漂移」
+  // 这类不一致静默通过。旧的 custom:My_Theme 落到这里回落默认，与「文件已改名」
+  // 是同一种结局。
+  for (const id of ["custom:My_Theme", "custom:gruvbox.2", "custom:a-b_c.d"]) {
+    expect(isSafeThemeId(id), id).toBe(false);
   }
 });
 
@@ -99,6 +115,65 @@ test("isSafeThemeId 拒绝会破坏 CSS 选择器的字符", () => {
     "custom:" + "x".repeat(100),
   ];
   for (const id of bad) expect(isSafeThemeId(id), JSON.stringify(id)).toBe(false);
+});
+
+test("isSafeThemeId 的长度上限量的是去掉 custom: 之后的那段", () => {
+  // agent 的文件名上限与 slug 截断都是 64；把 `custom:` 这 7 个字节也算进来，
+  // 一个刚好 64 字符的合法 slug 会在这里被判不安全——主题有令牌却切不过去。
+  expect(isSafeThemeId(`custom:${"x".repeat(64)}`)).toBe(true);
+  expect(isSafeThemeId(`custom:${"x".repeat(65)}`)).toBe(false);
+});
+
+// ── slugThemeId：与 agent 的 theme-store.ts 逐字一致（下面有对拍） ──
+
+test("slugThemeId 把上游主题名转成合法 id", () => {
+  expect(slugThemeId("Tokyo Night")).toBe("tokyo-night");
+  expect(slugThemeId("3024 Day")).toBe("3024-day");
+  expect(slugThemeId("Solarized Dark Higher Contrast")).toBe("solarized-dark-higher-contrast");
+  expect(slugThemeId("gruvbox.2")).toBe("gruvbox-2");
+  expect(slugThemeId("My_Theme")).toBe("my-theme");
+  expect(slugThemeId("a  -  b")).toBe("a-b");
+  expect(slugThemeId("-lead-")).toBe("lead");
+});
+
+test("slugThemeId 把重音折成 ASCII，纯非 ASCII 名字兜底成哈希", () => {
+  expect(slugThemeId("Café Noir")).toBe("cafe-noir");
+  expect(slugThemeId("我的主题")).toMatch(/^theme-[0-9a-f]{8}$/);
+  expect(slugThemeId("我的主题")).toBe(slugThemeId("我的主题"));
+  expect(slugThemeId("我的主题")).not.toBe(slugThemeId("另一个主题"));
+  expect(slugThemeId("...")).toMatch(/^theme-[0-9a-f]{8}$/);
+});
+
+test("slugThemeId 的输出恒是 isSafeThemeId 认可的自定义 id", () => {
+  // 这条是整个改动立足的性质：slug 出来的东西必须能进选择器与令牌名。
+  for (const n of ["Tokyo Night", "3024 Day", "我的主题", "...", "Café", "x".repeat(80), "9lives"]) {
+    expect(isSafeThemeId(`custom:${slugThemeId(n)}`), n).toBe(true);
+  }
+});
+
+test("slugThemeId 与 agent 侧逐字一致（对拍）", () => {
+  // 真正的真相在 agent：id 是它写进 CSS 的。前端这份是镜像，只在需要预判 id 时用。
+  // 两侧不一致的后果是静默的——前端算出的 id 在 CSS 里没有对应的令牌块。
+  const names = [
+    "Tokyo Night", "3024 Day", "Solarized Dark Higher Contrast", "gruvbox.2", "My_Theme",
+    "already-kebab", "a  -  b", "-lead-", "__x__", "Café Noir", "Über Dark",
+    "我的主题", "另一个主题", "テーマ", "Тема 1", "...", "___", "9lives",
+    "x".repeat(80), `${"a".repeat(63)} tail`, "a", "A", "",
+  ];
+  for (const n of names) expect(slugThemeId(n), JSON.stringify(n)).toBe(agentSlug(n));
+});
+
+// ── nameFromCss：展示名 ──
+
+test("nameFromCss 读 --ps-name-<tokenId> 并剥引号", () => {
+  const read = reader({ "--ps-name-custom-tokyo-night": ' "Tokyo Night" ' });
+  expect(nameFromCss("custom:tokyo-night", read)).toBe("Tokyo Night");
+});
+
+test("nameFromCss 读不到时回落 id 的裸名，而不是空白", () => {
+  // 老 agent、demo 站、CSS 还没到位都会走这条。显示一个 slug 也好过什么都没有。
+  expect(nameFromCss("custom:tokyo-night", reader({}))).toBe("tokyo-night");
+  expect(nameFromCss("custom:x", reader({ "--ps-name-custom-x": '""' }))).toBe("x");
 });
 
 test("isSafeThemeId 对非字符串不抛", () => {

@@ -84,13 +84,24 @@ test('"blackout" 同名不同义，会被保留（已知且可接受）', () => 
 
 // ── 自定义主题 id ──
 
-test("loadSettings 放行 custom: 前缀的任意合法名字", () => {
+test("loadSettings 放行 custom: 前缀的任意合法 id", () => {
   // 有哪些自定义主题只有 agent 知道（用户往 keyDir 里丢 .ghostty），
-  // 前端没法预先列举，只能按前缀放行。
-  for (const id of ["custom:paper", "custom:My_Theme", "custom:gruvbox.2"]) {
+  // 前端没法预先列举，只能按前缀放行。id 是文件名 slug 化的产物（小写 kebab）。
+  for (const id of ["custom:paper", "custom:tokyo-night", "custom:3024-day", "custom:theme-1a2b3c4d"]) {
     const store = memStore();
     store.setItem("ps.settings", JSON.stringify({ theme: id }));
     expect(loadSettings(store).theme, id).toBe(id);
+  }
+});
+
+test("loadSettings 把 slug 化之前存下的旧 custom id 当成失效值回落", () => {
+  // 2026-08-05 之前 id 就是文件名（`custom:My_Theme`）。改成 slug 之后那种 id
+  // 在 CSS 里已经不存在，与「文件被改名/删了」是同一种结局：回落默认，
+  // 用户在设置里重选一次。不做迁移映射——旧 id 到新 id 不是一一对应的。
+  for (const id of ["custom:My_Theme", "custom:gruvbox.2", "custom:Tokyo Night"]) {
+    const store = memStore();
+    store.setItem("ps.settings", JSON.stringify({ theme: id }));
+    expect(loadSettings(store).theme, id).toBe("cream-dark");
   }
 });
 

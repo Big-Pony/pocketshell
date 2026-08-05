@@ -34,20 +34,41 @@ const EXT = ".ghostty";
 const MAX_NAME_LEN = 64;
 
 /**
- * Names must be safe as BOTH a path segment and a CSS attribute-selector value,
- * so this is an allowlist rather than a blocklist — a blocklist over two
- * different grammars is a bet nobody should take.
+ * Built-in theme ids, i.e. the base names of `app/themes/*.ghostty`.
  *
- * Allowed: ASCII letters/digits, space, dot, dash, underscore; must start with a
- * letter or digit. That covers how Ghostty themes are actually named
- * ("Tokyo Night", "gruvbox-dark", "3024 Day") while excluding `/` and `\`
- * (traversal), a leading dot (hidden files, and `.`/`..`), quotes, braces,
- * semicolons, commas, angle brackets and every control character including NUL
- * and newline (selector and declaration escapes).
+ * The agent has to know them because a slugged custom name can land on one of
+ * them (`cp nord ~/.pocketshell/themes/nord.ghostty`), and the settings panel
+ * would then show two rows the user cannot tell apart. Duplicated here rather
+ * than imported: nothing from `app/` is on the agent's runtime path. The drift
+ * guard is a test that reads the directory (`theme-store.test.ts`).
  */
-const NAME_RE = new RegExp(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,${MAX_NAME_LEN - 1}}$`);
+export const BUILTIN_THEME_IDS: readonly string[] = Object.freeze([
+  "blackout", "cream-dark", "cream-light", "gruvbox-dark", "mocha", "nord", "tokyonight",
+]);
+const BUILTIN = new Set(BUILTIN_THEME_IDS);
+
+/**
+ * Names must be safe as a path segment and as a quoted CSS string, so this is
+ * an allowlist rather than a blocklist — a blocklist over two different
+ * grammars is a bet nobody should take.
+ *
+ * Allowed: Unicode letters and digits (so `我的主题.ghostty` and `Café.ghostty`
+ * are themes, not errors), combining marks, plus space, dot, dash and
+ * underscore; must start with a letter or digit. That covers how Ghostty themes
+ * are actually named ("Tokyo Night", "gruvbox-dark", "3024 Day") while
+ * excluding `/` and `\` (traversal), a leading dot (hidden files, and `.`/`..`),
+ * quotes, braces, semicolons, commas, angle brackets, every control character
+ * including NUL and newline, and every space-like character that is not a plain
+ * ASCII space (U+00A0 and friends are confusables in a file name).
+ *
+ * Note what this rule no longer has to do: it does *not* have to keep the name
+ * usable as a CSS ident. `slugThemeId` handles that, so the file can be called
+ * whatever the upstream theme is called and the id is derived.
+ */
+const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M} ._-]*$/u;
 
 export function isValidThemeName(name: string): boolean {
+  if (typeof name !== "string" || name.length === 0 || name.length > MAX_NAME_LEN) return false;
   if (!NAME_RE.test(name)) return false;
   if (name !== name.trim()) return false; // trailing space: legal path, confusing id
   if (name.includes("..")) return false;  // belt and braces; `/` is already out
@@ -56,23 +77,87 @@ export function isValidThemeName(name: string): boolean {
 
 /** Strip an optional `.ghostty` suffix so `save("foo.ghostty")` and
  *  `save("foo")` mean the same thing (people paste file names). */
-export function themeIdOf(fileName: string): string {
+export function themeBaseOf(fileName: string): string {
   return fileName.endsWith(EXT) ? fileName.slice(0, -EXT.length) : fileName;
 }
 
+/** 32-bit FNV-1a, hex. Only used to give a name with no ASCII content a stable,
+ *  distinct id; nothing security-relevant hangs off it. */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * File name → theme **id**: the string that ends up in a CSS custom property
+ * name (`--sw-custom-<id>-bg`) and in `[data-theme="custom:<id>"]`.
+ *
+ * The display name and the id used to be the same string, which meant the 602
+ * themes in `mbadolato/iTerm2-Color-Schemes` — most of them named like
+ * "Tokyo Night" and "3024 Day" — were unusable: `--sw-custom-3024 Day-bg` ends
+ * at the space and the whole declaration is dropped silently. Telling the user
+ * to rename an official theme file is a worse answer than deriving an id.
+ *
+ * Rules, in order:
+ *  1. NFKD-normalise and drop combining marks, so `Café` → `Cafe`. Accented
+ *     Latin has an unambiguous ASCII home and the alternative (a hash) throws
+ *     away a perfectly readable name.
+ *  2. Lowercase; every run of anything outside `[a-z0-9]` becomes one `-`;
+ *     leading/trailing `-` go. So `Tokyo Night` → `tokyo-night`,
+ *     `3024 Day` → `3024-day`, `gruvbox.2` → `gruvbox-2`, `My_Theme` → `my-theme`.
+ *  3. Truncated to the same 64 as the name, then re-trimmed (a cut can leave a
+ *     trailing dash).
+ *  4. Empty result → `theme-<hash of the original name>`. This is where scripts
+ *     that are not Latin land: `我的主题` has no ASCII home, and a hash is at
+ *     least stable across restarts and distinct per name — the user still sees
+ *     `我的主题` in the menu, because the *display name* is the file name and
+ *     only the id is slugged.
+ *
+ * Mirrored by `slugThemeId` in `app/src/lib/theme-css.ts`; the two are pinned
+ * together by a cross-package test.
+ */
+export function slugThemeId(name: string): string {
+  const folded = name.normalize("NFKD").replace(/\p{M}+/gu, "");
+  const slug = folded
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_NAME_LEN)
+    .replace(/-+$/, "");
+  return slug || `theme-${fnv1a(name)}`;
+}
+
 export interface ThemeEntry {
-  /** Base name without extension. Used verbatim as the `custom:<id>` theme id. */
+  /** Slugged base name. Used as the `custom:<id>` theme id and in token names. */
   id: string;
+  /** Base name as the user wrote it — what the settings panel shows. */
+  name: string;
   /** File name as it sits on disk, for error messages. */
   file: string;
   theme: ParsedTheme;
 }
 
-/** Why a file in the directory did not become a theme. Surfaced rather than
- *  swallowed: "my theme doesn't show up" is unanswerable without it. */
+/**
+ * Why a file in the directory did not become a theme. Surfaced rather than
+ * swallowed: "my theme doesn't show up" is unanswerable without it.
+ *
+ *  - `name`    — the file name is not usable at all (traversal, quotes, …).
+ *  - `dup`     — its id collides with another custom theme's; first by file
+ *                name won.
+ *  - `builtin` — its id collides with a built-in theme's.
+ *  - `parse`   — not a complete Ghostty theme.
+ *  - `read`    — could not be read (permissions, dangling symlink, a directory).
+ *  - `internal`— a slug that is somehow not a legal CSS ident. Never expected;
+ *                emitted by `server-theme.ts` as a last-line assertion so a bug
+ *                in the slug costs one theme rather than a broken stylesheet.
+ */
 export interface ThemeSkip {
   file: string;
-  reason: "name" | "parse" | "read";
+  reason: "name" | "dup" | "builtin" | "parse" | "read" | "internal";
   message: string;
 }
 
@@ -87,12 +172,15 @@ export interface ThemeListing {
 }
 
 export type SaveResult =
-  | { ok: true; id: string; overwritten: boolean }
-  | { ok: false; reason: "name" | "parse" | "limit" | "write"; message: string };
+  /** `id` is the slug the theme is addressed by; `name` is the file it went to
+   *  (they differ whenever the name needed slugging, which the UI reports). */
+  | { ok: true; id: string; name: string; overwritten: boolean }
+  | { ok: false; reason: "name" | "dup" | "builtin" | "parse" | "limit" | "write"; message: string };
 
 export interface ThemeStore {
   list(): ThemeListing;
   save(name: string, text: string): SaveResult;
+  /** Delete by **file/display name**, not by slug — see the note on `remove`. */
   remove(name: string): boolean;
   /**
    * Cheap change token for the directory. Callers cache rendered CSS against it
@@ -128,18 +216,65 @@ function scan(dir: string): { files: string[]; skipped: ThemeSkip[] } {
   const skipped: ThemeSkip[] = [];
   for (const e of entries.slice().sort()) {
     if (!e.endsWith(EXT)) continue;
-    const id = e.slice(0, -EXT.length);
-    if (!isValidThemeName(id)) {
+    const name = e.slice(0, -EXT.length);
+    if (!isValidThemeName(name)) {
       skipped.push({
         file: e,
         reason: "name",
-        message: `unusable theme name "${id}" (letters, digits, space, . - _ only; must not start with a dot)`,
+        message: `unusable theme name "${name}" (letters, digits, space, . - _ only; must not start with a dot)`,
       });
       continue;
     }
     files.push(e);
   }
   return { files, skipped };
+}
+
+/**
+ * Resolve slug collisions across a sorted file list.
+ *
+ * Two different files can slug to one id — `Tokyo Night.ghostty` and
+ * `tokyo-night.ghostty` both give `tokyo-night` — and a slug can also land on a
+ * built-in (`nord.ghostty` in the keyDir). Both are decided the same way:
+ * *whoever is first wins*, deterministically. The list is sorted by file name,
+ * so the winner does not change between two requests, and the loser becomes a
+ * skip the panel can explain rather than a theme that silently replaces
+ * another one in the menu.
+ *
+ * Built-ins beat every custom theme: a user's `nord.ghostty` cannot shadow the
+ * shipped `nord`, because the shipped tokens are in the bundled stylesheet and
+ * would win the cascade anyway — the honest outcome is a skip that says so.
+ */
+function resolveIds(
+  files: string[],
+): { keep: Array<{ file: string; name: string; id: string }>; skipped: ThemeSkip[] } {
+  const keep: Array<{ file: string; name: string; id: string }> = [];
+  const skipped: ThemeSkip[] = [];
+  const taken = new Map<string, string>(); // id → the file that claimed it
+  for (const file of files) {
+    const name = file.slice(0, -EXT.length);
+    const id = slugThemeId(name);
+    if (BUILTIN.has(id)) {
+      skipped.push({
+        file,
+        reason: "builtin",
+        message: `"${name}" resolves to the built-in theme id "${id}"; rename the file to keep both`,
+      });
+      continue;
+    }
+    const owner = taken.get(id);
+    if (owner !== undefined) {
+      skipped.push({
+        file,
+        reason: "dup",
+        message: `"${name}" and "${themeBaseOf(owner)}" both resolve to "${id}"; keeping "${themeBaseOf(owner)}"`,
+      });
+      continue;
+    }
+    taken.set(id, file);
+    keep.push({ file, name, id });
+  }
+  return { keep, skipped };
 }
 
 export function openThemeStore(dir: string, opts: ThemeStoreOpts = {}): ThemeStore {
@@ -152,13 +287,17 @@ export function openThemeStore(dir: string, opts: ThemeStoreOpts = {}): ThemeSto
     list() {
       const { files, skipped } = scan(dir);
       const total = files.length;
-      const truncated = total > max;
+      // Collisions are settled before the cap, and on names alone — it is
+      // string work over a sorted list, no extra IO, and doing it after the cap
+      // would make which file wins depend on where the cap happened to fall.
+      const { keep, skipped: clashes } = resolveIds(files);
+      skipped.push(...clashes);
+      const truncated = keep.length > max;
       const themes: ThemeEntry[] = [];
       // Parse only up to the cap: `total` is honest about how many files are
       // there, but reading 600 of them to then throw 550 away would be work
       // done purely to be tidy.
-      for (const file of files.slice(0, max)) {
-        const id = file.slice(0, -EXT.length);
+      for (const { file, name, id } of keep.slice(0, max)) {
         // Read and parse are separate try blocks on purpose. Both end in "this
         // file did not become a theme", but the user's next move differs: a read
         // failure (permissions, a dangling symlink, a directory wearing a
@@ -173,7 +312,7 @@ export function openThemeStore(dir: string, opts: ThemeStoreOpts = {}): ThemeSto
           continue;
         }
         try {
-          themes.push({ id, file, theme: parseGhostty(text, id) });
+          themes.push({ id, name, file, theme: parseGhostty(text, name) });
         } catch (e) {
           skipped.push({ file, reason: "parse", message: String((e as Error)?.message ?? e) });
         }
@@ -183,24 +322,51 @@ export function openThemeStore(dir: string, opts: ThemeStoreOpts = {}): ThemeSto
     },
 
     save(name, text) {
-      const id = themeIdOf(name.trim());
-      if (!isValidThemeName(id)) {
+      // The file keeps the name the user typed; only the id is slugged. Import
+      // "Tokyo Night" and the file is `Tokyo Night.ghostty`, exactly as if it
+      // had been copied in — the two paths must not produce different directory
+      // contents for the same theme.
+      const base = themeBaseOf(name.trim());
+      if (!isValidThemeName(base)) {
         return {
           ok: false,
           reason: "name",
           message: `invalid theme name "${name}": use letters, digits, space, dot, dash or underscore`,
         };
       }
+      const id = slugThemeId(base);
+      if (BUILTIN.has(id)) {
+        return {
+          ok: false,
+          reason: "builtin",
+          message: `"${base}" resolves to the built-in theme id "${id}"; pick another name`,
+        };
+      }
       // Validate before writing, never after: an unparseable file on disk is a
       // theme the user thinks they saved and a skip record they never read.
       try {
-        parseGhostty(text, id);
+        parseGhostty(text, base);
       } catch (e) {
         return { ok: false, reason: "parse", message: String((e as Error)?.message ?? e) };
       }
 
       const { files } = scan(dir);
-      const overwritten = files.includes(`${id}${EXT}`);
+      const target = `${base}${EXT}`;
+      const overwritten = files.includes(target);
+      // A *different* file that already owns this id: writing would create a
+      // second file that then loses the collision and never appears. Refusing
+      // up front, with the winner named, beats a save that silently does
+      // nothing visible.
+      if (!overwritten) {
+        const clash = files.find((f) => slugThemeId(f.slice(0, -EXT.length)) === id);
+        if (clash) {
+          return {
+            ok: false,
+            reason: "dup",
+            message: `"${themeBaseOf(clash)}" already uses the id "${id}"; delete it or pick another name`,
+          };
+        }
+      }
       // The cap bounds how many themes exist, so replacing one is always fine
       // even at the limit — otherwise a full directory would be unfixable from
       // the UI.
@@ -212,26 +378,33 @@ export function openThemeStore(dir: string, opts: ThemeStoreOpts = {}): ThemeSto
         };
       }
 
-      const target = pathOf(id);
-      const tmp = join(dir, `.${id}${EXT}.tmp`);
+      const tmp = join(dir, `.${base}${EXT}.tmp`);
       try {
         mkdirSync(dir, { recursive: true });
         // tmp+rename so a half-written file is never visible to a concurrent
         // stylesheet request (and never lands in the listing as a parse skip).
         writeFileSync(tmp, text, { mode: 0o600 });
-        renameSync(tmp, target);
+        renameSync(tmp, pathOf(base));
       } catch (e) {
         try { unlinkSync(tmp); } catch { /* nothing to clean up */ }
         return { ok: false, reason: "write", message: String((e as Error)?.message ?? e) };
       }
-      return { ok: true, id, overwritten };
+      return { ok: true, id, name: base, overwritten };
     },
 
+    /**
+     * Delete by **file name**, not by slug.
+     *
+     * The slug is lossy — `Tokyo Night` and `tokyo_night` share one — so it
+     * cannot name a file, and resolving it back would mean "delete whichever
+     * file happens to win the collision today". The file name is what the panel
+     * displays and what `ThemeEntry.name` carries, so the caller always has it.
+     */
     remove(name) {
-      const id = themeIdOf(name.trim());
-      if (!isValidThemeName(id)) return false; // never let a name we would not write be a name we delete
+      const base = themeBaseOf(name.trim());
+      if (!isValidThemeName(base)) return false; // never let a name we would not write be a name we delete
       try {
-        unlinkSync(pathOf(id));
+        unlinkSync(pathOf(base));
         return true;
       } catch {
         return false; // missing file, missing dir, or not ours to delete

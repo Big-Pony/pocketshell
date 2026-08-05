@@ -22,6 +22,23 @@ PocketShell which palette colour to use as the UI accent.
 | `mocha` | Catppuccin Mocha | [mbadolato/iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) (`ghostty/`) | MIT |
 | `blackout` | Black Metal | [mbadolato/iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) (`ghostty/`) | MIT |
 
+## Using upstream themes yourself
+
+Any `.ghostty` file dropped into the agent's `~/.pocketshell/themes/` becomes a
+theme, so the whole of [`mbadolato/iTerm2-Color-Schemes`](https://github.com/mbadolato/iTerm2-Color-Schemes)
+(`ghostty/`) works as-is. **Name the file whatever upstream calls it** — spaces,
+dots and non-Latin characters are all fine (`Tokyo Night.ghostty`,
+`3024 Day.ghostty`). PocketShell derives an internal id from the file name
+(`Tokyo Night` → `tokyo-night`) because the id ends up in a CSS custom property
+name, and shows the original file name in Settings. Two files that derive the
+same id, or one that derives a built-in's id, are reported in Settings with the
+reason rather than silently replacing each other.
+
+用法说明：把任意 `.ghostty` 丢进 agent 的 `~/.pocketshell/themes/` 即可，
+上游那 600 多套主题都能直接用，**文件名照抄上游即可**（空格、点、中文都行）。
+PocketShell 会从文件名派生一个内部 id（`Tokyo Night` → `tokyo-night`，因为 id 要进
+CSS 自定义属性名），设置面板里显示的仍是原文件名。
+
 ### Note on `blackout`
 
 `blackout` is adapted from **Black Metal** in `mbadolato/iTerm2-Color-Schemes`.

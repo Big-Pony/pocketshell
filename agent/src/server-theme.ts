@@ -10,7 +10,8 @@
 // Shape of the response (design §4.4/§4.5):
 //
 //   :root {
-//     --ps-custom-themes: "mine,other";     ← the manifest the app reads
+//     --ps-custom-themes: "mine,other";     ← the manifest the app reads (ids)
+//     --ps-name-custom-mine: "My Theme";    ← display name, per theme
 //     --ps-scheme-custom-mine: dark;        ← light/dark marker, per theme
 //     --sw-custom-mine-bg: #101010;         ← five preview swatches, per theme
 //     …
@@ -33,30 +34,41 @@ const SWATCH: ReadonlyArray<[suffix: string, token: string]> = [
 ];
 
 /**
- * Names that survive into a CSS *custom property* name.
+ * Ids that survive into a CSS *custom property* name.
  *
- * Stricter than `theme-store.isValidThemeName`, and it has to be. That one
- * guards a path segment and an attribute-selector value, where `3024 Day` and
- * `gruvbox.2` are both fine (`[data-theme="custom:3024 Day"]` is quoted). But
- * the swatch and scheme markers are *idents* — `--sw-custom-3024 Day-bg` ends
- * at the space and `--ps-scheme-custom-gruvbox.2` ends at the dot, and a
- * malformed declaration is dropped silently by every browser. The theme would
- * appear in the menu with a blank swatch and the wrong light/dark class.
+ * This used to be a **user-facing rule**: the id was the file name verbatim, so
+ * `3024 Day.ghostty` was refused with "rename the file" — the swatch and scheme
+ * markers are idents, `--sw-custom-3024 Day-bg` ends at the space, and a
+ * malformed declaration is dropped silently by every browser. That rule failed
+ * the main use case, since most of `mbadolato/iTerm2-Color-Schemes` is named
+ * that way, so ids are now slugged (`theme-store.slugThemeId`) and every id
+ * reaching this module is `[a-z0-9-]+` by construction.
  *
- * So a name that cannot be an ident does not go in the stylesheet at all; it
- * comes back as a skip instead, which the settings panel already knows how to
- * show. The user gets "renaming this file will fix it" rather than a theme that
- * half-works.
+ * It is kept as an **internal assertion**, not deleted: if the slug ever grows a
+ * bug, the failure mode without this check is a stylesheet with a truncated
+ * declaration — invisible, and it corrupts the *whole* manifest rule rather than
+ * one theme. A tripped assertion instead costs that one theme and reports
+ * `reason: "internal"`, which the panel shows as a bug in PocketShell rather
+ * than as something the user did wrong.
  *
- * This matches `app/src/lib/theme-css.ts`'s `tokenIdOf` — both sides turn
- * `custom:<name>` into `custom-<name>` — minus the characters that side's
- * `CUSTOM_NAME` lets through but CSS does not.
+ * The `custom-` prefix that `tokenIdOf` adds keeps the ident legal even for an
+ * id starting with a digit (`3024-day`), so a leading digit is fine here.
  */
-const IDENT_SAFE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const IDENT_SAFE = /^[a-z0-9][a-z0-9-]*$/;
 
-export function isCssIdentSafe(name: string): boolean {
-  return IDENT_SAFE.test(name);
+export function isCssIdentSafe(id: string): boolean {
+  return IDENT_SAFE.test(id);
 }
+
+/**
+ * A display name that is safe inside a double-quoted CSS string value.
+ *
+ * Same treatment `encodeSkips` gives a file name and for the same reason: the
+ * name comes from a file the user created with `cp`, and a quote or a brace in
+ * it would end the declaration. Degrading a character to `_` costs a slightly
+ * wrong label; not degrading it costs the entire manifest rule.
+ */
+const cssString = (s: string): string => s.replace(/[",;{}()\n\r\\]/g, "_");
 
 /** `mine` → `custom-mine`, the fragment used inside token names. Mirrors
  *  `tokenIdOf()` on the app side, which maps the id `custom:mine` the same way
@@ -104,10 +116,11 @@ export function buildThemeCss(listing: ThemeListing, selected: string | null): T
   const skipped = [...listing.skipped];
   const usable = listing.themes.filter((t) => {
     if (isCssIdentSafe(t.id)) return true;
+    // Unreachable unless slugThemeId is broken — see isCssIdentSafe.
     skipped.push({
       file: t.file,
-      reason: "name",
-      message: `"${t.id}" cannot be used in a CSS token name (letters, digits, - and _ only); rename the file`,
+      reason: "internal",
+      message: `slug "${t.id}" for "${t.name}" is not a legal CSS ident — this is a PocketShell bug`,
     });
     return false;
   });
@@ -141,6 +154,10 @@ export function buildThemeCss(listing: ThemeListing, selected: string | null): T
     const tokens = derive(entry.theme);
     const tid = tokenIdOf(entry.id);
     manifest.push("");
+    // The display name, because the id is a slug of it (`Tokyo Night` →
+    // `tokyo-night`) and showing the slug in the menu would be renaming the
+    // user's theme behind their back.
+    manifest.push(`  --ps-name-${tid}: "${cssString(entry.name)}";`);
     manifest.push(`  --ps-scheme-${tid}: ${isLightBackground(entry.theme.background) ? "light" : "dark"};`);
     for (const [suffix, token] of SWATCH) manifest.push(`  --sw-${tid}-${suffix}: ${tokens[token]};`);
     if (entry.id === selected) {
@@ -211,33 +228,27 @@ export interface ThemeImportBody {
 }
 
 export type ThemeImportResult =
-  | { ok: true; id: string; overwritten: boolean }
-  | { ok: false; reason: "name" | "parse" | "limit" | "write"; message: string };
+  | { ok: true; id: string; name: string; overwritten: boolean }
+  | { ok: false; reason: "name" | "dup" | "builtin" | "parse" | "limit" | "write"; message: string };
 
 /**
  * Validate and store one imported theme.
  *
  * Shared by the HTTP route and the RPC so the two cannot disagree about what is
- * acceptable, and so `reason` — which the settings panel turns into four
- * different messages — comes out of one place. `ThemeStore.save` already
- * refuses unsafe names, unparseable text and an over-full directory; this adds
- * the CSS-ident check (see `isCssIdentSafe`) so a name that would be accepted on
- * disk but silently mangled in a token name is refused up front rather than
- * saved into a theme that half-works.
+ * acceptable, and so `reason` — which the settings panel turns into a different
+ * message each — comes out of one place.
+ *
+ * Thin on purpose: `ThemeStore.save` owns every rule (unsafe names, slug
+ * collisions with another theme or with a built-in, unparseable text, the cap),
+ * so pasting "Tokyo Night" into the import box and copying `Tokyo Night.ghostty`
+ * into the directory land in exactly the same place. This layer used to add its
+ * own CSS-ident check, which is what made the import box refuse the very names
+ * the upstream theme repository uses.
  */
 export function importTheme(store: ThemeStore, body: ThemeImportBody): ThemeImportResult {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const text = typeof body.text === "string" ? body.text : "";
   if (!name) return { ok: false, reason: "name", message: "missing theme name" };
   if (!text.trim()) return { ok: false, reason: "parse", message: "missing theme text" };
-
-  const bare = name.endsWith(".ghostty") ? name.slice(0, -".ghostty".length) : name;
-  if (!isCssIdentSafe(bare)) {
-    return {
-      ok: false,
-      reason: "name",
-      message: `invalid theme name "${bare}": use letters, digits, dash and underscore only`,
-    };
-  }
-  return store.save(bare, text);
+  return store.save(name, text);
 }

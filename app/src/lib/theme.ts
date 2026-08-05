@@ -15,7 +15,7 @@ import { loadSettings, saveSettings, THEMES, type ThemePref } from "./settings";
 import {
   MANIFEST_BUILTIN, MANIFEST_CUSTOM, MANIFEST_SKIPPED, parseThemeList, parseCustomThemeList,
   parseSkips, totalFromCss, truncatedFromCss, schemeFromCss, swatchFromCss, isCustomTheme,
-  customThemeName, type CssReader, type Scheme, type ThemeSkip,
+  customThemeName, nameFromCss, type CssReader, type Scheme, type ThemeSkip,
 } from "./theme-css";
 
 export type { ThemeSkip };
@@ -54,6 +54,11 @@ export interface ThemeEntry {
   /** 5 个预览色；CSS 里没有该主题的预览色时为 null（画空色板，不画错色板）。 */
   colors: string[] | null;
   custom: boolean;
+  /**
+   * 自定义主题的展示名（**原文件名**，如 `Tokyo Night`）；内置主题为 null，
+   * 名字走 i18n。id 是文件名 slug 化的产物，拿来当名字显示等于替用户改名。
+   */
+  name: string | null;
 }
 
 /**
@@ -75,6 +80,7 @@ export function listThemes(read: CssReader = cssReader()): ThemeEntry[] {
     scheme: schemeFromCss(id, read),
     colors: swatchFromCss(id, read),
     custom: isCustomTheme(id),
+    name: isCustomTheme(id) ? nameFromCss(id, read) : null,
   }));
 }
 

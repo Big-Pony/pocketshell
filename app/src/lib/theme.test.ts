@@ -111,16 +111,28 @@ test("listThemes 在读不到清单时不过滤（否则菜单会整个空掉）
 
 test("listThemes 追加 --ps-custom-themes 里的自定义主题并打标", () => {
   const read = reader(builtinCss({
-    "--ps-custom-themes": '"paper,my.theme"',
+    "--ps-custom-themes": '"paper,tokyo-night"',
     "--ps-scheme-custom-paper": "light",
   }));
   const list = listThemes(read);
   const custom = list.filter((e) => e.custom);
-  expect(custom.map((e) => e.id)).toEqual(["custom:paper", "custom:my.theme"]);
+  expect(custom.map((e) => e.id)).toEqual(["custom:paper", "custom:tokyo-night"]);
   expect(custom[0].scheme).toBe("light");
   expect(custom[0].colors).toBeNull(); // agent 没给预览色时画空色板，不画错色板
   // 自定义排在内置之后，内置的相对顺序不受影响。
   expect(list[0].id).toBe(DEFAULT_THEME);
+});
+
+test("listThemes 给自定义主题带上展示名（原文件名），内置的 name 为 null", () => {
+  // id 是文件名 slug 化的产物，拿 id 当名字显示等于替用户把主题改了名。
+  const read = reader(builtinCss({
+    "--ps-custom-themes": '"tokyo-night,3024-day"',
+    "--ps-name-custom-tokyo-night": '"Tokyo Night"',
+    // 3024-day 没给 --ps-name-*：老 agent 的情况，回落成 id 而不是空白。
+  }));
+  const custom = listThemes(read).filter((e) => e.custom);
+  expect(custom.map((e) => e.name)).toEqual(["Tokyo Night", "3024-day"]);
+  expect(listThemes(read).find((e) => !e.custom)?.name).toBeNull();
 });
 
 test("listThemes 丢掉自定义清单里不安全的名字", () => {

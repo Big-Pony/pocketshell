@@ -42,12 +42,50 @@ export const MANIFEST_SKIPPED = "--ps-custom-skipped";
  * 不是怕远程攻击（数据来自本机 localStorage 与本机 agent），而是这类字符会让
  * 选择器**静默失配**：主题看着没生效，却查不出为什么。
  *
- * 内置 id 是小写 kebab；自定义名额外放行下划线与点（Ghostty 主题文件常见）。
+ * 2026-08-05 之后内置与自定义**同一套语法**：小写 kebab。以前自定义名额外放行
+ * 大写、下划线与点（那时 id 就是文件名），现在 id 是 `slugThemeId()` 的产物，
+ * 一定是小写 kebab——放行更宽的字符集只会让「agent 发来的 id 不是它自己的 slug」
+ * 这种不一致悄悄通过。旧的 `custom:My_Theme` 落到这里会被判不安全并回落默认，
+ * 与「文件已改名/已删除」是同一种结局，符合 loadSettings 的既有行为。
  */
-const BUILTIN_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const CUSTOM_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** 防呆上限，够长到装下任何真实主题名，短到不会撑爆选择器。 */
 const MAX_NAME = 64;
+
+/** 32 位 FNV-1a，十六进制。只用来给「一个 ASCII 字符都没有」的名字一个稳定且
+ *  互不相同的 id，不承担任何安全职责。与 agent 侧同名函数逐字一致。 */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * 文件名 → 主题 id。**必须与 agent 的 `theme-store.ts` 里同名函数逐字一致**，
+ * 两边由 `theme-css.test.ts` 的对拍用例钉住。
+ *
+ * 为什么要 slug：上游 `mbadolato/iTerm2-Color-Schemes` 那 602 套主题大量带空格
+ * （`Tokyo Night`、`3024 Day`），而 id 会进 CSS 自定义属性名——`--sw-custom-3024
+ * Day-bg` 在空格处断掉，整条声明被浏览器静默丢弃。让用户为了用一套官方主题去改
+ * 文件名，是比自动转换更差的答案。**展示名仍是原文件名**，只有 id 被 slug。
+ *
+ * 规则：NFKD 去掉组合符（`Café` → `Cafe`）→ 转小写 → 非 `[a-z0-9]` 的连续段并成
+ * 一个 `-` → 去首尾 `-` → 截到 64 → 再去一次尾部 `-`（截断可能切出来一个）。
+ * slug 成空串（如 `我的主题`，没有 ASCII 归宿）时兜底 `theme-<原名哈希>`。
+ */
+export function slugThemeId(name: string): string {
+  const folded = name.normalize("NFKD").replace(/\p{M}+/gu, "");
+  const slug = folded
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_NAME)
+    .replace(/-+$/, "");
+  return slug || `theme-${fnv1a(name)}`;
+}
 
 export function isCustomTheme(id: string): boolean {
   return id.startsWith(CUSTOM_PREFIX);
@@ -63,12 +101,18 @@ export function customThemeId(name: string): string {
   return isCustomTheme(name) ? name : CUSTOM_PREFIX + name;
 }
 
-/** id 是否可安全拼进选择器与令牌名。内置与 `custom:` 两种形状各自校验。 */
+/**
+ * id 是否可安全拼进选择器与令牌名。`custom:` 前缀剥掉后规则与内置相同。
+ *
+ * 长度上限量的是**去掉前缀之后**的那一段：agent 的文件名上限就是 64，
+ * `slugThemeId()` 也按 64 截，把 `custom:` 这 7 个字节算进来的话，一个刚好 64 字符
+ * 的合法 slug 会在这里被判不安全——主题拿得到令牌却切不过去，且毫无提示。
+ */
 export function isSafeThemeId(id: string): boolean {
-  if (typeof id !== "string" || id.length === 0 || id.length > MAX_NAME) return false;
-  const name = customThemeName(id);
-  if (name !== null) return name.length > 0 && CUSTOM_NAME.test(name);
-  return BUILTIN_ID.test(id);
+  if (typeof id !== "string" || id.length === 0) return false;
+  const name = customThemeName(id) ?? id;
+  if (name.length === 0 || name.length > MAX_NAME) return false;
+  return THEME_ID.test(name);
 }
 
 /**
@@ -120,6 +164,22 @@ export function schemeFromCss(id: string, read: CssReader): Scheme {
 }
 
 /**
+ * 某套自定义主题的**展示名**（原文件名）。
+ *
+ * 为什么要单独一个令牌：2026-08-05 之后 id 是文件名 slug 化的产物
+ * （`Tokyo Night` → `tokyo-night`），清单里列的是 id，直接拿 id 当名字显示等于
+ * 把用户的主题改了名。agent 每套多发一条 `--ps-name-custom-<id>: "Tokyo Night"`
+ * （几十字节），设置面板显示它、id 只用于选择器与令牌名。
+ *
+ * 读不到就回落 id：老 agent、demo 站、以及 CSS 还没到位时都会走这条，显示一个
+ * slug 总好过显示空白。
+ */
+export function nameFromCss(id: string, read: CssReader): string {
+  const raw = read(`--ps-name-${tokenIdOf(id)}`).trim().replace(/^["']|["']$/g, "").trim();
+  return raw || (customThemeName(id) ?? id);
+}
+
+/**
  * 某套主题的 5 个预览色。任一缺失返回 null（调用方据此画空色板而不是画错色板）。
  * 预览色住在无属性 `:root` 里，所以 A 主题激活时也读得到 B 主题的色——
  * 这正是它们存在的理由，否则设置面板里六行色板会画成一模一样。
@@ -133,10 +193,10 @@ export function swatchFromCss(id: string, read: CssReader): string[] | null {
 /** 一个没能成为主题的文件。`reason` 决定 UI 显示哪句话。 */
 export interface ThemeSkip {
   file: string;
-  reason: "name" | "parse" | "read";
+  reason: "name" | "dup" | "builtin" | "parse" | "read" | "internal";
 }
 
-const SKIP_REASONS = new Set(["name", "parse", "read"]);
+const SKIP_REASONS = new Set(["name", "dup", "builtin", "parse", "read", "internal"]);
 
 /**
  * 解析 agent 编进 CSS 的跳过清单（`"parse:a.ghostty,name:b c.ghostty"`）。
