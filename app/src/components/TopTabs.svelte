@@ -241,7 +241,7 @@
     flex: none; background: transparent; border: 0;
     color: var(--dim); width: 30px; height: 30px;
     padding: 0 0 6px; font-size: 1rem; line-height: 1;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
   .add:active { color: var(--text); }
 

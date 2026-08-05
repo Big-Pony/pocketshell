@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 // 主题是「一套令牌名 × N 组值」：组件只引用语义令牌，所以加配色本该是零改动的。
@@ -230,4 +230,33 @@ test("app.css 里不再硬编码等宽字体族", () => {
     (l) => /font-family:\s*(?!inherit|var\()/.test(l) && MONO_HINT.test(l),
   );
   expect(offenders.join("\n"), "app.css 里还有硬编码的等宽字体链").toBe("");
+});
+
+/** 所有组件源文件。 */
+function componentFiles(): string[] {
+  const dir = resolve(__dirname, "./components");
+  return readdirSync(dir).filter((f) => f.endsWith(".svelte")).map((f) => `${dir}/${f}`);
+}
+
+test("组件里不再有硬编码的等宽字体族 —— 一律走 var(--font-mono)", () => {
+  // 「令牌名不改、只换值」那条规矩在字体上的落地。漏一处的症状是：切了字体，
+  // 终端变了而 git 分支名没变——一眼看不出，却处处不协调。
+  //
+  // 允许 inherit 与 var(...)。**只管等宽**：组件若要指定正文 sans-serif
+  // 字体不在本需求范围内，判据是这行提没提 monospace 或某个等宽族名。
+  const MONO_HINT = /monospace|JetBrains Mono|SF Mono|Maple Mono|Menlo|Consolas|MonaspiceNe|GoogleSansCode|UbuntuMono/;
+  const offenders: string[] = [];
+  for (const file of componentFiles()) {
+    const src = readFileSync(file, "utf8");
+    src.split("\n").forEach((line, i) => {
+      // CSS 里的 font-family: 与 JS 里的 fontFamily: 都要管
+      const m = /(?:font-family|fontFamily)\s*:\s*(.+)/.exec(line);
+      if (!m) return;
+      const val = m[1].trim();
+      if (val.startsWith("inherit") || val.startsWith("var(")) return;
+      if (!MONO_HINT.test(line)) return;
+      offenders.push(`${file.split("/").pop()}:${i + 1}  ${line.trim()}`);
+    });
+  }
+  expect(offenders.join("\n"), "这些地方还在写死等宽字体族").toBe("");
 });

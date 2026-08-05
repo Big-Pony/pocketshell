@@ -170,7 +170,7 @@
   /* 分组标题走共同设计语言：mono 大写小标题 */
   .sp-group {
     color: var(--dimmer);
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     font-weight: 600;
     margin: 12px 2px 6px;
@@ -197,7 +197,7 @@
     border: 0;
     padding: 6px 10px;
     font-size: 0.72rem;
-    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
   .ins:active { background: var(--keyhi); }
   .cr { color: var(--accent); margin-left: 5px; font-size: 0.6rem; }

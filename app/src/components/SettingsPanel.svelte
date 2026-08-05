@@ -722,7 +722,7 @@
     outline: none;
     resize: none;
   }
-  .timport textarea { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem; }
+  .timport textarea { font-family: var(--font-mono); font-size: 0.7rem; }
   .timport input:focus, .timport textarea:focus { border-color: var(--accent); }
   /* Radio dot: filled ring when picked. Colour is the only cue in the swatch
      row, so the dot carries the state redundantly (not colour-only). */
@@ -757,7 +757,7 @@
     min-width: 1.6em;
     text-align: right;
   }
-  .val { font-size: 11px; color: var(--dim); min-width: 2.4em; text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .val { font-size: 11px; color: var(--dim); min-width: 2.4em; text-align: right; font-family: var(--font-mono); }
   input[type="range"] { width: 104px; accent-color: var(--accent); }
   .seg {
     display: flex;
@@ -814,7 +814,7 @@
   /* 分区标题走共同设计语言：mono 大写小标题 */
   .nsub {
     color: var(--dimmer);
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     font-weight: 600;
     text-transform: uppercase;

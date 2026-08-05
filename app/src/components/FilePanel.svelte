@@ -49,6 +49,6 @@
   .subtabs button { flex: 1; padding: 6px 0; border: 0; background: transparent; color: var(--dim); border-radius: var(--radius-sm); font-size: 0.72rem; }
   .subtabs button.on { background: var(--seg-active-bg); color: var(--seg-active-text); font-weight: 600; box-shadow: var(--seg-active-ring), var(--seg-shadow); }
   /* 分支名与分割条一致用主色，不再是 amber */
-  .branch { margin-left: 5px; font-size: 0.6rem; color: var(--accent); font-weight: 600; font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .branch { margin-left: 5px; font-size: 0.6rem; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
   .body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 </style>

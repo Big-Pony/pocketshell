@@ -110,7 +110,7 @@
   .rf:disabled { opacity: 0.45; }
   /* 分区标题走共同设计语言：mono 大写小标题 */
   .st {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--dimmer); font-weight: 600; margin: 12px 0 6px;
   }

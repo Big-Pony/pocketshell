@@ -132,7 +132,7 @@
     flex: 1; min-width: 0; font-size: 0.72rem; color: var(--text);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .mono { font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace; }
+  .mono { font-family: var(--font-mono); }
   .hm-act {
     flex: 0 0 auto; background: transparent; color: var(--dim);
     border: 0; padding: 4px 7px; font-size: 0.8rem;
