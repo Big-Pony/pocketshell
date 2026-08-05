@@ -248,3 +248,16 @@ test("bootFontUrl 拒绝可疑值", () => {
   localStorage.setItem("ps.settings", JSON.stringify({ bootFontUrl: '"><script>' }));
   expect(loadSettings().bootFontUrl).toBeUndefined();
 });
+
+test("bootFontUrl 只放行本地 /fonts/*.woff2 路径，拒绝协议相对/跨域/穿越", () => {
+  // 宽松字符集能放过 `//evil.com/x.woff2`（协议相对 URL 不需要冒号），内联脚本
+  // 会把它原样塞进 <link href>，首帧就发出一个跨域请求。
+  for (const bad of ["//evil.com/a.woff2", "https://evil.com/a.woff2", "/fonts/../../etc/passwd"]) {
+    localStorage.setItem("ps.settings", JSON.stringify({ bootFontUrl: bad }));
+    expect(loadSettings().bootFontUrl, bad).toBeUndefined();
+  }
+  for (const good of ["/fonts/maple-mono-regular.woff2", "/fonts/JetBrainsMono-Regular.woff2"]) {
+    localStorage.setItem("ps.settings", JSON.stringify({ bootFontUrl: good }));
+    expect(loadSettings().bootFontUrl, good).toBe(good);
+  }
+});

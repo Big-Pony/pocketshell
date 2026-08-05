@@ -43,6 +43,21 @@ export const FONTS: FontEntry[] = [
 /** 在 fonts.css 里渲染为无属性 `:root` 的那套。 */
 export const DEFAULT_FONT: FontId = "maple-mono";
 
+/**
+ * 回落链尾部，逐字照抄 fonts.css 里每条 `--font-mono-<id>` 共用的那一段
+ * （字体族名之后的部分）。termFontFamily() 的 jsdom 兜底路径要拼一条完整的
+ * 链，之前漏了 CJK/emoji 那截——中文会掉到某个非等宽字体、终端对齐全乱，
+ * 且只有在 CSS 没生效时才会暴露，真机上几乎看不出来。单独导出这一份是为了
+ * 不再有第二处手抄同一串字体名。
+ */
+export const FALLBACK_TAIL =
+  '"SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", ' +
+  '"Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", ' +
+  '"Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", ' +
+  '"Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", ' +
+  '"Droid Sans Fallback", "Apple Color Emoji", "Segoe UI Emoji", ' +
+  '"Noto Color Emoji", monospace';
+
 function entryOf(id: FontId): FontEntry {
   return FONTS.find((f) => f.id === id) ?? FONTS.find((f) => f.id === DEFAULT_FONT)!;
 }
@@ -65,7 +80,7 @@ export function termFontFamily(): string {
     if (v) return v;
   }
   const id = (document?.documentElement?.dataset?.font as FontId) || DEFAULT_FONT;
-  return `"${familyOf(id)}", "SF Mono", ui-monospace, Menlo, monospace`;
+  return `"${familyOf(id)}", ${FALLBACK_TAIL}`;
 }
 
 /**

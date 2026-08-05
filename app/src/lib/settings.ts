@@ -111,6 +111,13 @@ function coerceBootValue(v: unknown): string | undefined {
   return s.length > 0 && s.length <= 64 && /^[#a-zA-Z0-9(),.%\s/_-]+$/.test(s) ? s : undefined;
 }
 
+/** bootFontUrl 会被内联脚本直接写进 <link href>。只放行本地字体路径——
+ *  宽松字符集能过 `//evil.com/x.woff2`（协议相对 URL 不需要冒号），
+ *  那会在首帧发一个跨域请求。 */
+function coerceBootFontUrl(v: unknown): string | undefined {
+  return typeof v === "string" && /^\/fonts\/[\w.-]+\.woff2$/.test(v) ? v : undefined;
+}
+
 // Legacy boolean -> level; invalid/absent -> default.
 function coerceVibrate(v: unknown): VibrateLevel {
   if (v === true) return "medium";
@@ -144,7 +151,7 @@ export function loadSettings(store: Storage = localStorage): Settings {
     if (bootBg) s.bootBg = bootBg;
     const scheme = parsed.scheme === "light" || parsed.scheme === "dark" ? parsed.scheme : undefined;
     if (scheme) s.scheme = scheme;
-    const bootFontUrl = coerceBootValue(parsed.bootFontUrl);
+    const bootFontUrl = coerceBootFontUrl(parsed.bootFontUrl);
     if (bootFontUrl) s.bootFontUrl = bootFontUrl;
     return s;
   } catch {

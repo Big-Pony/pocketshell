@@ -14,7 +14,7 @@
 // 上游 URL **钉死 tag**，不用 latest：上游发新版时字形与内部命名都可能变，
 // 钉死才能保证重跑本脚本产出的东西与仓库里已有的一致。升级字体是一次显式的、
 // 要重跑 src/fonts.test.ts 的改动。
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
