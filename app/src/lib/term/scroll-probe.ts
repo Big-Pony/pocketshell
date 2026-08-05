@@ -32,7 +32,7 @@ export interface ScrollSnapshot {
   cellHeight: number;
   /** 渲染画布高度（CSS px）。 */
   canvasHeight: number;
-  /** 滚动容器的真实状态，直接取自 DOM——与上面 xterm 侧的账本对照着看。 */
+  /** 滚动的真实账本，取自 Viewport._scrollableElement（虚拟化滚动，不在 DOM 上）。 */
   scrollHeight: number;
   scrollTop: number;
   clientHeight: number;
@@ -47,10 +47,10 @@ const num = (v: unknown): number =>
 /**
  * 拍下一份滚动状态。永不抛。
  *
- * `term` 是 xterm 的 Terminal，`host` 是挂载它的元素（用来找滚动容器）。
- * 两者都按 unknown 收：这是取证代码，调用方不该为了埋点去满足类型。
+ * `term` 是 xterm 的 Terminal。按 unknown 收：这是取证代码，调用方不该为了
+ * 埋点去满足类型。
  */
-export function snapshotScroll(term: unknown, host: unknown): ScrollSnapshot {
+export function snapshotScroll(term: unknown): ScrollSnapshot {
   const snap: ScrollSnapshot = {
     bufferType: "unknown",
     bufferLength: UNREAD, baseY: UNREAD, ydisp: UNREAD,
@@ -80,16 +80,23 @@ export function snapshotScroll(term: unknown, host: unknown): ScrollSnapshot {
     // 残缺报告优于没有报告；字段保持 UNREAD。
   }
   try {
-    // xterm 6 把可滚动区做成了 .xterm-scrollable-element（不再是 .xterm-viewport
-    // 直接滚）。找不到就保持 -1，别猜别的元素——猜错会给出一份看似正常的假数据。
-    const el = (host as { querySelector?(s: string): unknown } | null | undefined)
-      ?.querySelector?.(".xterm-scrollable-element") as
-      { scrollHeight?: number; scrollTop?: number; clientHeight?: number } | null | undefined;
-    snap.scrollHeight = num(el?.scrollHeight);
-    snap.scrollTop = num(el?.scrollTop);
-    snap.clientHeight = num(el?.clientHeight);
+    // xterm 6 把滚动虚拟化了：.xterm-scrollable-element 没有 overflow 规则，
+    // 只是 .xterm-screen 加两条自绘滚动条的定位壳，它的 scrollHeight/scrollTop
+    // 是**恒定常量**（实测：300 行 scrollback 下恒为 360/0/360，向上翻 100 行
+    // 也纹丝不动）。真实账本在 Viewport._scrollableElement 里 —— Viewport._sync()
+    // 把 cell.height × lines.length 喂给它的 setScrollDimensions()，从不写 DOM。
+    //
+    // 读错地方不是「少一条线索」而是**假阳性**：常量恰好长成
+    // scrollHeight === clientHeight && scrollTop === 0，也就是「滚动容器认为无处
+    // 可滚」的教科书形态，会让读日志的人把头号怀疑判为坐实。
+    const sd = (term as {
+      _core?: { _viewport?: { _scrollableElement?: { getScrollDimensions?(): { scrollHeight?: number; scrollTop?: number; height?: number } } } };
+    } | null | undefined)?._core?._viewport?._scrollableElement?.getScrollDimensions?.();
+    snap.scrollHeight = num(sd?.scrollHeight);
+    snap.scrollTop = num(sd?.scrollTop);
+    snap.clientHeight = num(sd?.height); // Scrollable 管视口高度叫 height
   } catch {
-    // 同上。
+    // 同上：残缺报告优于没有报告。
   }
   return snap;
 }
