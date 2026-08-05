@@ -119,9 +119,17 @@
   }
 
   // 字体切换是同步的：令牌都在 fonts.css 里，不像自定义主题需要等 agent 供给。
+  //
+  // 顺序很关键，不能颠倒：update() 用的是组件持有的 settings prop 快照（在这次
+  // 点击之前捕获的），它的展开写会把整份设置连同旧的 bootFontUrl 一起落盘。
+  // 如果先调 applyFont 再调 update，applyFont 刚写下的新 bootFontUrl 会被
+  // update() 那份过期快照原样覆盖回旧值——下次冷启动 index.html 的内联脚本会
+  // 去 preload 用户已经切走的那套字体，真正在用的那套反而没预取，首帧防闪烁
+  // 机制形同虚设。所以必须让 applyFont 最后写：先用旧快照落盘 fontFamily，
+  // 再用 applyFont 写 data-font 与 bootFontUrl，这一步之后没有别的写入能覆盖它。
   function pickFont(id: Settings["fontFamily"]) {
-    applyFont(id);
     update("fontFamily", id);
+    applyFont(id);
   }
 
   // 剪贴板读取必须在 click handler 的 user gesture 内发起 —— 这是浏览器允许

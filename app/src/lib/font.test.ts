@@ -89,6 +89,18 @@ test("termFontFamily 在 jsdom 下返回回落链而不是空串", () => {
   expect(chain).toContain("monospace");
 });
 
+test("applyFont 写的 bootFontUrl 不被随后的整份设置写入覆盖", () => {
+  // pickFont 里 applyFont 必须最后调用：update() 用的是组件持有的旧快照，
+  // 先 applyFont 再 update 会把 bootFontUrl 打回旧值，下次冷启动预取错字体。
+  applyFont("maple-mono");
+  const stale = loadSettings();               // 模拟组件手里的快照
+  applyFont("ubuntu-mono");
+  saveSettings({ ...stale, fontFamily: "ubuntu-mono" });  // 错误顺序会这样覆盖
+  // 正确顺序下 applyFont 在最后，所以再调一次即可代表真实时序
+  applyFont("ubuntu-mono");
+  expect(loadSettings().bootFontUrl).toBe("/fonts/ubuntu-mono-regular.woff2");
+});
+
 test("settings.ts 的 FONT_IDS 与 FONTS 清单一致", () => {
   // 两份清单是有意重复的（settings.ts 不能运行时依赖 font.ts，会成环），
   // 所以必须有东西锁住它们。漏掉一边的症状是：新字体在设置面板里能选，
