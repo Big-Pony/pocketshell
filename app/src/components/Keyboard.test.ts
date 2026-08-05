@@ -157,3 +157,33 @@ test("keys tab: rollover — a second key going down before the first key's defe
   expect(onText).toHaveBeenCalledWith("q");
   expect(onText).toHaveBeenCalledWith("w");
 });
+
+// 需求 2（12 期）：方向盘右侧 2×2 从左上顺时针依次是 esc / tab / space / del。
+// 网格按行填充，所以顺时针的视觉顺序 = DOM 顺序 Esc, Tab, Del, Space
+//（左上 → 右上 → 左下 → 右下）。这条断言存在的意义是：把「顺时针」这个
+// 只在视觉上成立的约定，翻译成一条机器能守住的 DOM 顺序。
+test("ops sub-tab: the 2x2 pad next to the D-pad reads Esc/Tab/Del/Space clockwise", async () => {
+  const { r } = openOps();
+  await fireEvent.click(screen.getByText("✂ 快捷操作"));
+  const pad = r.container.querySelector(".ops-nav2")!;
+  const caps = Array.from(pad.querySelectorAll("button")).map((b) => b.textContent?.trim());
+  expect(caps).toEqual(["Esc", "Tab", "Del", "space"]);
+});
+
+// 四个动作按钮升到第一排后仍必须可点（位置变了，行为不变）。
+test("ops sub-tab: the action buttons now sit in the first row", async () => {
+  const { r } = openOps();
+  await fireEvent.click(screen.getByText("✂ 快捷操作"));
+  const row = r.container.querySelector(".ops-row")!;
+  const labels = Array.from(row.querySelectorAll("button")).map((b) => b.textContent?.trim());
+  expect(labels).toEqual(["选择文本", "全选复制", "复制输出", "粘贴"]);
+});
+
+// Home/End/PgUp/PgDn 保留（不是删除，是下移到最后一排）——TUI 翻页的唯一出口。
+test("ops sub-tab: Home/End/PgUp/PgDn move to the last row and stay functional", async () => {
+  const { r } = openOps();
+  await fireEvent.click(screen.getByText("✂ 快捷操作"));
+  const bottom = r.container.querySelector(".ops-bottom")!;
+  const caps = Array.from(bottom.querySelectorAll("button")).map((b) => b.textContent?.trim());
+  expect(caps).toEqual(["Home", "End", "PgUp", "PgDn"]);
+});
