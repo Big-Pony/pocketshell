@@ -8,8 +8,6 @@
     <meta name="theme-color" content="#242524" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
-    <!-- Terminal font is render-blocking; start the fetch before the CSS asks for it (Bold stays lazy). -->
-    <link rel="preload" href="/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
     <!-- iOS does not read the manifest; these keep "Add to Home Screen" decent there too -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -44,6 +42,9 @@
         // 首帧兜底：默认主题 cream-dark 的 --bg-deep（见 src/theme-tokens.css）。
         // **全套体系里唯一保留的硬编码色值**，只有首次访问会用到它。
         var FALLBACK_BG = "#242524";
+        // 首帧兜底：默认字体的 Regular。**全套体系里第二个（也是最后一个）
+        // 硬编码值**，只有首次访问会用到。index.html.test.ts 锁住它与 FONTS 一致。
+        var FALLBACK_FONT = "/fonts/maple-mono-regular.woff2";
         var pref = "", scheme = "", bootBg = "", lang = "";
         try {
           var s = JSON.parse(localStorage.getItem("ps.settings") || "{}");
@@ -68,6 +69,24 @@
         if (meta) meta.setAttribute("content", bg);
         if (!lang) lang = (navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
         root.lang = lang === "zh" ? "zh-CN" : "en";
+        // 字体 preload。这段跑在任何 CSS 之前，所以它没法自己知道「当前字体的
+        // 文件在哪」——与上面的背景色同一个处境，同一套解法：applyFont() 每次
+        // 换字体都把 Regular 的 URL 写回 ps.settings，这里只读不算。脚本因此
+        // 完全不知道有哪些字体，也就无从漂移。
+        //
+        // 只预取 Regular：Bold 保持惰性（浏览器对 @font-face 天然按需），
+        // 大多数终端内容是常规字重。
+        var fontUrl = "";
+        try {
+          if (typeof s.bootFontUrl === "string") fontUrl = s.bootFontUrl;
+        } catch (e) {}
+        var fl = document.createElement("link");
+        fl.rel = "preload";
+        fl.as = "font";
+        fl.type = "font/woff2";
+        fl.crossOrigin = "anonymous";
+        fl.href = fontUrl || FALLBACK_FONT;
+        document.head.appendChild(fl);
       })();
     </script>
     <!-- 用户自己的 .ghostty 主题（agent 的 <keyDir>/themes/）。
