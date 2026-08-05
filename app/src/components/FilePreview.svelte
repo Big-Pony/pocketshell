@@ -277,7 +277,8 @@
 </div>
 
 <style>
-  /* 代码区跟随主题（--code-*）；终端区仍固定深色 --term-* */
+  /* 代码区跟随主题（--code-*）。终端区从 2026-08-05 起也跟随主题明暗，
+     两者同源于该主题的 .ghostty 调色板。 */
   .preview { width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--code-bg); color: var(--code-fg); }
   .hidden { display: none; }
   /* 应用内全屏覆盖层：盖住上下区 + tab 栏 + 底栏（z-index 高于 .overlay=40） */

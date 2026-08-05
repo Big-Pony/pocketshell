@@ -321,6 +321,8 @@ Agent 内置基于 GitHub Releases 的应用内自动更新：启动时和手机
 
 [Apache-2.0](./LICENSE)
 
+内置主题引用了 MIT 许可的第三方调色板，来源与许可见 [THIRD-PARTY-THEMES.md](./THIRD-PARTY-THEMES.md)。
+
 ## 🙏 致谢
 
 - [xterm.js](https://github.com/xtermjs/xterm.js) —— 浏览器终端渲染

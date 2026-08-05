@@ -1,0 +1,67 @@
+# ============================================================
+#  PocketShell theme: blackout（纯黑银）
+#  Upstream name : —— 无上游，PocketShell 原创
+#  License       : 本仓库许可（Apache-2.0）
+#  History       : 2026-07-25 随「6 套配色」手写引入，id 为 blackout；
+#                  2026-08-05 主题体系改为 .ghostty 派生后，从 app.css 的
+#                  手写令牌反推为调色板，id 保持 blackout —— 老用户
+#                  localStorage 里存的就是它，无感迁移。
+#
+#  设计意图：OLED 纯黑省电 + **无彩银主色**，整屏唯一的颜色是状态灯
+#  （运行绿 / 等待黄 / 断开红）。所以 ps-accent 是灰白而不是任何彩色——
+#  派生器不会给它强加彩度，这是有意的。
+# ============================================================
+
+# ps-accent = #e9e9e6
+
+background = 000000
+# 旧主题的 UI 文字（--text #e9e9e6）与终端正文（--term-text #cfd2cd）本是两个
+# 值，而派生器用同一个 foreground 喂两者。取亮的那个：UI 文字逐字还原，终端
+# 正文跟着从 13.75 提到 17.26 对比度——纯黑底上更亮的正文不是坏事。
+foreground = e9e9e6
+
+# 游标与选区：沿用旧主题的 --term-accent / --term-selection 语义
+cursor-color = e9e9e6
+cursor-text  = 000000
+
+selection-background = 3b3b3a
+selection-foreground = ffffff
+
+# ── ANSI 16 色 ────────────────────────────────────────────────
+# 0-7 标准色、8-15 亮色。红/绿/黄三槽刻意与旧主题的 --red/--ok/--amber
+# 同值，让终端里的错误/成功/警告与 UI 状态灯是同一个颜色。
+# 其余槽位取旧主题的 --cyan/--blue 及其衍生，整体压低饱和以配无彩机身。
+
+# 0  Black
+palette = 0=#000000
+# 1  Red / 旧 --red 的暗变体
+palette = 1=#c94a42
+# 2  Green / 旧 --ok 的暗变体
+palette = 2=#2bb34b
+# 3  Yellow / 旧 --amber 的暗变体
+palette = 3=#c9973f
+# 4  Blue / 旧 --blue
+palette = 4=#5a86c4
+# 5  Magenta
+palette = 5=#b98fd9
+# 6  Cyan / 旧 --cyan
+palette = 6=#4aa5ae
+# 7  White / 旧 --term-text
+palette = 7=#cfd2cd
+
+# 8  Bright Black / 旧 --dimmer
+palette = 8=#5a5b58
+# 9  Bright Red / 旧 --red（派生器取 bright 槽做 --red）
+palette = 9=#e5564d
+# 10 Bright Green / 旧 --ok（派生器取 bright 槽做 --ok）
+palette = 10=#35d158
+# 11 Bright Yellow / 旧 --amber（同上）
+palette = 11=#e8b04b
+# 12 Bright Blue
+palette = 12=#6b9fe8
+# 13 Bright Magenta
+palette = 13=#cba6e8
+# 14 Bright Cyan
+palette = 14=#5bbfc9
+# 15 Bright White / 旧 --text
+palette = 15=#e9e9e6

@@ -1,0 +1,34 @@
+# ============================================================
+#  PocketShell theme: mocha
+#  Upstream name : Catppuccin Mocha
+#  Source        : https://github.com/mbadolato/iTerm2-Color-Schemes (ghostty/Catppuccin Mocha)
+#  License       : MIT — Copyright (c) 2011 to Present Mark Badolato
+#                  (each individual theme's copyright belongs to its author)
+#  Changes       : renamed the file to `mocha.ghostty` and added the
+#                  `ps-accent` directive below. No colour value was modified.
+# ============================================================
+
+# ps-accent = #cba6f7
+
+palette = 0=#45475a
+palette = 1=#f38ba8
+palette = 2=#a6e3a1
+palette = 3=#f9e2af
+palette = 4=#89b4fa
+palette = 5=#f5c2e7
+palette = 6=#94e2d5
+palette = 7=#bac2de
+palette = 8=#585b70
+palette = 9=#f7aec2
+palette = 10=#c2ecbf
+palette = 11=#fcd682
+palette = 12=#aeccfc
+palette = 13=#f398da
+palette = 14=#b1eae1
+palette = 15=#a6adc8
+background = #1e1e2e
+foreground = #cdd6f4
+cursor-color = #f5e0dc
+cursor-text = #1e1e2e
+selection-background = #f5e0dc
+selection-foreground = #1e1e2e

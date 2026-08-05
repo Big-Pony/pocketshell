@@ -25,6 +25,7 @@ import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { formatDiagReport } from "./diag-report";
 import { chainPathOf, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { checkLatest } from "./update-check";
+import { importTheme } from "./server-theme";
 import { readCache, writeCache, isFresh, CHECK_TTL_MS, type CachedCheck } from "./update-cache";
 import { AGENT_VERSION } from "./version";
 
@@ -123,6 +124,11 @@ export const parse = {
   notifyWire: (p: RpcParams) => ({ tool: p.tool as NotifyTool }),
   notifyTestWebhook: (p: RpcParams) => ({ id: str(p, "id") }),
   updateCheck: (p: RpcParams) => ({ force: flag(p, "force") }),
+  // Left as unknown-ish on purpose: importTheme() does the type narrowing, and
+  // it has to anyway for the HTTP body. String(undefined) === "undefined" would
+  // turn "you forgot the name" into "the name is literally undefined".
+  themeImport: (p: RpcParams) => ({ name: p.name, text: p.text }),
+  themeName: (p: RpcParams) => ({ name: str(p, "name") }),
 };
 
 // ---------------------------------------------------------------------------
@@ -198,6 +204,18 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   // 实例身份：只读，走通用 RPC 信封（不需要新增 protocol 消息类型）。
   // 天然只在 Noise 握手成功后可得 —— 未配对设备看不到实例名。
   "agent.info": (ctx) => ok({ instanceName: ctx.config.instanceName ?? null }),
+
+  // 自定义主题的写操作。**读**走 HTTP（`GET /theme/custom.css`，必须是
+  // <link> 能拉的普通样式表，见 server-theme.ts），写走这里——理由是鉴权：
+  // 手机既不在 loopback 上、也拿不到 notify token，而 RPC 信封天然只有握手
+  // 成功的设备能用，设备的 Noise 公钥就是凭据。同一台机器上的本地脚本仍可用
+  // HTTP 的 POST /theme/import（loopback + bearer，照 /internal/notify）。
+  //
+  // 两者共用 importTheme()，所以「什么名字合法、什么文本能存」只有一份判定。
+  "theme.import": (ctx, p) => ok(importTheme(ctx.config.themes, parse.themeImport(p))),
+  // 删除只需要名字；store 自己会拒掉它本来就不会写的名字（不存在即 false，
+  // 前端据此提示，而不是假装删成功）。
+  "theme.remove": (ctx, p) => ok({ removed: ctx.config.themes.remove(parse.themeName(p).name) }),
 
   // 客户端诊断上报（docs/bug/终端显示异常2）。整屏文字消失只在真机回
   // 前台时偶现，而那正是「手边没有电脑、连不上 devtools」的场景，所以

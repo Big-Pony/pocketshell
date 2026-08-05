@@ -1,0 +1,37 @@
+# ============================================================
+#  测试夹具：ANSI 槽位语义错位的真实调色板  —— 不是内置主题
+#
+#  Black Metal 把青灰放在红槽（1/9）、粉色放在绿槽（2/10）、红色放在黄槽
+#  （3/11）。这不是杜撰的坏数据，是上游真实存在的调色板，因此它是色相校正
+#  的回归样本：派生器必须把 --ok/--red/--amber 拉回正确色相，同时让
+#  --term-ansi-* 原样透传（终端要与同一套主题在 Ghostty 里长得一样）。
+#
+#  2026-08-05 前它曾作为内置主题 blackout；手写的「纯黑银」迁回并取回该 id
+#  后，它退役为纯夹具。来源 mbadolato/iTerm2-Color-Schemes（MIT）。
+# ============================================================
+
+
+# ps-accent = #a06666
+
+palette = 0=#000000
+palette = 1=#486e6f
+palette = 2=#dd9999
+palette = 3=#a06666
+palette = 4=#888888
+palette = 5=#999999
+palette = 6=#aaaaaa
+palette = 7=#c1c1c1
+palette = 8=#404040
+palette = 9=#486e6f
+palette = 10=#dd9999
+palette = 11=#a06666
+palette = 12=#888888
+palette = 13=#999999
+palette = 14=#aaaaaa
+palette = 15=#c1c1c1
+background = #000000
+foreground = #c1c1c1
+cursor-color = #c1c1c1
+cursor-text = #8e8e8e
+selection-background = #c1c1c1
+selection-foreground = #000000

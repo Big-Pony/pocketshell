@@ -1,0 +1,59 @@
+# ============================================================
+#  PocketShell theme: cream-dark
+#  Upstream name : Claude Cream Dark
+#  Source        : https://github.com/kakarrot-dev/claude-cream (themes/ghostty/claude-cream-dark)
+#  License       : MIT — Copyright (c) 2026 段茱文 (kakarrot0109)
+#  Changes       : renamed the file to `cream-dark.ghostty` and added the
+#                  `ps-accent` directive below. No colour value was modified.
+#  暖炭灰底 + 柔和金强调 + 米白文字
+# ============================================================
+
+# ps-accent = #e6bf7a
+
+# 主体背景 & 前景
+background = 2d2e2d
+foreground = ddd9cd
+
+# 光标（柔和金）
+cursor-color = e6bf7a
+cursor-text  = 2a1e1b
+
+# 选中区
+selection-background = 736347
+selection-foreground = f8f7f2
+
+# ── ANSI 16 色（Dark 变体：整体提亮 + 保持 Claude 色调）──────
+
+# 0  Black / 更深底
+palette = 0=1f201f
+# 1  Red
+palette = 1=ea928a
+# 2  Green
+palette = 2=98c379
+# 3  Yellow
+palette = 3=e5c07b
+# 4  Blue
+palette = 4=89a8ce
+# 5  Magenta
+palette = 5=c891d9
+# 6  Cyan / 提亮 accent-teal
+palette = 6=75b5bc
+# 7  White / 米色正文
+palette = 7=ddd9cd
+
+# 8  Bright Black / 暖灰
+palette = 8=8c887e
+# 9  Bright Red
+palette = 9=f2a29a
+# 10 Bright Green
+palette = 10=a9d18e
+# 11 Bright Yellow / 提亮琥珀
+palette = 11=f0cf92
+# 12 Bright Blue
+palette = 12=a6bde0
+# 13 Bright Magenta
+palette = 13=d9a9e8
+# 14 Bright Cyan
+palette = 14=9bced3
+# 15 Bright White
+palette = 15=f8f7f2

@@ -23,6 +23,7 @@ import { isLocalAddr } from "./net-addr";
 import { watchRegistryFile, readStamp } from "./registry-watch";
 import { PreviewTokens } from "./preview-service";
 import { buildPreviewResponse } from "./server-preview";
+import { buildThemeCssResponse, importTheme } from "./server-theme";
 import { AGENT_VERSION } from "./version";
 import { checkLatest } from "./update-check";
 import { readCache, writeCache, type CachedCheck } from "./update-cache";
@@ -787,6 +788,39 @@ export function startServer(deps: Deps = {}) {
       }
       if (url.pathname.startsWith("/preview/")) {
         return buildPreviewResponse(previewTokens, url, Date.now(), req.headers.get("range"));
+      }
+      // The user's own themes as a stylesheet. Unauthenticated on purpose, and
+      // it is worth being explicit about why: the app pulls it with a plain
+      // <link> in <head> (design §4.3 — a blocking stylesheet is what makes a
+      // custom theme survive the first frame), and a <link> can carry neither a
+      // bearer token nor the Noise session. The content is a colour palette the
+      // user copied out of a public theme repository, sitting behind whatever
+      // guards the app itself; there is nothing here to protect. Writes are a
+      // different matter — see /theme/import below.
+      if (url.pathname === "/theme/custom.css" && (req.method === "GET" || req.method === "HEAD")) {
+        return buildThemeCssResponse(config.themes, url, req.headers.get("if-none-match"));
+      }
+      // Import over HTTP: loopback + bearer, exactly like /internal/notify.
+      // That makes it a *local* path — a script or a shell one-liner on the
+      // machine running the agent — because those are the two credentials a
+      // local process can get at (the token is in <keyDir>/notify_token, and the
+      // agent hands it to the tools it wires up).
+      //
+      // A phone cannot use it: it is not on loopback and it does not have the
+      // token. The settings-panel import therefore goes over the authed WS
+      // instead (`theme.import` in rpc-router.ts), where the device's Noise key
+      // is already the credential. Two transports for one operation is not
+      // ideal, but the alternative was a write endpoint whose only guard is a
+      // loopback check — which is exactly the hole the admin page was retired
+      // for (VULN-001, see net-addr.ts).
+      if (url.pathname === "/theme/import" && req.method === "POST") {
+        const ip = srv.requestIP(req)?.address ?? "";
+        if (!isLocalAddr(ip)) return new Response("Forbidden", { status: 403 });
+        if (req.headers.get("authorization") !== `Bearer ${config.notifyToken}`) return new Response("Unauthorized", { status: 401 });
+        const body = (await req.json().catch(() => null)) as { name?: unknown; text?: unknown } | null;
+        if (!body) return new Response("bad", { status: 400 });
+        const r = importTheme(config.themes, body);
+        return Response.json(r, { status: r.ok ? 200 : 400 });
       }
       const r = resolveStatic(
         url.pathname,
