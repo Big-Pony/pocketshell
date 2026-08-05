@@ -21,8 +21,8 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false });
+  saveSettings({ layout: "win", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
@@ -131,7 +131,7 @@ test("bootBg / scheme 默认不存在，写了能读回", () => {
 });
 
 test("bootBg 脏值被丢弃（它会被直接写进 style.background）", () => {
-  for (const v of ["", "   ", 42, null, "#fff; }", "url(javascript:alert(1))", "x".repeat(40)]) {
+  for (const v of ["", "   ", 42, null, "#fff; }", "url(javascript:alert(1))", "x".repeat(70)]) {
     const store = memStore();
     store.setItem("ps.settings", JSON.stringify({ bootBg: v }));
     expect(loadSettings(store).bootBg, JSON.stringify(v)).toBeUndefined();
@@ -218,4 +218,33 @@ test("groupTabsByType 非布尔脏数据回落 false", () => {
   const store = memStore();
   store.setItem("ps.settings", JSON.stringify({ groupTabsByType: "yes" }));
   expect(loadSettings(store).groupTabsByType).toBe(false);
+});
+
+test("fontFamily 默认 maple-mono，脏数据回落默认", () => {
+  localStorage.setItem("ps.settings", JSON.stringify({ fontFamily: "comic-sans" }));
+  expect(loadSettings().fontFamily).toBe("maple-mono");
+
+  localStorage.setItem("ps.settings", JSON.stringify({ fontFamily: "ubuntu-mono" }));
+  expect(loadSettings().fontFamily).toBe("ubuntu-mono");
+});
+
+test("老用户没有 fontFamily 字段时回落默认（升级路径）", () => {
+  // 1.10.0 及以前存下来的设置里没有这个字段。回落到新默认是有意为之，
+  // release notes 里要写明怎么改回 JetBrains Mono。
+  localStorage.setItem("ps.settings", JSON.stringify({ theme: "nord", fontSize: 12 }));
+  const s = loadSettings();
+  expect(s.fontFamily).toBe("maple-mono");
+  expect(s.theme).toBe("nord"); // 其余字段不受影响
+});
+
+test("bootFontUrl 收得下最长的字体路径", () => {
+  // coerceBootValue 原来上限 32，装不下 /fonts/google-sans-code-regular.woff2。
+  const url = "/fonts/google-sans-code-regular.woff2";
+  localStorage.setItem("ps.settings", JSON.stringify({ bootFontUrl: url }));
+  expect(loadSettings().bootFontUrl).toBe(url);
+});
+
+test("bootFontUrl 拒绝可疑值", () => {
+  localStorage.setItem("ps.settings", JSON.stringify({ bootFontUrl: '"><script>' }));
+  expect(loadSettings().bootFontUrl).toBeUndefined();
 });

@@ -5,7 +5,13 @@ import "@xterm/xterm/css/xterm.css";
 import App from "./App.svelte";
 import { mount } from "svelte";
 import { initThemeAsync } from "./lib/theme";
+import { initFont } from "./lib/font";
 import { setupI18n } from "./lib/i18n";
+
+// Apply <html data-font> before first render (index.html has the same guard
+// inline). Synchronous — no network round trip needed for a font choice, so
+// it does not need to join the theme promise chain below.
+initFont();
 
 // Apply <html data-theme> before first render (index.html has the same guard
 // inline).
