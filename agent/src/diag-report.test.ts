@@ -100,3 +100,54 @@ test("marks an unknown kind rather than trusting the client's label", () => {
   const o = parse(formatDiagReport({ tag: "t", kind: "whatever" }, at));
   expect(o.kind).toBe("unknown");
 });
+
+// 需求 3（12 期）：滚动状态快照。白名单制意味着不显式加进去的字段会被静默
+// 丢掉——那样埋点会「看起来接好了」但日志里什么都没有，是最难发现的失效。
+test("keeps the scroll fields that identify a stuck viewport", () => {
+  const o = parse(formatDiagReport({
+    tag: "sess-1",
+    kind: "scroll",
+    bufferType: "normal",
+    bufferLength: 500,
+    baseY: 476,
+    ydisp: 476,
+    rows: 24,
+    cols: 80,
+    cellHeight: 0,
+    canvasHeight: 408,
+    scrollHeight: 0,
+    scrollTop: 0,
+    clientHeight: 408,
+  }, at));
+  expect(o.kind).toBe("scroll");
+  expect(o.bufferType).toBe("normal");
+  expect(o.bufferLength).toBe(500);
+  expect(o.baseY).toBe(476);
+  expect(o.ydisp).toBe(476);
+  expect(o.rows).toBe(24);
+  expect(o.cols).toBe(80);
+  expect(o.cellHeight).toBe(0);
+  expect(o.canvasHeight).toBe(408);
+  expect(o.scrollHeight).toBe(0);
+  expect(o.scrollTop).toBe(0);
+  expect(o.clientHeight).toBe(408);
+});
+
+// -1（读不到）与 0（真的塌陷）必须都原样保留 —— 把 -1 归一成 0 会让日志
+// 读出完全相反的结论。
+test("keeps -1 and 0 apart in a scroll report", () => {
+  const o = parse(formatDiagReport({
+    tag: "t", kind: "scroll", cellHeight: -1, scrollHeight: 0,
+  }, at));
+  expect(o.cellHeight).toBe(-1);
+  expect(o.scrollHeight).toBe(0);
+});
+
+// bufferType 是客户端来的字符串，同样要过净化与长度上限。
+test("sanitises bufferType like every other client string", () => {
+  const o = parse(formatDiagReport({
+    tag: "t", kind: "scroll", bufferType: "x".repeat(500) + "\nforged",
+  }, at));
+  expect(o.bufferType.includes("\n")).toBe(false);
+  expect(o.bufferType.length).toBeLessThanOrEqual(64);
+});
