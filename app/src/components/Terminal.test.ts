@@ -47,6 +47,12 @@ vi.mock("@xterm/xterm", async () => {
     write(data: unknown, cb?: () => void): void { this.written.push(data); cb?.(); }
     resize(cols: number, rows: number): void { this.cols = cols; this.rows = rows; }
     clear(): void { this.clearCount++; }
+    // reloadHistory() 用的是 reset() 而不是 clear()（12 期：clear() 不复位光标列与
+    // SGR，会让重灌的历史与残留内容熔行）。mock 少了这个方法时，reset() 抛的
+    // TypeError 会被 reloadHistory 自己的 catch 吞掉，连同它后面那句 term.write
+    // 一起静默跳过——下面「reseed content is the last write」那条断言就会变成
+    // 恒真（实测：把重灌内容换成任意垃圾字符串，全套测试照样全绿）。
+    reset(): void { this.clearCount++; }
     dispose(): void {}
     setBuffer(type: string): void {
       this.buffer.active = { type };
