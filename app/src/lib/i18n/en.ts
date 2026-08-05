@@ -146,7 +146,7 @@ export default {
     },
     font: {
       label: "Monospace font",
-      desc: "Shared by the terminal, code preview and editor; all five ship box-drawing and Powerline glyphs",
+      desc: "Shared by the terminal, code preview and editor — all five include box-drawing and Powerline glyphs",
       "maple-mono": "Maple Mono",
       "jetbrains-mono": "JetBrains Mono",
       "google-sans-code": "Google Sans Code",
