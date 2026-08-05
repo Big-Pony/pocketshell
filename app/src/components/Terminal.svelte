@@ -81,6 +81,7 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { installWebgl, type WebglHandle } from "../lib/term/webgl-renderer";
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
+  import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
   import { Connection } from "../lib/net/connection";
   import { fromB64 } from "../lib/bytes";
   import type { TermHistoryResult } from "../lib/net/protocol";
@@ -266,6 +267,14 @@
         console.warn(formatSnapshot(sessionId, snap));
         void conn.rpc("diag.report", { tag: sessionId, kind: "atlas", ...snap }).catch(() => {});
       } catch { /* 诊断绝不能影响任何东西 */ }
+      // 需求 3（12 期）：「回前台后终端渲染了最新内容却滚不上去」的取证。
+      // 与图集快照分开 try/catch —— 其中一个探针因上游结构变动而失败时，
+      // 另一个仍然要能发出去，否则一次结构变动会同时弄瞎两条线索。
+      try {
+        const s = snapshotScroll(term, host);
+        console.warn(formatScrollSnapshot(sessionId, s));
+        void conn.rpc("diag.report", { tag: sessionId, kind: "scroll", ...s }).catch(() => {});
+      } catch { /* 同上 */ }
     };
     document.addEventListener("visibilitychange", onVisible);
     // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays

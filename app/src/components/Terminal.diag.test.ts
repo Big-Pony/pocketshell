@@ -52,7 +52,9 @@ test("reports the atlas state to the agent every time the app returns to the for
   document.dispatchEvent(new Event("visibilitychange"));
   await new Promise((r) => setTimeout(r, 0));
 
-  const calls = diagCalls(rpc);
+  // onVisible 现在并排发两条（atlas + scroll，见需求 3 埋点），各自 try/catch
+  // 互不干扰——这里只看 atlas 那条,scroll 那条由它自己的测试覆盖。
+  const calls = diagCalls(rpc).filter((c) => (c[1] as { kind?: string })?.kind === "atlas");
   expect(calls.length).toBe(1);
   const p = calls[0][1] as Record<string, unknown>;
   // tag 标出是哪个会话——多标签同时中招时要能分辨。
@@ -77,7 +79,8 @@ test("a failing report never propagates — diagnostics must not break the sessi
   await new Promise((r) => setTimeout(r, 10));
   window.removeEventListener("unhandledrejection", onRejection);
 
-  expect(diagCalls(rpc).length).toBe(1);
+  // 两条上报（atlas + scroll）都失败也不能互相牵连、更不能抛出未捕获拒绝。
+  expect(diagCalls(rpc).length).toBe(2);
   expect(onRejection).not.toHaveBeenCalled();
 });
 
@@ -92,4 +95,26 @@ test("stops reporting once the terminal is unmounted", async () => {
   await new Promise((r) => setTimeout(r, 0));
 
   expect(diagCalls(rpc).length).toBe(0);
+});
+
+// 需求 3（12 期）：回前台时除了图集快照，再发一条滚动状态快照。两条都在
+// onVisible 里发，因为「回前台」正是这个 bug 唯一的发作时机。
+test("reports a scroll snapshot when the page comes back to the foreground", async () => {
+  const rpc = okRpc();
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-scroll", active: true } });
+  await new Promise((r) => setTimeout(r, 0));
+  rpc.mockClear();
+
+  document.dispatchEvent(new Event("visibilitychange"));
+  await new Promise((r) => setTimeout(r, 0));
+
+  const scrollCalls = diagCalls(rpc).filter(
+    (c: unknown[]) => (c[1] as { kind?: string })?.kind === "scroll",
+  );
+  expect(scrollCalls.length).toBe(1);
+  expect(scrollCalls[0][1]).toMatchObject({ tag: "s-scroll", kind: "scroll" });
+  // 快照字段必须真的带上——只发一个 kind 等于没埋点。
+  expect(scrollCalls[0][1]).toHaveProperty("bufferLength");
+  expect(scrollCalls[0][1]).toHaveProperty("cellHeight");
+  expect(scrollCalls[0][1]).toHaveProperty("scrollHeight");
 });
