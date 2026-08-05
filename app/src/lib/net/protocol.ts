@@ -41,7 +41,10 @@ export type ClientMsg =
   | { type: "detach"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
-  | { type: "newSession"; name: string; cmd?: string; cwd?: string; kind?: "tmux" | "shell" }
+  // cols/rows 可选：新建 tmux 会话时带上本机上次的可信尺寸，让会话**一开始就**按
+  // 本机宽度排版。不带时 agent 退回 80x24，那之后由第一次 refit 纠正——但纠正之前
+  // 上游程序（Claude Code）已经按 80 列打了硬换行进历史，而硬换行 tmux 反折不回来。
+  | { type: "newSession"; name: string; cmd?: string; cwd?: string; kind?: "tmux" | "shell"; cols?: number; rows?: number }
   | { type: "kill"; sessionId: string }
   | { type: "listSessions" }
   | { type: "renameSession"; sessionId: string; name: string }

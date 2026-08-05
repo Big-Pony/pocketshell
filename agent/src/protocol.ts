@@ -46,7 +46,9 @@ export type ClientMsg =
   | { type: "detach"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
-  | { type: "newSession"; name: string; cmd?: string; cwd?: string; kind?: "tmux" | "shell" }
+  // cols/rows 可选：客户端带上本机上次的可信尺寸，让会话一开始就按该宽度排版
+  // （不带则退回 80x24）。取值仍要过 sane-size 校验——协议是外部输入。
+  | { type: "newSession"; name: string; cmd?: string; cwd?: string; kind?: "tmux" | "shell"; cols?: number; rows?: number }
   | { type: "kill"; sessionId: string }
   | { type: "listSessions" }
   | { type: "renameSession"; sessionId: string; name: string }

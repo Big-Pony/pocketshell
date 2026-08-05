@@ -82,6 +82,7 @@
   import { installWebgl, type WebglHandle } from "../lib/term/webgl-renderer";
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
+  import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
   import { Connection } from "../lib/net/connection";
   import { fromB64 } from "../lib/bytes";
   import type { TermHistoryResult } from "../lib/net/protocol";
@@ -317,7 +318,25 @@
     let lastSentCols = 0;
     let lastSentRows = 0;
     refit = () => {
+      // 量不到就不量（12 期真机 bug 的根因防线，详见 lib/term/fit-guard.ts）。
+      //
+      // `display:none` 的元素不参与布局，`getComputedStyle(el).width` 会把**声明值**
+      // 原样吐回来——`.term` 写的是 `width:100%`，拿到的就是字符串 "100%"。FitAddon
+      // 对它 `parseInt` 得到 100，当成 100 像素，于是 cols 塌成 9~12（真机实测 12）。
+      // FitAddon 自己的 `Math.max(0, ...)` 挡不住：坏值是个**看着很合理的正数**。
+      //
+      // 后果不可逆：Claude Code 读 winsize 后自己算折行、把 \n 打进输出流，tmux 只能
+      // reflow 自己折的软折行，还不回来（实测 `capture-pane -J` 也拼不回）。所以宁可
+      // 保持旧尺寸，也不能拿猜出来的尺寸去 resize。
+      //
+      // 等待没有用：等 rAF / 2000ms / fonts.ready 结果都一样，唯一能改变它的事件是
+      // 「元素被显示」——下面的 ResizeObserver 正是在等这个事件。
+      if (!isMeasurable(host)) return;
       const d = dims();
+      // 可测量了也仍要验一次：字体未就绪等边缘情况同样可能算出离谱的格子数。
+      if (!isPlausible(d)) return;
+      // 只记可信值：兜底一旦被塌陷值污染，一次性故障就变成永久故障。
+      rememberDims(d);
       if (term.cols !== d.cols || term.rows !== d.rows) term.resize(d.cols, d.rows);
       // proposeDimensions can over-count by ~1 col on narrow mobile viewports
       // (padding/scrollbar rounding), clipping the rightmost cells off-screen.
@@ -514,7 +533,11 @@
     // 而 replay 环形缓冲只有 256KB 且只覆盖「agent 启动以来」，接管外部或
     // 重启前的 tmux 会话时可能是空的。seedFromHistory 内部负责 attach。
     void seedFromHistory();
-    refit();
+    // 只有活动的 tab 才在挂载时 refit。非活动 tab 此刻是 display:none，量不到自己，
+    // 而它上报的塌陷尺寸会把**共享的 tmux 会话**拽窄、连带污染别人的历史。
+    // refit() 内部也有 isMeasurable 守卫，这里显式判 active 是让意图落在代码上：
+    // 没显示出来就没有任何理由去打扰 tmux。真正显示时由下面的 ResizeObserver 补上。
+    if (active) refit();
     onReady?.(sessionId, term);
     // The classifyPane poll is NOT started here: the visibility $effect below
     // starts it when (and only while) this terminal is active + live (A4).
@@ -537,9 +560,26 @@
     // 需求7: the divider drag changes only the container height (no window
     // resize), so observe the host directly. Reuses onResize's 150ms debounce
     // + cols-change reloadHistory. Guarded for environments without RO (jsdom).
+    // 「变得可测量」这件事本身就是一次有效的 resize 信号。
+    //
+    // 实测：宿主隐藏时 RO 以 contentRect 0x0 触发一次，被显示时再以真实尺寸
+    // (374x488) 触发一次——**浏览器会主动通知我们「现在能量了」**。这是隐藏期间
+    // 唯一可靠的唤醒源（等时间没用，见 fit-guard.ts 里的实测记录）。
+    //
+    // 这条跃迁不能只交给 onResize：它带 150ms 防抖，而「刚可测量」应当立刻补一次，
+    // 否则终端会在旧尺寸下多渲染几帧。所以 0→非 0 直接 refit，其余走原来的防抖。
     let ro: ResizeObserver | undefined;
     if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(() => onResize());
+      let wasMeasurable = isMeasurable(host);
+      ro = new ResizeObserver(() => {
+        const now = isMeasurable(host);
+        const became = !wasMeasurable && now;
+        wasMeasurable = now;
+        // active 守卫与 onResize 保持一致：非活动 tab 没有任何理由去打扰共享的
+        // tmux 会话。它被切成活动时，下面那个 $effect 会走 activateRefit。
+        if (became) { if (active) refit(); return; }
+        onResize();
+      });
       ro.observe(host);
     }
 

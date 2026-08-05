@@ -375,14 +375,31 @@ function imeStubConn() {
 }
 
 let origMatchMedia: any;
+let origClientWidth: PropertyDescriptor | undefined;
+let origClientHeight: PropertyDescriptor | undefined;
 beforeAll(() => {
   // xterm.open() needs matchMedia to read the device pixel ratio in jsdom.
   origMatchMedia = window.matchMedia;
   const mql = { matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} };
   window.matchMedia = vi.fn().mockReturnValue(mql);
+
+  // jsdom 没有布局引擎，所有元素的 clientWidth/Height 恒为 0 —— 这与**隐藏元素**
+  // 在真实浏览器里的形态一模一样，而 refit() 现在正是靠这个判据拒绝测量
+  // （见 lib/term/fit-guard.ts：display:none 时 getComputedStyle 返回 "100%"，
+  // 被 FitAddon 的 parseInt 当成 100px，cols 塌成 9~12，进而把 tmux 历史写窄）。
+  //
+  // 本文件的 MockFit 模拟的是「视口尺寸正常」的场景，所以这里把宿主一并伪装成
+  // 可测量的，否则守卫会（正确地）把所有 resize 拦下来。真正「不可测量时不发
+  // resize」的契约由 Terminal.fit.test.ts 覆盖，那里刻意不做这个伪装。
+  origClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  origClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 390 });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 500 });
 });
 afterAll(() => {
   window.matchMedia = origMatchMedia;
+  if (origClientWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", origClientWidth);
+  if (origClientHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", origClientHeight);
 });
 
 test("hardens the xterm helper textarea against mobile IME", async () => {
