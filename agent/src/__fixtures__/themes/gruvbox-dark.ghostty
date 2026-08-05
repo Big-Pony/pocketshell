@@ -1,0 +1,34 @@
+# ============================================================
+#  PocketShell theme: gruvbox-dark
+#  Upstream name : Gruvbox Dark
+#  Source        : https://github.com/mbadolato/iTerm2-Color-Schemes (ghostty/Gruvbox Dark)
+#  License       : MIT — Copyright (c) 2011 to Present Mark Badolato
+#                  (each individual theme's copyright belongs to its author)
+#  Changes       : renamed the file to `gruvbox-dark.ghostty` and added the
+#                  `ps-accent` directive below. No colour value was modified.
+# ============================================================
+
+# ps-accent = #fabd2f
+
+palette = 0=#282828
+palette = 1=#cc241d
+palette = 2=#98971a
+palette = 3=#d79921
+palette = 4=#458588
+palette = 5=#b16286
+palette = 6=#689d6a
+palette = 7=#a89984
+palette = 8=#928374
+palette = 9=#fb4934
+palette = 10=#b8bb26
+palette = 11=#fabd2f
+palette = 12=#83a598
+palette = 13=#d3869b
+palette = 14=#8ec07c
+palette = 15=#ebdbb2
+background = #282828
+foreground = #ebdbb2
+cursor-color = #ebdbb2
+cursor-text = #282828
+selection-background = #665c54
+selection-foreground = #ebdbb2

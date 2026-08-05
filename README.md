@@ -321,6 +321,8 @@ Protocol changes start in the backend at `agent/src/protocol.ts`; `app/src/lib/p
 
 [Apache-2.0](./LICENSE)
 
+Built-in themes bundle third-party colour palettes under the MIT license — see [THIRD-PARTY-THEMES.md](./THIRD-PARTY-THEMES.md).
+
 ## 🙏 Acknowledgements
 
 - [xterm.js](https://github.com/xtermjs/xterm.js) — terminal rendering in the browser

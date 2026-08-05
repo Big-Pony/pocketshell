@@ -1,0 +1,62 @@
+# ============================================================
+#  PocketShell theme: cream-light
+#  Upstream name : Claude Cream Light
+#  Source        : https://github.com/kakarrot-dev/claude-cream (themes/ghostty/claude-cream-light)
+#  License       : MIT — Copyright (c) 2026 段茱文 (kakarrot0109)
+#  Changes       : renamed the file to `cream-light.ghostty` and added the
+#                  `ps-accent` directive below. No colour value was modified.
+#  暖象牙画布 + 琥珀金强调 + 暖褐文字
+# ============================================================
+
+# ps-accent = #b7791f
+
+# 主体背景 & 前景
+background = f5f3e9
+foreground = 403d36
+
+# 光标（琥珀金）
+cursor-color = b7791f
+cursor-text  = fff8f3
+
+# 选中区（浅金 + 暖褐文字）
+selection-background = e2bc67
+selection-foreground = 29271d
+
+# ── ANSI 16 色 ────────────────────────────────────────────────
+# 0-7 标准色，8-15 亮色变体
+# 设计原则：Claude token 优先（primary/accent-teal/accent-amber/success/warning/error）
+# 未定义的槽位用调色板衍生色补齐
+
+# 0  Black / 深墨
+palette = 0=29271d
+# 1  Red / 错误红
+palette = 1=7c1b13
+# 2  Green / 成功绿
+palette = 2=4b6f3d
+# 3  Yellow / 警告琥珀
+palette = 3=8a5e16
+# 4  Blue
+palette = 4=375b87
+# 5  Magenta
+palette = 5=6f3f82
+# 6  Cyan / 青绿 accent-teal
+palette = 6=2c6f75
+# 7  White / 弱正文米色
+palette = 7=d8d2c3
+
+# 8  Bright Black / 暖灰
+palette = 8=8d8575
+# 9  Bright Red / 提亮红
+palette = 9=aa4a40
+# 10 Bright Green
+palette = 10=6f914f
+# 11 Bright Yellow / 琥珀 accent-amber
+palette = 11=b7791f
+# 12 Bright Blue
+palette = 12=5479a8
+# 13 Bright Magenta
+palette = 13=8d5aa0
+# 14 Bright Cyan
+palette = 14=4d8f95
+# 15 Bright White / 深墨强调
+palette = 15=ffffff

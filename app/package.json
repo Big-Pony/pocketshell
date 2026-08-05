@@ -10,11 +10,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && bun run scripts/compress-dist.ts",
-    "build:demo": "vite build --mode demo && bun run scripts/rename-demo-dist.ts && bun run scripts/compress-dist.ts",
+    "build": "bun run gen:themes && vite build && bun run scripts/compress-dist.ts",
+    "build:demo": "bun run gen:themes && vite build --mode demo && bun run scripts/rename-demo-dist.ts && bun run scripts/compress-dist.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "gen:icons": "bun run scripts/gen-icons.ts"
+    "gen:icons": "bun run scripts/gen-icons.ts",
+    "gen:themes": "bun run scripts/gen-themes.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",

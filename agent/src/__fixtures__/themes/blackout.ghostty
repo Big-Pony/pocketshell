@@ -1,0 +1,40 @@
+# ============================================================
+#  PocketShell theme: blackout
+#  Upstream name : Black Metal
+#  Source        : https://github.com/mbadolato/iTerm2-Color-Schemes (ghostty/Black Metal)
+#  License       : MIT — Copyright (c) 2011 to Present Mark Badolato
+#                  (each individual theme's copyright belongs to its author)
+#  Changes       : adapted from Black Metal (mbadolato/iTerm2-Color-Schemes) —
+#                  renamed only, no colour value was modified. The rename is
+#                  because the upstream name refers to black metal music, which
+#                  reads out of place inside a developer tool; `blackout`
+#                  continues the existing 纯黑银 naming in PocketShell.
+#                  The `ps-accent` directive below was added.
+#  改编自 Black Metal（mbadolato/iTerm2-Color-Schemes），仅改名未改色值。
+#  改名理由：原名是黑金属音乐主题，与开发工具语境不符。
+# ============================================================
+
+# ps-accent = #a06666
+
+palette = 0=#000000
+palette = 1=#486e6f
+palette = 2=#dd9999
+palette = 3=#a06666
+palette = 4=#888888
+palette = 5=#999999
+palette = 6=#aaaaaa
+palette = 7=#c1c1c1
+palette = 8=#404040
+palette = 9=#486e6f
+palette = 10=#dd9999
+palette = 11=#a06666
+palette = 12=#888888
+palette = 13=#999999
+palette = 14=#aaaaaa
+palette = 15=#c1c1c1
+background = #000000
+foreground = #c1c1c1
+cursor-color = #c1c1c1
+cursor-text = #8e8e8e
+selection-background = #c1c1c1
+selection-foreground = #000000
