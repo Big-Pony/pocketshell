@@ -68,6 +68,8 @@
     border-radius: var(--radius-md);
     font-size: 12px;
     white-space: pre-wrap;
+    /* <pre> 的 UA 样式表兜底 monospace 会盖过继承，不显式给就跟不上换字体 */
+    font-family: var(--font-mono);
   }
   .btns { display: flex; gap: 8px; margin-top: 14px; }
   .btns button {

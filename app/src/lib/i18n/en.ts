@@ -146,7 +146,7 @@ export default {
     },
     font: {
       label: "Monospace font",
-      desc: "Shared by the terminal, code preview and editor — all five include box-drawing and Powerline glyphs",
+      desc: "Used across the whole UI — all five include box-drawing and Powerline glyphs; CJK always falls back to the system font",
       "maple-mono": "Maple Mono",
       "jetbrains-mono": "JetBrains Mono",
       "google-sans-code": "Google Sans Code",

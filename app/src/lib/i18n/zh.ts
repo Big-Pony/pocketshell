@@ -144,7 +144,7 @@ export default {
     },
     font: {
       label: "等宽字体",
-      desc: "终端、代码预览与编辑器共用；五套都带终端画框与 Powerline 字形",
+      desc: "全界面共用；五套都带终端画框与 Powerline 字形，中文一律走系统字体",
       // 字体名是专有名词，中英文一致、不翻译。加一套字体要在这里补两处词条。
       "maple-mono": "Maple Mono",
       "jetbrains-mono": "JetBrains Mono",

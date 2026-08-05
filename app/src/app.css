@@ -55,9 +55,16 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 全 App 走等宽令牌（2026-08-05 用户拍板）：字体设置管的是整个界面，不只是
+   终端与代码。原先界面文案（任务/文件/确定/取消）用苹方、只有等宽内容跟随，
+   用户逐个面板点名说不对，遂提到这里一次性覆盖。
+
+   中文不受影响：这 5 套字体都无 CJK 字形，中文照旧回落到令牌链尾部的
+   PingFang SC —— 真正变的是英文与数字。所以这里必须写 --font-mono 而不是
+   某个具体家族名，回落链里的 CJK 与 emoji 尾巴一个都不能少。 */
 html, body {
   height: 100%;
-  font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", sans-serif;
+  font-family: var(--font-mono);
   color: var(--text);
   background: var(--bg-deep);
 }
@@ -66,6 +73,15 @@ body {
   overflow: hidden;
   background: var(--bg-deep);
   transition: background 0.2s;
+}
+
+/* 表单控件不参与字体继承：UA 样式表给 button/input/select/textarea 塞的是
+   `font: 400 13.333px Arial`，所以它们既拿不到上面这条正文链、也拿不到
+   --font-mono。症状很隐蔽——中文掉进 Arial 的兜底而不是 PingFang SC，
+   只觉得「这块字怪怪的」。inherit 让它们重新参与继承链，之后组件想给某个
+   控件换等宽（如 TopTabs 的 .tab）加一条 var(--font-mono) 才真的生效。 */
+button, input, select, textarea {
+  font-family: inherit;
 }
 
 .mono {

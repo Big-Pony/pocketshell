@@ -224,9 +224,8 @@ test("回落链里保留 CJK 与 emoji —— 这几套字体都没有中文字�
 test("app.css 里不再硬编码等宽字体族", () => {
   // 这条是「令牌名不改、只换值」那条规矩在字体上的落地。回潮的话这里当场翻车。
   //
-  // **只管等宽**：app.css:80 的 `html, body` 是正文 sans-serif 字体链
-  // （-apple-system / PingFang SC / …），本需求不碰它——把它也换成 --font-mono
-  // 会让整个界面变等宽。判据是「这行提到了 monospace 或某个等宽族名」。
+  // 判据是「这行提到了 monospace 或某个等宽族名」。2026-08-05 起 `html, body`
+  // 也走 --font-mono（见下一条用例），但它是 var() 形式，本条只挡字面量。
   const MONO_HINT = /monospace|JetBrains Mono|SF Mono|Maple Mono|Menlo|Consolas/;
   const offenders = APP_CSS.split("\n").filter(
     (l) => /font-family:\s*(?!inherit|var\()/.test(l) && MONO_HINT.test(l),
@@ -261,4 +260,68 @@ test("组件里不再有硬编码的等宽字体族 —— 一律走 var(--font-
     });
   }
   expect(offenders.join("\n"), "这些地方还在写死等宽字体族").toBe("");
+});
+
+test("渲染 <pre>/<code> 的组件必须显式给等宽令牌 —— 否则掉回 UA 的 monospace", () => {
+  // 上一条只挡「写死了别的字体族」，挡不住**一个字都没写**：
+  // 浏览器 UA 样式表给 <pre>/<code> 兜底 `font-family: monospace`，它比
+  // 继承优先级高，所以父级的 var(--font-mono) 根本传不下去——切字体时这些
+  // 元素纹丝不动，且不报错、不回落到任何我们的令牌。
+  //
+  // 2026-08-05 实测：md 预览的 <pre><code> 计算值就是字面量 "monospace"，
+  // 而同页 :root 的 --font-mono 已正确是 UbuntuMono。这条就是那个 bug 的回归闸。
+  //
+  // 判据分两路，因为 <pre> 不一定写在 markup 里：
+  //   a) markup 里字面出现 <pre / <code；
+  //   b) 样式里出现针对 pre/code 的选择器 —— MarkdownView 的 <pre> 由
+  //      {@html} 灌进来，markup 里一个 <pre 都搜不到，只能从它的
+  //      `.md-body :global(pre)` 认出来。第一版漏了这条，实测才发现。
+  // 命中任一路，文件里就必须有 var(--font-mono)（CSS 令牌）或运行时
+  // fontFamily 赋值（TermCopyOverlay 从 xterm options 读，见 termFontFromOptions）。
+  const offenders: string[] = [];
+  for (const file of componentFiles()) {
+    const src = readFileSync(file, "utf8");
+    const [markup, style = ""] = src.split("<style>");
+    const rendersPre = /<pre[\s>]|<code[\s>]/.test(markup);
+    const stylesPre = /(?::global\(\s*)?\bpre\b[^{;]*\{|(?::global\(\s*)?\bcode\b[^{;]*\{/.test(style);
+    if (!rendersPre && !stylesPre) continue;
+    const covered = /var\(--font-mono\)/.test(src) || /\.style\.fontFamily\s*=/.test(src);
+    if (!covered) offenders.push(file.split("/").pop()!);
+  }
+  expect(offenders.join("\n"), "这些组件的 <pre>/<code> 会掉回 UA monospace").toBe("");
+});
+
+test("表单控件继承页面字体 —— 否则浏览器给它们塞 Arial", () => {
+  // <button>/<input>/<textarea>/<select> 不继承 font-family：UA 样式表给的是
+  // `font: 400 13.333px Arial`。症状很隐蔽——中文掉到 Arial 的兜底（而不是
+  // PingFang SC），字重与字距都和周围不一样，但「看着像字体没生效」而已。
+  //
+  // 2026-08-05 实测：全 App 135 个控件命中。tab 栏的会话名就是其中之一，
+  // 它加了 var(--font-mono) 也没用——得先让控件参与继承链。
+  const rule = /\b(?:button|input|select|textarea)\b[^{]*\{[^}]*font-family:\s*inherit/;
+  expect(rule.test(APP_CSS), "app.css 缺表单控件的 font-family: inherit").toBe(true);
+});
+
+test("html/body 走 --font-mono —— 全 App 界面文案一起跟随字体设置", () => {
+  // 2026-08-05 用户拍板：字体设置管**整个界面**，不只是「等宽内容」。
+  // 原先的分工是终端/代码/文件名走等宽、界面文案（任务/文件/确定/取消）走苹方，
+  // 用户逐个面板点名说不对，遂扩到全局。
+  //
+  // 中文不受影响：这 5 套字体都没有 CJK 字形，中文照旧回落到令牌链里的
+  // PingFang SC —— 所以真正变的是英文与数字。这也是为什么必须走 --font-mono
+  // 而不是某个具体家族名：回落链里的 CJK 与 emoji 尾巴一个都不能少。
+  const bodyRule = /(^|\})\s*html,\s*body\s*\{[^}]*\}/m.exec(APP_CSS);
+  expect(bodyRule, "app.css 里没找到 html, body 规则").not.toBeNull();
+  expect(bodyRule![0], "html/body 没走 --font-mono，界面文案不会跟随字体设置")
+    .toMatch(/font-family:\s*var\(--font-mono\)/);
+});
+
+test("tab 栏会话名走等宽令牌 —— 与任务面板里的同一个名字保持一致", () => {
+  // 同一个 tmux 会话名，任务面板（.name.mono）是等宽、tab 栏却是正文字体，
+  // 并排看就是两种字。2026-08-05 用户实测报回来的。
+  const TOPTABS = readFileSync(resolve(__dirname, "./components/TopTabs.svelte"), "utf8");
+  const tabRule = /\.tab\s*\{[^}]*\}/.exec(TOPTABS);
+  expect(tabRule, "TopTabs 里没找到 .tab 规则").not.toBeNull();
+  expect(tabRule![0], ".tab 没有走 --font-mono，会话名会掉回正文字体")
+    .toMatch(/font-family:\s*var\(--font-mono\)/);
 });
