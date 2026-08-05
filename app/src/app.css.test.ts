@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 // 主题是「一套令牌名 × N 组值」：组件只引用语义令牌，所以加配色本该是零改动的。
@@ -170,4 +170,64 @@ test("app.css 只留非颜色令牌，颜色一律来自 theme-tokens.css", () =
   expect(declaredTokens(themes.get(DEFAULT_THEME)!).sort()).toEqual([
     "--radius-lg", "--radius-md", "--radius-sm", "--radius-xl", "--safe-bottom", "--safe-top",
   ]);
+});
+
+const FONTS_CSS = readFileSync(resolve(__dirname, "./fonts.css"), "utf8");
+
+/** fonts.css 里的字体 id 清单——与 lib/font.ts 的 FONTS 是两处，靠下面的用例锁住。 */
+const FONT_IDS = ["maple-mono", "jetbrains-mono", "google-sans-code", "monaspace-neon", "ubuntu-mono"];
+
+test("每套字体都有 --font-mono-<id> 令牌", () => {
+  // 设置面板的预览行按 id 拼令牌名渲染；缺一个就是那一行预览显示成默认字体，
+  // 用户以为「这两套长得一样」。
+  for (const id of FONT_IDS) {
+    expect(FONTS_CSS, `缺 --font-mono-${id}`).toMatch(new RegExp(`--font-mono-${id}\\s*:`));
+  }
+});
+
+test("每套字体都有 :root[data-font] 块把 --font-mono 指过去", () => {
+  for (const id of FONT_IDS) {
+    const re = new RegExp(`:root\\[data-font="${id}"\\]\\s*\\{[^}]*--font-mono\\s*:\\s*var\\(--font-mono-${id}\\)`);
+    expect(FONTS_CSS, `${id} 没有把 --font-mono 指向自己的令牌`).toMatch(re);
+  }
+});
+
+test("默认字体渲染为无属性 :root —— 首帧还没写 data-font 时也得有字体", () => {
+  const bare = /^:root\s*\{([^}]*)\}/m.exec(FONTS_CSS);
+  expect(bare, "fonts.css 里没有无属性 :root 块").not.toBeNull();
+  expect(bare![1]).toMatch(/--font-mono\s*:\s*var\(--font-mono-maple-mono\)/);
+});
+
+test("@font-face 的 src 路径都指向真实存在的文件", () => {
+  // 改文件名而漏改 CSS 是静默失败：浏览器 404 之后直接回落系统字体，不报错。
+  const srcs = [...FONTS_CSS.matchAll(/url\("([^"]+)"\)/g)].map((m) => m[1]);
+  expect(srcs.length, "一个 @font-face src 都没找到").toBeGreaterThanOrEqual(10);
+  for (const s of srcs) {
+    expect(s, `src 应以 /fonts/ 开头：${s}`).toMatch(/^\/fonts\//);
+    const p = resolve(__dirname, "../public", s.replace(/^\//, ""));
+    expect(existsSync(p), `${s} 指向的文件不存在`).toBe(true);
+  }
+});
+
+test("回落链里保留 CJK 与 emoji —— 这几套字体都没有中文字形", () => {
+  // 中文靠 OS 回落。删掉这段的话手机上中文会掉到某个非等宽字体，终端对齐全乱。
+  for (const id of FONT_IDS) {
+    const m = new RegExp(`--font-mono-${id}\\s*:([^;]+);`).exec(FONTS_CSS);
+    expect(m, `没找到 --font-mono-${id}`).not.toBeNull();
+    expect(m![1], `${id} 的回落链缺 PingFang SC`).toContain("PingFang SC");
+    expect(m![1], `${id} 的回落链末尾必须是 monospace`).toMatch(/monospace\s*$/);
+  }
+});
+
+test("app.css 里不再硬编码等宽字体族", () => {
+  // 这条是「令牌名不改、只换值」那条规矩在字体上的落地。回潮的话这里当场翻车。
+  //
+  // **只管等宽**：app.css:80 的 `html, body` 是正文 sans-serif 字体链
+  // （-apple-system / PingFang SC / …），本需求不碰它——把它也换成 --font-mono
+  // 会让整个界面变等宽。判据是「这行提到了 monospace 或某个等宽族名」。
+  const MONO_HINT = /monospace|JetBrains Mono|SF Mono|Maple Mono|Menlo|Consolas/;
+  const offenders = APP_CSS.split("\n").filter(
+    (l) => /font-family:\s*(?!inherit|var\()/.test(l) && MONO_HINT.test(l),
+  );
+  expect(offenders.join("\n"), "app.css 里还有硬编码的等宽字体链").toBe("");
 });

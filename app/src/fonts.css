@@ -1,0 +1,130 @@
+/* app/src/fonts.css
+   字体令牌。与主题体系（theme-tokens.css）同构，但**手写而非生成**——
+   字体没有 derive() 那样的运算，只有「家族名 + 路径 + 回落链」，
+   生成器只会把 JSON 换个花括号。
+
+   加一套字体：
+     1. app/scripts/build-fonts.ts 的 FONT_SOURCES 补一条，跑 bun run gen:fonts；
+     2. 本文件补一组 @font-face + 一个 --font-mono-<id> + 一个 :root[data-font] 块；
+     3. lib/font.ts 的 FONTS 补一行；
+     4. i18n 两本字典各补一个字体名。
+   组件一个字都不用改——它们只认 --font-mono。
+
+   family 名**必须与字体文件内部的 name ID 1 逐字一致**，且不得改写：
+   Monaspace 有 Reserved Font Name，上游 NF 版已改名 MonaspiceNe 以合规，
+   写回 "Monaspace Neon" 会违反 OFL。详见 THIRD-PARTY-FONTS.md。 */
+
+/* ---- Maple Mono NF（默认） ---- */
+@font-face {
+  font-family: "Maple Mono NF";
+  src: url("/fonts/maple-mono-regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Maple Mono NF";
+  src: url("/fonts/maple-mono-bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+/* ---- JetBrains Mono（既有文件，子集范围与其余四套不同：缺盲文） ---- */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+/* ---- Google Sans Code ---- */
+@font-face {
+  font-family: "GoogleSansCode NFM";
+  src: url("/fonts/google-sans-code-regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "GoogleSansCode NFM";
+  src: url("/fonts/google-sans-code-bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+/* ---- Monaspace Neon ---- */
+@font-face {
+  font-family: "MonaspiceNe NFM";
+  src: url("/fonts/monaspace-neon-regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "MonaspiceNe NFM";
+  src: url("/fonts/monaspace-neon-bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+/* ---- Ubuntu Mono ---- */
+@font-face {
+  font-family: "UbuntuMono Nerd Font Mono";
+  src: url("/fonts/ubuntu-mono-regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "UbuntuMono Nerd Font Mono";
+  src: url("/fonts/ubuntu-mono-bold.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+/* 回落链尾部：这几套字体都没有 CJK 字形，中文靠 OS 回落；emoji 同理。
+   顺序照抄改造前 Terminal.svelte 里那条链，删任何一项都可能让某台设备
+   的中文掉到非等宽字体上、终端对齐全乱。 */
+:root {
+  --font-mono-maple-mono:
+    "Maple Mono NF", "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
+    "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New",
+    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei",
+    "WenQuanYi Micro Hei", "Droid Sans Fallback",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace;
+
+  --font-mono-jetbrains-mono:
+    "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
+    "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New",
+    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei",
+    "WenQuanYi Micro Hei", "Droid Sans Fallback",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace;
+
+  --font-mono-google-sans-code:
+    "GoogleSansCode NFM", "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
+    "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New",
+    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei",
+    "WenQuanYi Micro Hei", "Droid Sans Fallback",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace;
+
+  --font-mono-monaspace-neon:
+    "MonaspiceNe NFM", "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
+    "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New",
+    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei",
+    "WenQuanYi Micro Hei", "Droid Sans Fallback",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace;
+
+  --font-mono-ubuntu-mono:
+    "UbuntuMono Nerd Font Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas,
+    "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New",
+    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei",
+    "WenQuanYi Micro Hei", "Droid Sans Fallback",
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace;
+
+  /* 默认字体在无属性 :root 里，与主题体系同理：首帧还没写 data-font 时
+     也得有一套完整的值，否则第一帧是系统字体、applyFont 之后跳一下。 */
+  --font-mono: var(--font-mono-maple-mono);
+}
+
+:root[data-font="maple-mono"]       { --font-mono: var(--font-mono-maple-mono); }
+:root[data-font="jetbrains-mono"]   { --font-mono: var(--font-mono-jetbrains-mono); }
+:root[data-font="google-sans-code"] { --font-mono: var(--font-mono-google-sans-code); }
+:root[data-font="monaspace-neon"]   { --font-mono: var(--font-mono-monaspace-neon); }
+:root[data-font="ubuntu-mono"]      { --font-mono: var(--font-mono-ubuntu-mono); }
