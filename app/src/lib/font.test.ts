@@ -89,16 +89,19 @@ test("termFontFamily 在 jsdom 下返回回落链而不是空串", () => {
   expect(chain).toContain("monospace");
 });
 
-test("applyFont 写的 bootFontUrl 不被随后的整份设置写入覆盖", () => {
-  // pickFont 里 applyFont 必须最后调用：update() 用的是组件持有的旧快照，
-  // 先 applyFont 再 update 会把 bootFontUrl 打回旧值，下次冷启动预取错字体。
-  applyFont("maple-mono");
-  const stale = loadSettings();               // 模拟组件手里的快照
-  applyFont("ubuntu-mono");
-  saveSettings({ ...stale, fontFamily: "ubuntu-mono" });  // 错误顺序会这样覆盖
-  // 正确顺序下 applyFont 在最后，所以再调一次即可代表真实时序
-  applyFont("ubuntu-mono");
-  expect(loadSettings().bootFontUrl).toBe("/fonts/ubuntu-mono-regular.woff2");
+test("pickFont 里 applyFont 必须最后调用（否则 bootFontUrl 被旧快照覆盖）", () => {
+  // update() 展开的是组件持有的 settings prop 快照（本次点击之前捕获），
+  // 它的整份写入会把 applyFont 刚写的 bootFontUrl 覆盖回旧值——下次冷启动
+  // 就去 preload 用户已经切走的那套字体。这条断言把顺序钉死在组件源码里，
+  // 因为真正决定顺序的是那两行调用，不是 font.ts 内部逻辑。
+  const src = readFileSync(resolve(__dirname, "../components/SettingsPanel.svelte"), "utf8");
+  const body = /function pickFont\([^)]*\)\s*\{([\s\S]*?)\n  \}/.exec(src);
+  expect(body, "SettingsPanel.svelte 里没找到 pickFont").not.toBeNull();
+  const iUpdate = body![1].indexOf('update("fontFamily"');
+  const iApply = body![1].indexOf("applyFont(");
+  expect(iUpdate, "pickFont 里没有 update(\"fontFamily\", …)").toBeGreaterThanOrEqual(0);
+  expect(iApply, "pickFont 里没有 applyFont(…)").toBeGreaterThanOrEqual(0);
+  expect(iApply, "applyFont 必须在 update 之后调用").toBeGreaterThan(iUpdate);
 });
 
 test("settings.ts 的 FONT_IDS 与 FONTS 清单一致", () => {

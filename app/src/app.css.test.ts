@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { FONTS } from "./lib/font";
 
 // 主题是「一套令牌名 × N 组值」：组件只引用语义令牌，所以加配色本该是零改动的。
 // 前提是**每套主题都给全同一套令牌**——漏一个就会静默回落到默认（无属性 :root）
@@ -174,8 +175,9 @@ test("app.css 只留非颜色令牌，颜色一律来自 theme-tokens.css", () =
 
 const FONTS_CSS = readFileSync(resolve(__dirname, "./fonts.css"), "utf8");
 
-/** fonts.css 里的字体 id 清单——与 lib/font.ts 的 FONTS 是两处，靠下面的用例锁住。 */
-const FONT_IDS = ["maple-mono", "jetbrains-mono", "google-sans-code", "monaspace-neon", "ubuntu-mono"];
+/** fonts.css 里的字体 id 清单——直接从 lib/font.ts 的 FONTS 派生，
+ *  这样新增第 6 套字体时漏改 fonts.css 会在这里当场翻车，而不是悄悄放过。 */
+const FONT_IDS = FONTS.map((f) => f.id);
 
 test("每套字体都有 --font-mono-<id> 令牌", () => {
   // 设置面板的预览行按 id 拼令牌名渲染；缺一个就是那一行预览显示成默认字体，
