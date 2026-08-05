@@ -112,7 +112,8 @@ One binary = the whole product: the frontend is embedded and served on the same 
 
 - **Mobile shell** — split top/bottom panes with a draggable divider (double-tap fullscreen), a 5-tab bottom bar, persisted layout
 - **Context usage** — while an AI is running, the split bar shows that session's context usage (e.g. `⊙ 142k/1M · 14%`)
-- **Six themes** — four dark (Graphite Orange / Oscilloscope Cyan / Blackout Silver / Prussian Blue) plus two light (Warm White / Vermilion); can follow the system light/dark setting
+- **Seven themes** — six dark (Cream Dark / Gruvbox Dark / Tokyo Night / Nord / Mocha / Blackout) plus one light (Cream Light); the terminal's ANSI palette, cursor and selection follow the theme too, and any `.ghostty` palette dropped into the agent's `~/.pocketshell/themes/` (or pasted into settings) joins the list and survives cache clears and upgrades
+- **Five monospace fonts** — Maple Mono (default) / JetBrains Mono / Google Sans Code / Monaspace Neon / Ubuntu Mono, each with box-drawing and Powerline glyphs; switched in settings and applied to the whole UI (CJK text still renders with system fonts)
 - **Bilingual** — full i18n (zh/en), follows browser language on first open, switchable in settings
 - **PWA** — installable to the home screen and launched standalone; static assets live in a per-version cache bucket that's dropped wholesale on a version change
 - **Zero-dependency distribution** — a single-file binary, pure-JS crypto with no native addons, all targets cross-compiled from one Mac

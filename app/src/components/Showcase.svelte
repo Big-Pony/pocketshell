@@ -126,8 +126,14 @@
     font-size: 0.82rem;
     color: var(--dim);
   }
-  /* 二维码是黑色描边的 SVG；深色主题下反相才看得清。 */
-  :global(html[data-scheme="dark"]) .qr img { filter: invert(1); }
+  /* 二维码必须黑模块+白底，且四周留白（QR 规范的 quiet zone），否则手机相机扫不出。
+     白底写死 #fff 是扫码识别的功能前提，不是配色——不要改成主题令牌，也不要加 filter 反相。 */
+  .qr img {
+    box-sizing: content-box; /* 全局 border-box 会把 padding 吃进 104px，导致码变小 */
+    background: #fff;
+    padding: 8px;
+    border-radius: 6px;
+  }
 
   .cta { display: flex; flex-wrap: wrap; gap: 10px; }
   .btn {
