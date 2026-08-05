@@ -1,4 +1,6 @@
 import { test, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   FONTS, DEFAULT_FONT, applyFont, initFont, familyOf, termFontFamily,
 } from "./font";
@@ -85,4 +87,15 @@ test("termFontFamily 在 jsdom 下返回回落链而不是空串", () => {
   expect(chain).not.toBe("");
   expect(chain).toContain("UbuntuMono Nerd Font Mono");
   expect(chain).toContain("monospace");
+});
+
+test("settings.ts 的 FONT_IDS 与 FONTS 清单一致", () => {
+  // 两份清单是有意重复的（settings.ts 不能运行时依赖 font.ts，会成环），
+  // 所以必须有东西锁住它们。漏掉一边的症状是：新字体在设置面板里能选，
+  // 选完刷新就被 coerceFont 打回默认——不报错，只是"选不上"。
+  const src = readFileSync(resolve(__dirname, "./settings.ts"), "utf8");
+  const block = /const FONT_IDS = \[([\s\S]*?)\]/.exec(src);
+  expect(block, "settings.ts 里没找到 FONT_IDS").not.toBeNull();
+  const ids = [...block![1].matchAll(/"([a-z0-9-]+)"/g)].map((m) => m[1]);
+  expect(ids.sort()).toEqual(FONTS.map((f) => f.id).sort());
 });
