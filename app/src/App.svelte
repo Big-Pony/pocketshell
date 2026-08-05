@@ -897,6 +897,7 @@
         active={activeTopId === s.name}
         closed={s.closed ?? false}
         fontSize={settings.fontSize}
+        fontFamily={settings.fontFamily}
         onReady={(id, t) => terms.set(id, t)}
       />
     {/each}

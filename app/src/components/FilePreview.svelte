@@ -307,12 +307,12 @@
   }
   .video-wrap video { max-width: 100%; max-height: 100%; }
   .pv-notice { font-size: 0.7rem; color: var(--amber); padding: 6px 10px; }
-  .codewrap { display: flex; align-items: flex-start; padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  .codewrap { display: flex; align-items: flex-start; padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: var(--font-mono); }
   .gutter { flex: 0 0 auto; text-align: right; padding-right: 1em; color: var(--code-gutter); user-select: none; }
   .gutter .ln { min-width: 2.2em; }
   .code { margin: 0; white-space: pre; }
   .code code { font: inherit; }
-  .diff { padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  .diff { padding: 8px 4px; font-size: 0.72rem; line-height: 1.5; font-family: var(--font-mono); }
   .hh { color: var(--amber); margin: 6px 0 2px; }
   .dl { white-space: pre; }
   .dl.add { color: var(--ok); }

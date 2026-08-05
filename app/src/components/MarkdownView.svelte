@@ -67,8 +67,11 @@
   .md-body { padding: 12px 14px; color: var(--text); font-size: 0.82rem; line-height: 1.6; overflow-wrap: anywhere; }
   .md-body :global(h1), .md-body :global(h2), .md-body :global(h3) { color: var(--text); line-height: 1.3; margin: 0.8em 0 0.4em; }
   .md-body :global(a) { color: var(--accent); }
-  .md-body :global(code) { background: var(--code-bg); color: var(--code-fg); padding: 1px 4px; border-radius: 4px; font-size: 0.9em; }
-  .md-body :global(pre) { background: var(--code-bg); color: var(--code-fg); padding: 10px; border-radius: var(--radius-md, 8px); overflow: auto; }
+  /* 等宽族必须显式写：浏览器 UA 样式表给 pre/code 兜了一条默认等宽声明，
+     它盖过从 .md-body 继承下来的正文字体，也盖过 --font-mono——不给的话这块
+     永远是系统默认等宽，切字体时纹丝不动（2026-08-05 实测到的 bug）。 */
+  .md-body :global(code) { background: var(--code-bg); color: var(--code-fg); padding: 1px 4px; border-radius: 4px; font-size: 0.9em; font-family: var(--font-mono); }
+  .md-body :global(pre) { background: var(--code-bg); color: var(--code-fg); padding: 10px; border-radius: var(--radius-md, 8px); overflow: auto; font-family: var(--font-mono); }
   .md-body :global(pre code) { background: none; padding: 0; }
   .md-body :global(blockquote) { border-left: 3px solid var(--line); color: var(--dim); margin: 0.6em 0; padding: 0 0 0 12px; }
   .md-body :global(table) { border-collapse: collapse; }

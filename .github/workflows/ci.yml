@@ -97,6 +97,12 @@ jobs:
         with:
           bun-version: latest
 
+      # fonts.test.ts 用 fontTools 校验字体产物的字形覆盖与等宽一致性。
+      # 这是子集化的核心保障：缺一个制表符字形，终端画框就会静默回落系统字体、
+      # 接缝错位——CI 不装 uv 的话这两条测试直接 ENOENT，而不是"跳过"。
+      - name: Install uv (fonts.test.ts needs fontTools)
+        uses: astral-sh/setup-uv@v5
+
       - name: Cache bun install
         uses: actions/cache@v4
         with:

@@ -84,6 +84,7 @@
   import { Connection } from "../lib/net/connection";
   import { fromB64 } from "../lib/bytes";
   import type { TermHistoryResult } from "../lib/net/protocol";
+  import { familyOf, termFontFamily, type FontId } from "../lib/font";
 
   let {
     conn,
@@ -91,6 +92,7 @@
     active,
     closed = false,
     fontSize = 14,
+    fontFamily = "maple-mono",
     onReady,
   }: {
     conn: Connection;
@@ -98,6 +100,7 @@
     active: boolean;
     closed?: boolean;
     fontSize?: number;
+    fontFamily?: FontId;
     onReady?: (sessionId: string, term: Terminal) => void;
   } = $props();
 
@@ -149,10 +152,11 @@
   });
 
   onMount(async () => {
-    // Ensure the bundled JetBrains Mono is ready before xterm measures cells.
-    // Falls back silently if the font is unavailable or the API is missing.
+    // 等当前字体就绪再让 xterm 测格子。传单个家族名——document.fonts.load()
+    // 不吃回落链，喂整条链会静默什么都不加载，然后 xterm 用系统字体测出错误
+    // 的格子宽度。
     try {
-      await document.fonts.load(`${fontSize}px "JetBrains Mono"`);
+      await document.fonts.load(`${fontSize}px "${familyOf(fontFamily)}"`);
     } catch {
       // ignore
     }
@@ -160,14 +164,14 @@
 
     term = new Terminal({
       fontSize,
-      // Defensive CJK fallback: JetBrains Mono has no CJK glyphs, so name OS CJK
-      // fonts (PingFang SC / Noto Sans CJK / YaHei) so a device whose generic
-      // `monospace` lacks CJK still renders Chinese. Latin/box-drawing keep
-      // hitting JetBrains Mono first. NOTE: the actual "Chinese shows as an
-      // underscore on the phone" bug was NOT a font issue — it was tmux running
-      // without a UTF-8 locale under launchd; fixed by `tmux -u` in
-      // agent/src/terminal.ts. This chain is kept as a belt-and-suspenders.
-      fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Cascadia Code", "Cascadia Mono", "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace',
+      // 字体跟随设置（2026-08-05 起）。xterm 只吃字面色值/字面字体名、不认 CSS
+      // 变量——与下面 termTheme() 读 22 个颜色令牌同源。回落链（含 CJK 与 emoji）
+      // 在 fonts.css 的 --font-mono 里定义一次，这里只是把计算值搬过来。
+      //
+      // 历史注记：改造前这里手抄了一条回落链，其中 CJK 部分是为「手机上中文显示
+      // 成下划线」加的防御。那个 bug 的真因是 tmux 没跑在 UTF-8 locale 下（已由
+      // agent/src/terminal.ts 的 `tmux -u` 修掉），这条链是双保险，现已随令牌继承。
+      fontFamily: termFontFamily(),
       // 对齐 tmux 的 history-limit（2000）：capture-pane 最多就吐这么多行，
       // 多出的配额只会白占内存（xterm.js#791 实测 160×24 + 5000 行 ≈ 34MB）。
       // 若日后调大 tmux history-limit，这里要同步调大，否则历史会被 xterm 截断。
@@ -592,6 +596,19 @@
       term.options.fontSize = fs;
       if (active) queueMicrotask(() => refit());
     }
+  });
+
+  // Live-apply font-family changes: update xterm then re-fit + resize PTY.
+  // **必须 refit**：不同字体的字宽不同（Ubuntu Mono 明显更窄），格子尺寸变了
+  // 而不重新测量的话，xterm 算出来的 cols/rows 与实际能显示的对不上，
+  // 表现为右边一列被切掉或多出一条空白，且 PTY 尺寸也跟着错。
+  $effect(() => {
+    void fontFamily; // 依赖声明：prop 变了就重跑
+    if (!term || !fit) return;
+    const chain = termFontFamily();
+    if (term.options.fontFamily === chain) return; // 同一套字体，什么都不用做
+    term.options.fontFamily = chain;
+    if (active) queueMicrotask(() => refit());
   });
 </script>
 

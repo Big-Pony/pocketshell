@@ -15,6 +15,7 @@ import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { DEFAULT_SETTINGS } from "./lib/settings";
+import { FONTS, DEFAULT_FONT } from "./lib/font";
 
 const HTML = readFileSync(resolve(__dirname, "../index.html"), "utf8");
 const DEMO_HTML = readFileSync(resolve(__dirname, "../demo.html"), "utf8");
@@ -190,4 +191,41 @@ test("demo.html 不引 manifest 与 apple-touch-icon（演示站不做 PWA）", 
 test("demo.html 的入口指向 demo-main.ts", () => {
   expect(DEMO_HTML).toContain("/src/demo-main.ts");
   expect(DEMO_HTML).not.toContain("/src/main.ts");
+});
+
+/** 内联脚本里的字体兜底路径（`var FALLBACK_FONT = "…"`）。 */
+function fallbackFont(html: string): string {
+  const m = /var\s+FALLBACK_FONT\s*=\s*"([^"]+)"/.exec(html);
+  if (!m) throw new Error("内联脚本里没找到 var FALLBACK_FONT");
+  return m[1].trim();
+}
+
+test("首帧兜底字体路径等于默认字体在 FONTS 里的 url", () => {
+  // 对不上就是首次访问预取了一个用不上的字体：白下一份，真正要用的那份还得再下。
+  const want = FONTS.find((f) => f.id === DEFAULT_FONT)!.url;
+  expect(fallbackFont(HTML), "index.html 的 FALLBACK_FONT 与默认字体漂移了").toBe(want);
+  expect(fallbackFont(DEMO_HTML), "demo.html 的 FALLBACK_FONT 与默认字体漂移了").toBe(want);
+});
+
+test("两个 HTML 都不再写死 JetBrainsMono 的 preload", () => {
+  // 写死的话，选了别的字体的用户会白下 59KB 的 JetBrains，再下自己那套。
+  for (const [name, html] of [["index.html", HTML], ["demo.html", DEMO_HTML]] as const) {
+    expect(html, `${name} 还有写死的字体 preload`).not.toMatch(
+      /<link[^>]+rel="preload"[^>]+\/fonts\//,
+    );
+  }
+});
+
+test("内联脚本从 bootFontUrl 插 preload", () => {
+  for (const [name, html] of [["index.html", HTML], ["demo.html", DEMO_HTML]] as const) {
+    expect(html, `${name} 的脚本没读 bootFontUrl`).toContain("bootFontUrl");
+    expect(html, `${name} 的脚本没插 preload`).toMatch(/rel\s*=\s*["']preload["']|"preload"/);
+  }
+});
+
+test("内联脚本不手抄字体清单", () => {
+  // 与主题同一条规矩：脚本只读缓存值，不需要知道有哪些字体。
+  for (const [name, html] of [["index.html", HTML], ["demo.html", DEMO_HTML]] as const) {
+    expect(html, `${name} 又手抄了 FONTS 列表`).not.toMatch(/var\s+FONTS\s*=/);
+  }
 });

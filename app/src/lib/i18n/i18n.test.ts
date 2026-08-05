@@ -5,6 +5,7 @@
 import { test, expect } from "vitest";
 import zh from "./zh";
 import en from "./en";
+import { FONTS } from "../font";
 
 function leafKeys(obj: Record<string, unknown>, prefix = ""): string[] {
   const out: string[] = [];
@@ -29,6 +30,14 @@ test("no dictionary value is empty", () => {
       expect(typeof v).toBe("string");
       expect((v as string).length).toBeGreaterThan(0);
     }
+  }
+});
+
+test("每套字体都有中英文名字词条", () => {
+  // 漏一条的症状不是报错，是设置面板里那一行直接显示 "settings.font.xxx"。
+  for (const f of FONTS) {
+    expect(zh.settings.font[f.id], `zh 缺 settings.font.${f.id}`).toBeTruthy();
+    expect(en.settings.font[f.id], `en 缺 settings.font.${f.id}`).toBeTruthy();
   }
 });
 

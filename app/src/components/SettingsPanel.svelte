@@ -13,6 +13,7 @@
   import { hardReset } from "../lib/cache-admin";
   import { listThemes, customThemeInfo, applyThemeAsync, type ThemeEntry } from "../lib/theme";
   import { customThemeName } from "../lib/theme-css";
+  import { FONTS, applyFont } from "../lib/font";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
@@ -115,6 +116,20 @@
     // block that no longer exists (i.e. silently the default). Move first.
     if (settings.theme === e.id) await pickTheme("cream-dark");
     else { await applyThemeAsync(settings.theme); themeTick++; }
+  }
+
+  // 字体切换是同步的：令牌都在 fonts.css 里，不像自定义主题需要等 agent 供给。
+  //
+  // 顺序很关键，不能颠倒：update() 用的是组件持有的 settings prop 快照（在这次
+  // 点击之前捕获的），它的展开写会把整份设置连同旧的 bootFontUrl 一起落盘。
+  // 如果先调 applyFont 再调 update，applyFont 刚写下的新 bootFontUrl 会被
+  // update() 那份过期快照原样覆盖回旧值——下次冷启动 index.html 的内联脚本会
+  // 去 preload 用户已经切走的那套字体，真正在用的那套反而没预取，首帧防闪烁
+  // 机制形同虚设。所以必须让 applyFont 最后写：先用旧快照落盘 fontFamily，
+  // 再用 applyFont 写 data-font 与 bootFontUrl，这一步之后没有别的写入能覆盖它。
+  function pickFont(id: Settings["fontFamily"]) {
+    update("fontFamily", id);
+    applyFont(id);
   }
 
   // 剪贴板读取必须在 click handler 的 user gesture 内发起 —— 这是浏览器允许
@@ -383,6 +398,30 @@
     <div class="seg">
       <button class:on={settings.language === "zh"} onclick={() => update("language", "zh")}>中文</button>
       <button class:on={settings.language === "en"} onclick={() => update("language", "en")}>English</button>
+    </div>
+  </div>
+
+  <!-- Font. 与主题同样用一行一项而不是 .seg：五个字体名在 390px 下塞不进一排，
+       而且字体是「看一眼才知道要不要」的设置，值得给每行一段真实渲染的预览。 -->
+  <div class="set col">
+    <div class="grow">
+      <div class="label">{$t('settings.font.label')}</div>
+      <div class="desc">{$t('settings.font.desc')}</div>
+    </div>
+    <div class="themes" role="radiogroup" aria-label={$t('settings.font.label')}>
+      {#each FONTS as f (f.id)}
+        <button class="theme" role="radio" aria-checked={settings.fontFamily === f.id}
+          class:on={settings.fontFamily === f.id} onclick={() => pickFont(f.id)}>
+          <span class="tick" aria-hidden="true"></span>
+          <span class="tname">{$t(`settings.font.${f.id}`)}</span>
+          <!-- 用该字体真实渲染的预览：框线字形、易混字符、连字各一组。
+               渲染这一行就会触发该字体下载——打开设置面板会下满 5 套 Regular
+               （约 200KB，之后走 SW 的 /fonts/ cache-first）。这是「切之前先看看
+               长什么样」的代价，设计 §4.5 明确接受。 -->
+          <span class="fprev" style="font-family: var(--font-mono-{f.id})" aria-hidden="true"
+            >─┼┐ 0O1lI =&gt;</span>
+        </button>
+      {/each}
     </div>
   </div>
 
@@ -722,7 +761,7 @@
     outline: none;
     resize: none;
   }
-  .timport textarea { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem; }
+  .timport textarea { font-family: var(--font-mono); font-size: 0.7rem; }
   .timport input:focus, .timport textarea:focus { border-color: var(--accent); }
   /* Radio dot: filled ring when picked. Colour is the only cue in the swatch
      row, so the dot carries the state redundantly (not colour-only). */
@@ -742,6 +781,14 @@
   }
   .tname { flex: 1; min-width: 0; }
   .tname s { display: block; text-decoration: none; font-size: 10px; color: var(--dim); margin-top: 1px; }
+  /* 字体预览。刻意不跟随 --font-mono：每行要展示的是**它自己那套**。 */
+  .fprev {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--dim);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
   .sw { flex: 0 0 auto; display: flex; gap: 2px; }
   .sw i {
     width: 13px; height: 18px;
@@ -757,7 +804,7 @@
     min-width: 1.6em;
     text-align: right;
   }
-  .val { font-size: 11px; color: var(--dim); min-width: 2.4em; text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .val { font-size: 11px; color: var(--dim); min-width: 2.4em; text-align: right; font-family: var(--font-mono); }
   input[type="range"] { width: 104px; accent-color: var(--accent); }
   .seg {
     display: flex;
@@ -814,7 +861,7 @@
   /* 分区标题走共同设计语言：mono 大写小标题 */
   .nsub {
     color: var(--dimmer);
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     font-weight: 600;
     text-transform: uppercase;

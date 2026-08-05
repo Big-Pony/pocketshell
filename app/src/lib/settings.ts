@@ -4,6 +4,7 @@
 // font size, and vibration preference are all device-local by design.
 
 import { CUSTOM_PREFIX, isSafeThemeId } from "./theme-css";
+import type { FontId } from "./font";
 
 const KEY = "ps.settings";
 
@@ -37,6 +38,8 @@ export interface Settings {
   theme: ThemePref;
   language: Language;
   groupTabsByType: boolean;   // 需求 4：终端 tab 靠左、文件 tab 靠右
+  /** 等宽字体 id。与 fonts.css 的 `:root[data-font="…"]` 一一对应。 */
+  fontFamily: FontId;
   /**
    * 首帧用的缓存值，由 `applyTheme()` 写入，**只被 index.html / demo.html 的内联
    * 防闪烁脚本读**（那段脚本跑在任何 CSS 之前，没法自己算出当前主题的颜色）。
@@ -44,6 +47,9 @@ export interface Settings {
    */
   bootBg?: string;            // 当前主题的 --bg-deep 字面值
   scheme?: string;            // 当前主题的明暗（"dark" | "light"）
+  /** 当前字体 Regular 权重的 woff2 路径，由 `applyFont()` 写入，只被
+   *  index.html / demo.html 的内联脚本读，用来插 `<link rel=preload>`。 */
+  bootFontUrl?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -53,6 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "cream-dark",
   language: "zh",
   groupTabsByType: false,     // 默认关闭，维持现状
+  fontFamily: "maple-mono",
 };
 
 /** 菜单序：内置 7 套在前，"system" 收尾。自定义主题由 CSS 清单动态追加。 */
@@ -78,11 +85,37 @@ function coerceTheme(v: unknown): ThemePref {
   return DEFAULT_SETTINGS.theme;
 }
 
-/** 首帧缓存值是要直接写进 `style.background` 的，只收干净的短字符串。 */
+/**
+ * 字体白名单。id 会被拼进 CSS 选择器 `[data-font="…"]`，脏值只会静默失配
+ * （不报错，字体就是不生效）——与主题 id 同样的理由，必须在入口挡掉。
+ *
+ * 清单在这里重复了一份（真相是 lib/font.ts 的 FONTS），是为了不让 settings.ts
+ * 运行时依赖 font.ts —— font.ts 已经依赖 settings.ts，反向引会成环。
+ * `font.test.ts` 有一条用例锁住两边一致。
+ */
+const FONT_IDS = [
+  "maple-mono", "jetbrains-mono", "google-sans-code", "monaspace-neon", "ubuntu-mono",
+];
+
+function coerceFont(v: unknown): FontId {
+  return typeof v === "string" && FONT_IDS.includes(v)
+    ? (v as FontId)
+    : DEFAULT_SETTINGS.fontFamily;
+}
+
+/** 首帧缓存值是要直接写进 DOM 的，只收干净的短字符串。
+ *  上限 64：最长的字体 URL 是 /fonts/google-sans-code-regular.woff2（36 字符），
+ *  32 装不下。 */
 function coerceBootValue(v: unknown): string | undefined {
-  if (typeof v !== "string") return undefined;
-  const s = v.trim();
-  return s.length > 0 && s.length <= 32 && /^[#a-zA-Z0-9(),.%\s/-]+$/.test(s) ? s : undefined;
+  const s = typeof v === "string" ? v.trim() : "";
+  return s.length > 0 && s.length <= 64 && /^[#a-zA-Z0-9(),.%\s/_-]+$/.test(s) ? s : undefined;
+}
+
+/** bootFontUrl 会被内联脚本直接写进 <link href>。只放行本地字体路径——
+ *  宽松字符集能过 `//evil.com/x.woff2`（协议相对 URL 不需要冒号），
+ *  那会在首帧发一个跨域请求。 */
+function coerceBootFontUrl(v: unknown): string | undefined {
+  return typeof v === "string" && /^\/fonts\/[\w.-]+\.woff2$/.test(v) ? v : undefined;
 }
 
 // Legacy boolean -> level; invalid/absent -> default.
@@ -110,6 +143,7 @@ export function loadSettings(store: Storage = localStorage): Settings {
       theme: coerceTheme(parsed.theme),
       language: LANGS.includes(parsed.language) ? parsed.language : detectLanguage(),
       groupTabsByType: parsed.groupTabsByType === true,
+      fontFamily: coerceFont(parsed.fontFamily),
     };
     // 只在真有值时挂上，缺省保持 undefined —— 这样 `toEqual(DEFAULT_SETTINGS)`
     // 之类的断言不会被两个可选字段搅乱。
@@ -117,6 +151,8 @@ export function loadSettings(store: Storage = localStorage): Settings {
     if (bootBg) s.bootBg = bootBg;
     const scheme = parsed.scheme === "light" || parsed.scheme === "dark" ? parsed.scheme : undefined;
     if (scheme) s.scheme = scheme;
+    const bootFontUrl = coerceBootFontUrl(parsed.bootFontUrl);
+    if (bootFontUrl) s.bootFontUrl = bootFontUrl;
     return s;
   } catch {
     return { ...DEFAULT_SETTINGS, language: detectLanguage() };

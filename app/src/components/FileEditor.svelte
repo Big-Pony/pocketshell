@@ -35,7 +35,7 @@
   // theme switch with no editor reconfiguration.
   const theme = EditorView.theme({
     "&": { background: "var(--code-bg)", color: "var(--code-fg)", height: "100%", fontSize: "0.72rem" },
-    ".cm-scroller": { fontFamily: '"SF Mono", ui-monospace, Menlo, monospace', lineHeight: "1.5" },
+    ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.5" },
     ".cm-content": { caretColor: "var(--code-cursor)" },
     ".cm-cursor": { borderLeftColor: "var(--code-cursor)" },
     ".cm-gutters": { background: "var(--code-bg)", color: "var(--code-gutter)", border: "none" },

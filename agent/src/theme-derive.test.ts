@@ -619,9 +619,12 @@ describe("token set matches the app", () => {
 
     // Not theme tokens: structural geometry (shared by every theme, declared in
     // app.css), the generator's own metadata (--ps-* list/scheme markers and the
-    // --sw-* swatch previews), and --phone-h, a local defined and consumed inside
-    // Showcase.svelte.
-    const NOT_A_THEME_TOKEN = /^--(radius-|safe-|ps-|sw-|boot-|phone-h$)/;
+    // --sw-* swatch previews), --phone-h (a local defined and consumed inside
+    // Showcase.svelte), and --font-* — the font tokens are hand-written in
+    // app/src/fonts.css because fonts have no derive() step (family name + path,
+    // no computation), so this deriver never produces them. app.css.test.ts is
+    // what guards that set instead.
+    const NOT_A_THEME_TOKEN = /^--(radius-|safe-|ps-|sw-|boot-|font-|phone-h$)/;
     const needed = [...referenced].filter((t) => !NOT_A_THEME_TOKEN.test(t)).sort();
     const produced = new Set(TOKEN_NAMES);
 

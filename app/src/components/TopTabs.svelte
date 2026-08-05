@@ -213,6 +213,8 @@
     border-radius: 6px 6px 0 0; background: var(--tab-bg); color: var(--dim);
     font-size: 0.72rem; white-space: nowrap; scroll-snap-align: start;
     position: relative;
+    /* 会话名与任务面板里的同一个名字（.name.mono）保持同一种字 */
+    font-family: var(--font-mono);
     transition: background 0.15s, color 0.15s;
     /* Multi-tap must not raise the phone's native selection / callout menu. */
     -webkit-touch-callout: none;
@@ -241,7 +243,7 @@
     flex: none; background: transparent; border: 0;
     color: var(--dim); width: 30px; height: 30px;
     padding: 0 0 6px; font-size: 1rem; line-height: 1;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
   .add:active { color: var(--text); }
 
