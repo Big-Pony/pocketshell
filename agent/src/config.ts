@@ -11,6 +11,7 @@ import { createRateLimiter, type RateLimiter } from "./rate-limit";
 import { createAudit, fileAuditWriter, type Audit } from "./audit";
 import { openSnippetStore, type SnippetStore } from "./snippet-store";
 import { openHintStore, type HintStore } from "./hint-store";
+import { openThemeStore, type ThemeStore } from "./theme-store";
 import { normalizeInstanceName } from "./instance-brand";
 
 /** The repo OTA is allowed to auto-apply from. See the `update` block below. */
@@ -35,6 +36,12 @@ export interface AgentConfig {
   audit: Audit;
   snippets: SnippetStore;
   hints: HintStore;
+  /** User themes dropped into `<keyDir>/themes/`. Backed by files, not the db,
+   *  so `cp` from a Ghostty config is the primary way in. */
+  themes: ThemeStore;
+  /** Path backing `themes`. Not created at boot: an install with no custom
+   *  themes should not grow an empty directory it never asked for. */
+  themeDir: string;
   tmpDir: string;
   /** 部署时传入的实例名（已归一化）。未设即不做 PWA 品牌化。 */
   instanceName?: string;
@@ -169,6 +176,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const notifyToken = loadOrCreateNotifyToken(keyDir);
   const snippets = openSnippetStore(join(keyDir, "pocketshell.db"));
   const hints = openHintStore(join(keyDir, "pocketshell.db"));
+  const themeDir = join(keyDir, "themes");
+  // Log skipped theme files: "I copied it in and it doesn't show up" is
+  // otherwise unanswerable, and the reason (bad name vs unparseable) is exactly
+  // what the user needs.
+  const themes = openThemeStore(themeDir, {
+    onSkip: (s) => console.warn(`[pocketshell] theme ${s.file} skipped (${s.reason}): ${s.message}`),
+  });
   const tmpDir = join(keyDir, "tmp");
   mkdirSync(tmpDir, { recursive: true });
 
@@ -216,6 +230,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     audit,
     snippets,
     hints,
+    themes,
+    themeDir,
     tmpDir,
     instanceName,
     update,

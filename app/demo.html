@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>PocketShell Demo</title>
-    <!-- Default (石墨橙) --bg-deep; the inline script below rewrites it per theme. -->
-    <meta name="theme-color" content="#0c0d0e" />
+    <!-- Default theme (cream-dark) --bg-deep; the inline script below rewrites it. -->
+    <meta name="theme-color" content="#242524" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <!-- Terminal font is render-blocking; start the fetch before the CSS asks for it (Bold stays lazy). -->
@@ -14,22 +14,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="PocketShell Demo" />
-    <!--
-      First-paint background per theme. app.css arrives a moment later; without
-      this the first frame is white (or the previous theme's colour) and then
-      snaps. Only --bg-deep is inlined — one declaration per theme, mirroring
-      the same token in app.css. Setting data-theme below is enough to pick the
-      right one, so no colour is hardcoded in the script.
-    -->
-    <style>
-      :root                          { --boot-bg: #0c0d0e; }  /* 石墨橙 */
-      :root[data-theme="light"]      { --boot-bg: #efeee9; }  /* 暖白仪表 */
-      :root[data-theme="osc"]        { --boot-bg: #080b0d; }  /* 示波青 */
-      :root[data-theme="blackout"]   { --boot-bg: #000000; }  /* 纯黑银 */
-      :root[data-theme="prussian"]   { --boot-bg: #080b12; }  /* 普鲁士蓝 */
-      :root[data-theme="vermilion"]  { --boot-bg: #f0ece1; }  /* 朱砂宣纸 */
-      html { background: var(--boot-bg); }
-    </style>
     <script>
       // 桌面/手机分流。窄屏**且**触控设备 → 换成 app 全屏。
       //
@@ -49,34 +33,41 @@
     </script>
     <script>
       // Apply the persisted theme + language before first paint (FOUC guard).
-      // Mirrors app/src/lib/theme.ts + app/src/lib/settings.ts — keep the
-      // storage key, the theme list and the light-theme set in sync. (Same
-      // hand-mirroring arrangement as sw.js <-> lib/sw-cache.ts: this file
-      // cannot import modules and still run before paint.)
+      // 这段脚本跑在任何 CSS 之前，所以它没法自己算出「当前主题是什么颜色」。
+      //
+      // 2026-08-05 之前的解法是在这里手抄一份「主题 → --bg-deep」表（index.html
+      // 与 demo.html 各一份），加一套主题漏抄一处就静默闪错色。现在改为**用完即存**：
+      // lib/theme.ts 的 applyTheme() 每次换主题都把当前的 --bg-deep 与明暗写回
+      // ps.settings，这里只读不算——主题有多少套、各自什么颜色，本文件一概不需要
+      // 知道。于是主题列表、浅色集合、每套色值三份手抄一起消失。
       (function () {
-        var THEMES = ["dark", "light", "osc", "blackout", "prussian", "vermilion", "system"];
-        var LIGHT = ["light", "vermilion"];
-        var pref = "dark";
-        var lang = "";
+        // 首帧兜底：默认主题 cream-dark 的 --bg-deep（见 src/theme-tokens.css）。
+        // **全套体系里唯一保留的硬编码色值**，只有首次访问会用到它。
+        var FALLBACK_BG = "#242524";
+        var pref = "", scheme = "", bootBg = "", lang = "";
         try {
           var s = JSON.parse(localStorage.getItem("ps.settings") || "{}");
-          if (THEMES.indexOf(s.theme) !== -1) pref = s.theme;
+          if (typeof s.theme === "string") pref = s.theme;
+          if (s.scheme === "light" || s.scheme === "dark") scheme = s.scheme;
+          if (typeof s.bootBg === "string") bootBg = s.bootBg;
           if (s.language === "zh" || s.language === "en") lang = s.language;
         } catch (e) {}
-        var resolved = pref === "system"
-          ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-          : pref;
-        document.documentElement.dataset.theme = resolved;
-        document.documentElement.dataset.scheme = LIGHT.indexOf(resolved) !== -1 ? "light" : "dark";
+        var root = document.documentElement;
+        var bg = bootBg || FALLBACK_BG;
+        // "system" 是指针不是配色，解析它要读 OS 偏好并挑一套具体主题——那又得
+        // 在这里写死主题名。交给 main.ts 的 applyTheme()，这里只管背景色：首帧
+        // 唯一可见的东西就是它（#app 此时还是空的），而它走上面的缓存值。
+        if (pref && pref !== "system") root.dataset.theme = pref;
+        root.dataset.scheme = scheme || "dark";
+        // 内联样式，因为 app.css 还没到。applyTheme() 接手后会撤掉它，之后背景由
+        // app.css 的 html{background:var(--bg-deep)} 负责，换主题才跟得上。
+        root.style.background = bg;
         // Android Chrome tints the address bar from this; the manifest's
         // theme_color is only a static install-time snapshot.
         var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) {
-          meta.setAttribute("content",
-            getComputedStyle(document.documentElement).getPropertyValue("--boot-bg").trim());
-        }
+        if (meta) meta.setAttribute("content", bg);
         if (!lang) lang = (navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
-        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        root.lang = lang === "zh" ? "zh-CN" : "en";
       })();
     </script>
   </head>

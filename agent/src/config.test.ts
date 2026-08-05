@@ -149,6 +149,23 @@ test("loadConfig exposes tmpDir under keyDir and creates it", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("loadConfig wires a ThemeStore at <keyDir>/themes without creating the dir", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-cfg-theme-"));
+  const cfg = loadConfig({ POCKETSHELL_KEY_DIR: dir } as any);
+  expect(cfg.themeDir).toBe(join(dir, "themes"));
+  // Deliberately absent: an install with no custom themes should not sprout an
+  // empty directory. The store copes, and save() creates it on demand.
+  expect(existsSync(cfg.themeDir)).toBe(false);
+  expect(cfg.themes.list().themes).toEqual([]);
+
+  const palette = Array.from({ length: 16 }, (_, i) => `palette = ${i}=${i.toString(16).repeat(6)}`).join("\n");
+  expect(cfg.themes.save("mine", `background = 101010\nforeground = f0f0f0\n${palette}\n`))
+    .toMatchObject({ ok: true, id: "mine", overwritten: false });
+  expect(loadConfig({ POCKETSHELL_KEY_DIR: dir } as any).themes.list().themes.map((t) => t.id))
+    .toEqual(["mine"]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("POCKETSHELL_TLS=0 forces tls off even if agent.json enables it", () => {
   const keyDir = tmpKeyDir();
   loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
