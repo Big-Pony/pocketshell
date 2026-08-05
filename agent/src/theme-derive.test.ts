@@ -270,6 +270,9 @@ describe("derive", () => {
         "tokyonight": ["#9ece6a", "#f7768e", "#e0af68"],
         "nord": ["#a0c083", "#ef8c94", "#eeca81"],
         "mocha": ["#bcefb8", "#feaac1", "#fcd682"],
+        // 纯黑银的这三个值就是它 2026-07-25 手写版的 --ok/--red/--amber 原值，
+        // 反推调色板时特意放进 bright 槽，好让派生结果逐字节落回原处。
+        "blackout": ["#35d158", "#e5564d", "#e8b04b"],
       };
       for (const [id, [ok, red, amber]] of Object.entries(UNTOUCHED)) {
         const t = tokensOf(id);
@@ -383,14 +386,21 @@ describe("derive", () => {
     });
 
     test("ANSI colours are NOT hue-corrected the way the semantic ones are", () => {
-      // blackout's slot 9 is a teal and slot 10 a pink; --red/--ok get rescued
-      // (a teal disconnect banner is broken UI), but `\e[91m` must still print
-      // what the theme author wrote or the terminal stops matching Ghostty.
-      const p = parsedOf("blackout");
+      // misused-slots (Black Metal) puts a teal in slot 9 and a pink in slot 10;
+      // --red/--ok get rescued (a teal disconnect banner is broken UI), but
+      // `\e[91m` must still print what the theme author wrote or the terminal
+      // stops matching the same theme in Ghostty.
+      //
+      // The sample is a fixture rather than a built-in: it shipped as `blackout`
+      // until 2026-08-05, when the hand-tuned 纯黑银 took that id back. Keeping
+      // it means this guard still runs against a palette that really is misused,
+      // instead of quietly passing on one that never needed rescuing.
+      const p = parsedOf("misused-slots");
       const t = derive(p);
       expect(t["--term-ansi-bright-red"]).toBe(p.palette[9]);
       expect(t["--term-ansi-bright-green"]).toBe(p.palette[10]);
       expect(t["--red"]).not.toBe(p.palette[9]);
+      expect(t["--ok"]).not.toBe(p.palette[10]);
     });
 
     test("cursor text is the accent's guaranteed-legible partner", () => {
@@ -639,7 +649,14 @@ describe("token set matches the app", () => {
 
 // ---------------------------------------------------------------------- fixtures
 
-test("every fixture file is one of the seven expected themes", () => {
+/** 非内置主题的夹具：故意留着的反例样本，不参与 THEME_IDS 的比对。 */
+const NON_THEME_FIXTURES = ["misused-slots.ghostty"];
+
+test("fixtures mirror the seven built-ins, plus the deliberate counter-examples", () => {
+  // 夹具本该与 app/themes/ 一一对应——夹具漂移会让这些用例测的是一份幻影。
+  // 例外只有 NON_THEME_FIXTURES：那些是「真实存在但不该内置」的调色板
+  // （槽位错位、畸形字段之类），列在这里就说明它是有意留的，不是忘了删。
   const files = readdirSync(FIXTURES).filter((f) => f.endsWith(".ghostty")).sort();
-  expect(files).toEqual([...THEME_IDS].map((i) => `${i}.ghostty`).sort());
+  const expected = [...[...THEME_IDS].map((i) => `${i}.ghostty`), ...NON_THEME_FIXTURES].sort();
+  expect(files).toEqual(expected);
 });

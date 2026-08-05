@@ -138,12 +138,39 @@ export const isLightBackground = (hex: string): boolean => relLuminance(hex) > 0
  * exactly that and every panel edge vanished. Taking whichever of the two terms
  * lands *further* from the background keeps the layers apart near the ends of the
  * range without exaggerating them in the middle.
+ *
+ * The floor's *offset* (0.10) matters as much as its step. A pure `0.05 × step`
+ * ladder is separable in the sense that no two rungs are equal, but on a real
+ * OLED panel `#010101` against `#000000` is not a visible edge — the structure
+ * then rests entirely on `--line`, and cards stop reading as cards. The hand-
+ * tuned 纯黑银 theme this system replaces sat at L 0.150 / 0.209 / 0.255; the
+ * offset reproduces that (0.150 / 0.200 / 0.250) rather than inventing a new
+ * look for a case someone had already solved by eye.
+ *
+ * Themes whose background is merely dark rather than black are unaffected: the
+ * relative term already exceeds the floor by step 1 (Tokyo Night's `#1a1b26`
+ * sits at L 0.213, above the 0.150 rung), so only true-black palettes take it.
+ *
+ * The floor applies only to whole raised steps. `step = -1` recesses `--bg-deep`
+ * and `step = 0.5` sits a key cap just off the body: feeding either through an
+ * offset ladder would *raise* them (a 0.05 rung is above pure black), inverting
+ * the one thing the caller asked for. Those keep the relative term alone, which
+ * on pure black correctly collapses to black — `--bg-deep === --bg` is the
+ * honest answer there, and the old hand-tuned theme said the same.
  */
 function layer(bg: string, step: number, light: boolean): string {
   const c = hex2oklch(bg);
   const dir = light ? -1 : 1;
   const relative = c.L + dir * 0.035 * step;
-  const absolute = light ? 1 - 0.055 * step : 0.055 * step;
+  if (step < 1) return oklch2hex({ ...c, L: Math.min(1, Math.max(0, relative)) });
+  // The 0.10 offset is a *dark-side* fix: it exists because pure black has no
+  // room below it, and a floor of 0.05×step lands the first panel on #010101.
+  // The light side has no matching problem — a near-white background sits at
+  // L≈0.96 and the relative term never reaches down to the ceiling — so adding
+  // the offset there would not rescue anything, it would just clamp every light
+  // panel darker (cream-light's panel went #e9e7dd → #d0cec4 when this was
+  // symmetric). Keep the ceiling where it was.
+  const absolute = light ? 1 - 0.055 * step : 0.1 + 0.05 * step;
   const L = light ? Math.min(relative, absolute) : Math.max(relative, absolute);
   return oklch2hex({ ...c, L: Math.min(1, Math.max(0, L)) });
 }
