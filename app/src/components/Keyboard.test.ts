@@ -25,13 +25,16 @@ function pointerEventAt(type: string, clientX: number): Event {
 // pointerup fires the deferred shot immediately (the "released before the
 // frame" fast path in keyUp), so these tests now fire both events to model
 // an actual tap rather than an indefinite hold.
-test("ops sub-tab: Del key sends the forward-delete sequence via onText", async () => {
-  const { onText } = openOps();
+// 需求 1（12 期）：这个键原本 id 是 "Del"、发 \x1b[3~（前向删除，删光标右边）。
+// 行尾按下时光标右边没有字符，于是「按了没反应」——这就是「删除按钮失效」的真相，
+// 按钮本身从未坏过。改为退格：删光标左边，与笔记本 ⌫ 一致。
+test("ops sub-tab: the delete key sends backspace (deletes to the LEFT of the cursor)", async () => {
+  const { onText, r } = openOps();
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
-  const key = screen.getByText("Del");
+  const key = r.container.querySelector('.ops-nav2 [data-key-id="Backspace"]')!;
   await fireEvent.pointerDown(key);
   await fireEvent.pointerUp(key);
-  expect(onText).toHaveBeenCalledWith("\x1b[3~");
+  expect(onText).toHaveBeenCalledWith("\x7f");
 });
 
 test("ops sub-tab: Tab key sends the tab byte via onText", async () => {
@@ -167,7 +170,7 @@ test("ops sub-tab: the 2x2 pad next to the D-pad reads Esc/Tab/Del/Space clockwi
   await fireEvent.click(screen.getByText("✂ 快捷操作"));
   const pad = r.container.querySelector(".ops-nav2")!;
   const caps = Array.from(pad.querySelectorAll("button")).map((b) => b.textContent?.trim());
-  expect(caps).toEqual(["Esc", "Tab", "Del", "space"]);
+  expect(caps).toEqual(["Esc", "Tab", "⌫", "space"]);
 });
 
 // 四个动作按钮升到第一排后仍必须可点（位置变了，行为不变）。

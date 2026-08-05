@@ -300,9 +300,13 @@
           <button class="key" data-key-id="Tab"
             onpointerdown={(e) => { e.preventDefault(); keyDown("Tab"); }}
             onpointerup={() => keyUp("Tab")} onpointercancel={() => keyUp("Tab")} onpointerleave={() => keyUp("Tab")}>Tab</button>
-          <button class="key" data-key-id="Del"
-            onpointerdown={(e) => { e.preventDefault(); keyDown("Del"); }}
-            onpointerup={() => keyUp("Del")} onpointercancel={() => keyUp("Del")} onpointerleave={() => keyUp("Del")}>Del</button>
+          <!-- 需求 1（12 期）：这里原本是 id "Del" → SEQ.Del → \x1b[3~（前向删除）。
+               手机上「删掉刚打错的字」要的是退格，而前向删除在行尾什么也不做，
+               表现就是「删除按钮失效」。键帽用 ⌫ 而非 Del：发的既然是退格，
+               写 Del 会与笔记本上 Del 键的含义正好相反。 -->
+          <button class="key" data-key-id="Backspace"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Backspace"); }}
+            onpointerup={() => keyUp("Backspace")} onpointercancel={() => keyUp("Backspace")} onpointerleave={() => keyUp("Backspace")}>⌫</button>
           <button class="key" data-key-id="Space"
             onpointerdown={(e) => { e.preventDefault(); keyDown("Space"); }}
             onpointerup={() => keyUp("Space")} onpointercancel={() => keyUp("Space")} onpointerleave={() => keyUp("Space")}>space</button>
