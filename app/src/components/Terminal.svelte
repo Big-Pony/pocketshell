@@ -346,7 +346,20 @@
       if (currentBuffer !== "normal") return;
       try {
         const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
-        term.clear();
+        // reset() 而不是 clear()：实测（xterm 6.1）clear() 只重置 y/ybase/ydisp，
+        // 光标列 x、SGR 属性、DECSTBM 滚动区**都原样留着**，紧接着写入的 capture
+        // 于是从残留的列号开始落笔，与旧字符熔成一行（"DDDDDDDDDD" + "1111"），
+        // 整份历史横向错位——这就是「表格渲染一半被普通文本盖住」的形态，且只在
+        // 光标恰好不在第 0 列时发作，所以是偶现。
+        //
+        // 三种收尾实测对比：clear() → "DDDDDDDDDD1111"（且反色残留）；
+        // clear() + \x1b[H → "1111DDDDDD"（H 只移光标不擦除）；reset() → "1111"。
+        //
+        // reset() 多复位的东西逐条核过都安全：scrollback 照常重建（上翻不受影响）；
+        // alt buffer 会被拉回 normal，而本函数开头就 `if (currentBuffer !== "normal") return`，
+        // 走不到；cursorInactiveStyle / showCursorImmediately 等选项不受影响
+        // （实测），手机上的光标可见性不回退。
+        term.reset();
         // capture-pane lines are trimmed and bare-\n separated; xterm runs with
         // convertEol:false, so a bare \n moves down WITHOUT returning to column
         // 0 and the reseed renders as a diagonal staircase (visible after `:q`
