@@ -11,7 +11,8 @@
   import HintManager from "./HintManager.svelte";
   import OperationGuide from "./OperationGuide.svelte";
   import { hardReset } from "../lib/cache-admin";
-  import { THEME_SWATCHES } from "../lib/theme";
+  import { listThemes, customThemeInfo, applyThemeAsync, type ThemeEntry } from "../lib/theme";
+  import { customThemeName } from "../lib/theme-css";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
@@ -25,6 +26,84 @@
   let showDevices = $state(false);
   let devicesPrefill = $state("");
   let showHints = $state(false);
+
+  // ---- Themes ----
+  // The list is read from CSS, not from a table in TS: `theme-tokens.css` carries
+  // the built-in manifest and the agent's `/theme/custom.css` carries the user's
+  // own (design §4.4). `themeTick` re-runs the read after anything that could
+  // have changed it — an import, a delete, or a switch that swapped the
+  // stylesheet's href.
+  let themeTick = $state(0);
+  let themes = $derived.by((): ThemeEntry[] => { void themeTick; return listThemes(); });
+  let themeInfo = $derived.by(() => { void themeTick; return customThemeInfo(); });
+
+  /** Built-ins have an i18n name; a custom theme's name is its file name. */
+  function themeLabel(e: ThemeEntry): string {
+    return e.custom ? customThemeName(e.id) ?? e.id : tr(`settings.theme.${e.id}`);
+  }
+
+  // Switching is async for custom themes only: the agent ships the full token
+  // set for the *selected* theme, so a custom one needs a fresh stylesheet
+  // before `data-theme` is written (otherwise a frame renders with no tokens).
+  // applyThemeAsync handles both, and App.svelte's own applyTheme on the way
+  // through onChange is then a no-op re-application.
+  async function pickTheme(id: Settings["theme"]) {
+    await applyThemeAsync(id);
+    themeTick++;
+    update("theme", id);
+  }
+
+  let showImport = $state(false);
+  let impName = $state("");
+  let impText = $state("");
+  let impMsg = $state<{ ok: boolean; text: string } | null>(null);
+  let importing = $state(false);
+
+  async function doImport() {
+    const name = impName.trim();
+    if (!name || !impText.trim() || importing) return;
+    importing = true;
+    impMsg = null;
+    try {
+      // Over the authed WS rather than POST /theme/import: that route is
+      // loopback + bearer (a local-script path), and a phone is neither.
+      const r = await conn.rpc("theme.import", { name, text: impText }) as
+        { ok: true; id: string; overwritten: boolean } | { ok: false; reason: string };
+      if (!r.ok) {
+        impMsg = { ok: false, text: tr(`settings.theme.importErr.${r.reason}`) };
+        return;
+      }
+      impMsg = {
+        ok: true,
+        text: tr(r.overwritten ? "settings.theme.importReplaced" : "settings.theme.importOk", { name: r.id }),
+      };
+      impText = "";
+      // Re-pull the stylesheet so the new theme is in the manifest, then switch
+      // to it — importing a theme you then have to go and select is a pointless
+      // second step.
+      await pickTheme(`custom:${r.id}`);
+    } catch {
+      impMsg = { ok: false, text: tr("settings.theme.importErr.offline") };
+    } finally {
+      importing = false;
+    }
+  }
+
+  async function deleteTheme(e: ThemeEntry) {
+    const name = customThemeName(e.id);
+    if (!name || !confirm(tr("settings.theme.deleteConfirm", { name }))) return;
+    try {
+      const r = await conn.rpc("theme.remove", { name }) as { removed: boolean };
+      if (!r.removed) { impMsg = { ok: false, text: tr("settings.theme.deleteFailed") }; return; }
+    } catch {
+      impMsg = { ok: false, text: tr("settings.theme.importErr.offline") };
+      return;
+    }
+    // Deleting the theme you are wearing would leave data-theme pointing at a
+    // block that no longer exists (i.e. silently the default). Move first.
+    if (settings.theme === e.id) await pickTheme("cream-dark");
+    else { await applyThemeAsync(settings.theme); themeTick++; }
+  }
 
   // 剪贴板读取必须在 click handler 的 user gesture 内发起 —— 这是浏览器允许
   // readText() 的唯一路径（Safari/iOS 无权限降级，Chrome 需已授权+有焦点）。
@@ -193,7 +272,7 @@
 
 <div class="stg-scroll">
 <div class="stg">
-  <!-- Theme. A row per palette rather than the usual .seg: six segments do not
+  <!-- Theme. A row per palette rather than the usual .seg: seven segments do not
        fit at 390px (and overflow outright in English), and a colour scheme is
        the one setting worth previewing before you pick it. -->
   <div class="set col">
@@ -203,27 +282,72 @@
     </div>
     <div class="themes" role="radiogroup" aria-label={$t('settings.theme.label')}>
       <button class="theme" role="radio" aria-checked={settings.theme === "system"}
-        class:on={settings.theme === "system"} onclick={() => update("theme", "system")}>
+        class:on={settings.theme === "system"} onclick={() => pickTheme("system")}>
         <span class="tick" aria-hidden="true"></span>
         <span class="tname">
           {$t('settings.theme.system')}
           <s>{$t('settings.theme.systemDesc')}</s>
         </span>
       </button>
-      {#each THEME_SWATCHES as sw (sw.id)}
-        <button class="theme" role="radio" aria-checked={settings.theme === sw.id}
-          class:on={settings.theme === sw.id} onclick={() => update("theme", sw.id)}>
-          <span class="tick" aria-hidden="true"></span>
-          <span class="tname">{$t(`settings.theme.${sw.id}`)}</span>
-          <span class="sw" aria-hidden="true">
-            {#each sw.colors as c}<i style="background:{c}"></i>{/each}
-          </span>
-          <span class="tag">
-            {sw.scheme === "light" ? $t('settings.theme.schemeLight') : $t('settings.theme.schemeDark')}
-          </span>
-        </button>
+      {#each themes as e (e.id)}
+        <div class="trow" class:on={settings.theme === e.id}>
+          <button class="theme" role="radio" aria-checked={settings.theme === e.id}
+            onclick={() => pickTheme(e.id)}>
+            <span class="tick" aria-hidden="true"></span>
+            <span class="tname">
+              {themeLabel(e)}
+              {#if e.custom}<em class="cbadge">{$t('settings.theme.custom')}</em>{/if}
+            </span>
+            <span class="sw" aria-hidden="true">
+              <!-- colors is null when the agent has not supplied this theme's
+                   swatches (offline, or it was deleted elsewhere): paint an
+                   empty strip rather than a wrong one. -->
+              {#each e.colors ?? [] as c}<i style="background:{c}"></i>{/each}
+            </span>
+            <span class="tag">
+              {e.scheme === "light" ? $t('settings.theme.schemeLight') : $t('settings.theme.schemeDark')}
+            </span>
+          </button>
+          {#if e.custom}
+            <button class="tdel" onclick={() => deleteTheme(e)} aria-label={$t('settings.theme.delete')}
+              title={$t('settings.theme.delete')}>×</button>
+          {/if}
+        </div>
       {/each}
     </div>
+
+    <!-- Why a theme did not show up. Only reachable through the CSS manifest:
+         the stylesheet is fetched with <link>, which exposes no headers. -->
+    {#if themeInfo.truncated}
+      <p class="tnote">{$t('settings.theme.truncated', { values: { total: themeInfo.total, shown: themeInfo.shown } })}</p>
+    {/if}
+    {#if themeInfo.skipped.length}
+      <p class="tnote warn">{$t('settings.theme.skippedTitle', { values: { count: themeInfo.skipped.length } })}</p>
+      <ul class="tskips">
+        {#each themeInfo.skipped as s (s.file + s.reason)}
+          <li>{$t(`settings.theme.skip.${s.reason}`, { values: { file: s.file } })}</li>
+        {/each}
+      </ul>
+    {/if}
+
+    <p class="tnote">{$t('settings.theme.customHint')}</p>
+    <div class="timport-head">
+      <button class="btn" disabled={DEMO} title={DEMO ? $t('demo.disabled') : undefined}
+        onclick={() => { showImport = !showImport; impMsg = null; }}>
+        {showImport ? $t('settings.theme.importClose') : $t('settings.theme.import')}
+      </button>
+      {#if impMsg}<span class="tmsg" class:ok={impMsg.ok}>{impMsg.text}</span>{/if}
+    </div>
+    {#if showImport}
+      <div class="timport">
+        <p class="tnote">{$t('settings.theme.importDesc')}</p>
+        <input bind:value={impName} placeholder={$t('settings.theme.importName')} />
+        <textarea bind:value={impText} rows="4" placeholder={$t('settings.theme.importText')}></textarea>
+        <button class="save" disabled={importing || !impName.trim() || !impText.trim()} onclick={doImport}>
+          {$t('settings.theme.importSubmit')}
+        </button>
+      </div>
+    {/if}
   </div>
 
   <!-- Group tabs by type (req 4) -->
@@ -511,12 +635,83 @@
     color: var(--text);
     font-size: 12.5px;
     text-align: left;
+    flex: 1;
+    min-width: 0;
   }
-  .theme.on {
+  /* Custom themes carry a delete button, so the row is a flex wrapper and the
+     selected-state background moves onto it — otherwise the highlight would
+     stop short of the × and read as a separate control. */
+  .trow { display: flex; align-items: center; border-radius: var(--radius-sm); }
+  .trow.on, .theme.on {
     background: var(--seg-active-bg);
     box-shadow: var(--seg-active-ring), var(--seg-shadow);
   }
+  .trow.on .theme { background: transparent; box-shadow: none; }
   .theme:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .trow.on .tick { border-color: var(--accent); }
+  .trow.on .tick::after {
+    content: "";
+    position: absolute; inset: 2.5px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .cbadge {
+    font-style: normal;
+    font-size: 9px;
+    color: var(--dim);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 0 3px;
+    margin-left: 5px;
+    vertical-align: 1px;
+  }
+  .tdel {
+    flex: 0 0 auto;
+    background: transparent;
+    color: var(--dim);
+    border: 0;
+    font-size: 15px;
+    line-height: 1;
+    padding: 8px 9px;
+    border-radius: var(--radius-sm);
+  }
+  .tdel:active { color: var(--red); background: var(--red-soft); }
+  .tnote { color: var(--dim); font-size: 10.5px; line-height: 1.5; margin: 6px 2px 0; }
+  .tnote.warn { color: var(--amber); }
+  .tskips {
+    list-style: none;
+    margin: 3px 2px 0;
+    color: var(--dim);
+    font-size: 10px;
+    line-height: 1.6;
+    word-break: break-all;
+  }
+  .timport-head { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .tmsg { font-size: 10.5px; color: var(--red); flex: 1; min-width: 0; }
+  .tmsg.ok { color: var(--ok); }
+  .timport {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--panel2);
+    padding: 10px;
+    border-radius: var(--radius-lg);
+    margin: 8px 2px 0;
+    border: 1px solid var(--line);
+  }
+  .timport input, .timport textarea {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 7px;
+    font-size: 0.78rem;
+    font-family: inherit;
+    outline: none;
+    resize: none;
+  }
+  .timport textarea { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem; }
+  .timport input:focus, .timport textarea:focus { border-color: var(--accent); }
   /* Radio dot: filled ring when picked. Colour is the only cue in the swatch
      row, so the dot carries the state redundantly (not colour-only). */
   .tick {

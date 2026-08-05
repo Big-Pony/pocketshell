@@ -134,6 +134,22 @@ test("demo.html 的主题防闪烁脚本与 index.html 逐字一致", () => {
   expect(themeScript(DEMO_HTML)).toBe(themeScript(HTML));
 });
 
+test("两个入口都同步加载 /theme/custom.css，且带 theme.ts 用来换 href 的标记", () => {
+  // 同步阻塞的 <link> 正是「自定义主题不闪」的全部机制（设计 4.3）：CSS 到位时
+  // 首帧还没画。改成 JS 动态插入就退回到要自己做缓存的老问题。
+  // data-ps-theme="custom" 是 theme.ts 找这个 link 的选择器——改了名字，切自定义
+  // 主题就静默变成「换了 data-theme 但没换 CSS」，屏幕上是一套没有令牌的界面。
+  for (const [name, html] of [["index.html", HTML], ["demo.html", DEMO_HTML]] as const) {
+    expect(html, `${name} 没有自定义主题样式表`)
+      .toContain('<link rel="stylesheet" href="/theme/custom.css" data-ps-theme="custom" />');
+    const themeTs = readFileSync(resolve(__dirname, "./lib/theme.ts"), "utf8");
+    expect(themeTs).toContain('link[data-ps-theme="custom"]');
+    // 必须在入口脚本之前：晚于它就不是阻塞首帧的那条路了。
+    expect(html.indexOf("/theme/custom.css"), `${name} 的 link 在入口脚本之后`)
+      .toBeLessThan(html.indexOf('<script type="module"'));
+  }
+});
+
 test("demo.html 的兜底 theme-color 与 index.html 一致", () => {
   const meta = (html: string) => /<meta name="theme-color" content="([^"]+)"/.exec(html)![1].toLowerCase();
   expect(meta(DEMO_HTML)).toBe(meta(HTML));

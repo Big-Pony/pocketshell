@@ -111,6 +111,29 @@ test("终端底与 --bg 同明暗", () => {
   }
 });
 
+test("每套主题都给全 ANSI 16 色，且取自它自己的 .ghostty palette", () => {
+  // 2026-08-05 之前终端根本没吃 ANSI 16 色（xterm 用自带那套），所以「6 套主题」
+  // 只换了机身、终端里 ls 的目录蓝从来没变过。这条焊住新行为：令牌必须存在，
+  // 而且必须**逐字**等于源文件的 palette —— 语义色（--ok/--red/--amber）会被
+  // 色相与对比度修正，ANSI 不能，否则终端就和同一套主题在 Ghostty 里长得不一样。
+  const NAMES = [
+    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+    "bright-black", "bright-red", "bright-green", "bright-yellow",
+    "bright-blue", "bright-magenta", "bright-cyan", "bright-white",
+  ];
+  for (const [id, body] of BLOCKS) {
+    const src = readFileSync(resolve(__dirname, `../themes/${id}.ghostty`), "utf8");
+    const palette = new Map<number, string>();
+    for (const m of src.matchAll(/^\s*palette\s*=\s*(\d+)\s*=\s*#?([0-9a-fA-F]{6})/gm)) {
+      palette.set(Number(m[1]), `#${m[2].toLowerCase()}`);
+    }
+    NAMES.forEach((name, i) => {
+      expect(tokenValue(body, `--term-ansi-${name}`), `${id} 缺 --term-ansi-${name}`)
+        .toBe(palette.get(i)!);
+    });
+  }
+});
+
 test("--sw-<id>-* 预览色与该主题真实的 --bg/--panel/--accent/--ok/--text 一致", () => {
   // 预览色住在无属性 :root 里，因为设置面板要在 A 主题激活时展示 B 主题长什么样
   // ——读实时令牌会把所有色块画成同一套。代价是它可能与主题真值漂移，故逐值比对。

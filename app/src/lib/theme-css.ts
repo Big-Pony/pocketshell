@@ -26,6 +26,14 @@ export const CUSTOM_PREFIX = "custom:";
 /** 预览色后缀，顺序即设置面板色板顺序：机身 / 面板 / 主色 / 运行灯 / 文字。 */
 export const SWATCH_SUFFIXES = ["bg", "panel", "accent", "ok", "text"] as const;
 
+/** keyDir 里找到的 `.ghostty` 文件总数（含被截断掉的）。 */
+export const MANIFEST_TOTAL = "--ps-custom-total";
+/** 是否触到 50 套上限。**不能用 `total > shown` 推**——有文件被跳过时那两个数
+ *  本来就不等，据此提示「只显示了前 1 个」是假话，真正的原因就在下面的跳过清单里。 */
+export const MANIFEST_TRUNCATED = "--ps-custom-truncated";
+/** 被跳过的文件，`reason:file` 逗号分隔。agent 侧 `encodeSkips()` 编的。 */
+export const MANIFEST_SKIPPED = "--ps-custom-skipped";
+
 /**
  * 主题 id 的安全字符集。
  *
@@ -120,4 +128,50 @@ export function swatchFromCss(id: string, read: CssReader): string[] | null {
   const tid = tokenIdOf(id);
   const colors = SWATCH_SUFFIXES.map((s) => read(`--sw-${tid}-${s}`).trim());
   return colors.every((c) => c.length > 0) ? colors : null;
+}
+
+/** 一个没能成为主题的文件。`reason` 决定 UI 显示哪句话。 */
+export interface ThemeSkip {
+  file: string;
+  reason: "name" | "parse" | "read";
+}
+
+const SKIP_REASONS = new Set(["name", "parse", "read"]);
+
+/**
+ * 解析 agent 编进 CSS 的跳过清单（`"parse:a.ghostty,name:b c.ghostty"`）。
+ *
+ * 为什么跳过原因要走 CSS 而不是响应头：这份样式表是 `<link>` 拉的，而 `<link>`
+ * 拿不到任何响应头。不塞进 CSS 里的话，「我把主题拷进去了但列表里没有」就是
+ * 彻底静默的——而那恰好是这个功能最容易出的问题（编辑器备份文件、改了一半的
+ * 配色、名字里带空格）。
+ *
+ * 认不出的条目直接丢：坏一条不该让整份提示消失，这与 agent 侧「一个坏文件只
+ * 损失它自己」是同一条原则。
+ */
+export function parseSkips(raw: string): ThemeSkip[] {
+  const inner = raw.trim().replace(/^["']|["']$/g, "");
+  const out: ThemeSkip[] = [];
+  for (const part of inner.split(",")) {
+    const s = part.trim();
+    if (!s) continue;
+    const i = s.indexOf(":");
+    if (i <= 0) continue;
+    const reason = s.slice(0, i);
+    const file = s.slice(i + 1).trim();
+    if (!file || !SKIP_REASONS.has(reason)) continue;
+    out.push({ file, reason: reason as ThemeSkip["reason"] });
+  }
+  return out;
+}
+
+/** 清单里的文件总数。读不到或不是数字时返回 0（视作「没有截断信息」）。 */
+export function totalFromCss(read: CssReader): number {
+  const n = Number(read(MANIFEST_TOTAL).trim());
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/** 是否触到上限。agent 明说了才算，读不到一律 false（宁可不提示也别误报）。 */
+export function truncatedFromCss(read: CssReader): boolean {
+  return read(MANIFEST_TRUNCATED).trim() === "1";
 }

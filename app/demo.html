@@ -70,6 +70,14 @@
         root.lang = lang === "zh" ? "zh-CN" : "en";
       })();
     </script>
+    <!-- 用户自己的 .ghostty 主题（agent 的 <keyDir>/themes/）。
+         同步阻塞加载**是要的**：这样自定义主题的令牌在首帧之前就位，不需要任何
+         缓存逻辑（设计 4.3）。放在 main.ts 之前、app.css 之后——app.css 由
+         main.ts import，vite 会把它插进 <head>，顺序上仍在本行之后生效，
+         而自定义令牌本就该盖过内置的。
+         加载失败不阻塞渲染：demo 站没有 agent，这里就是 404，浏览器跳过即可；
+         内置 7 套照常工作。 -->
+    <link rel="stylesheet" href="/theme/custom.css" data-ps-theme="custom" />
   </head>
   <body style="margin:0">
     <div id="app"></div>

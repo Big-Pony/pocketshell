@@ -15,6 +15,7 @@ import { resolve } from "node:path";
 import { contrast, hex2oklch, hueDistance } from "./color-oklch";
 import {
   parseGhostty, derive, renderCss, isLightBackground, TOKEN_NAMES, HUE_BANDS, inHueBand,
+  ANSI_NAMES,
 } from "./theme-derive";
 
 const FIXTURES = resolve(import.meta.dir, "__fixtures__/themes");
@@ -357,6 +358,70 @@ describe("derive", () => {
     });
   });
 
+  describe("terminal ANSI 16", () => {
+    // Until 2026-08-05 the terminal had no ANSI tokens at all: xterm used its own
+    // built-in sixteen under every theme, so `ls --color` looked identical in all
+    // of them. These tokens are the fix, and the contract is "verbatim" — the
+    // point is that the terminal agrees with the same theme running in Ghostty.
+
+    test("names are xterm's ITheme keys, in palette order", () => {
+      expect(ANSI_NAMES).toHaveLength(16);
+      expect(ANSI_NAMES.slice(0, 8)).toEqual([
+        "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+      ]);
+      expect(ANSI_NAMES.slice(8)).toEqual(ANSI_NAMES.slice(0, 8).map((n) => `bright-${n}`));
+    });
+
+    test("every palette slot lands in its token, unmodified", () => {
+      for (const id of THEME_IDS) {
+        const p = parsedOf(id);
+        const t = derive(p);
+        ANSI_NAMES.forEach((name, i) => {
+          expect(t[`--term-ansi-${name}`], `${id} slot ${i}`).toBe(p.palette[i]);
+        });
+      }
+    });
+
+    test("ANSI colours are NOT hue-corrected the way the semantic ones are", () => {
+      // blackout's slot 9 is a teal and slot 10 a pink; --red/--ok get rescued
+      // (a teal disconnect banner is broken UI), but `\e[91m` must still print
+      // what the theme author wrote or the terminal stops matching Ghostty.
+      const p = parsedOf("blackout");
+      const t = derive(p);
+      expect(t["--term-ansi-bright-red"]).toBe(p.palette[9]);
+      expect(t["--term-ansi-bright-green"]).toBe(p.palette[10]);
+      expect(t["--red"]).not.toBe(p.palette[9]);
+    });
+
+    test("cursor text is the accent's guaranteed-legible partner", () => {
+      // A block cursor paints the glyph on the cursor colour, and the cursor is
+      // --accent (not the file's cursor-color: six of seven set that equal to the
+      // foreground). --on-accent is the one colour already proven 4.5:1 there.
+      for (const id of THEME_IDS) {
+        const t = tokensOf(id);
+        expect(t["--term-cursor-text"], id).toBe("var(--on-accent)");
+        expect(contrast(t["--accent"], t["--on-accent"]), id).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    test("the selection pair is opaque and legible", () => {
+      // xterm paints selectionForeground over selectionBackground. A translucent
+      // background would blend into the terminal bg and leave the designed
+      // foreground sitting on something nobody checked.
+      for (const id of THEME_IDS) {
+        const t = tokensOf(id);
+        expect(t["--term-selection"], `${id} selection must be opaque`).toMatch(/^#[0-9a-f]{6}$/);
+        expect(contrast(t["--term-sel-text"], t["--term-selection"]), id).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    test("a theme without selection-foreground still gets a legible one", () => {
+      const base = parsedOf("nord");
+      const t = derive({ ...base, selectionForeground: undefined });
+      expect(contrast(t["--term-sel-text"], t["--term-selection"])).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+
   test("tinted surfaces keep the hue of the colour they are named after", () => {
     // --red-dark backs the disconnect banner and --teal-dark the connected chip.
     // Fading them towards a visually-neutral background used to swing the hue
@@ -555,12 +620,15 @@ describe("token set matches the app", () => {
 
   test("the deriver emits no token the app has no use for", () => {
     // The reverse guard, so the token set cannot silently accumulate dead colour.
-    // Nine tokens are read at runtime via getComputedStyle rather than var() —
-    // Terminal.svelte feeds xterm's ITheme that way, and the settings panel reads
-    // swatches — so a plain var() sweep cannot see them.
+    // These are read at runtime via getComputedStyle rather than var() —
+    // Terminal.svelte feeds xterm's ITheme that way (all 22 of them, including
+    // the ANSI 16), and the settings panel reads swatches — so a plain var()
+    // sweep cannot see them.
     const RUNTIME_READ = new Set([
       "--elev", "--cyan", "--ok-soft", "--ok-line", "--amber-soft",
       "--teal", "--teal-dark", "--term-accent", "--term-selection",
+      "--term-cursor-text", "--term-sel-text",
+      ...ANSI_NAMES.map((n) => `--term-ansi-${n}`),
     ]);
     const css = readFileSync(resolve(APP_SRC, "theme-tokens.css"), "utf8");
     for (const t of RUNTIME_READ) {

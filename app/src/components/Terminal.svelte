@@ -5,28 +5,72 @@
   // `*.svelte` default export).
   import { PendingBuffer } from "../lib/term/pending-buffer";
 
-  // xterm's theme takes literal colour strings, not CSS variables. Read the
-  // --term-* tokens off :root so app.css stays the single source of truth for
-  // the palette (a reskin that only edits app.css can't miss the terminal).
-  // Falls back to the dark values when the tokens are missing (SSR / bare test
-  // DOM), which is also what the terminal always is in every theme.
+  // xterm's theme takes literal colour strings, not CSS variables, so the
+  // --term-* tokens are read off :root at runtime and handed over as an ITheme.
+  // theme-tokens.css (generated from app/themes/*.ghostty) stays the single
+  // source of truth: a new palette is a new file, not an edit here.
   //
-  // Cursor and selection read --term-* rather than --accent/--code-selection:
-  // the terminal is dark under every theme, but a light theme's accent and
-  // selection are tuned for a light background (dimmed for contrast there), so
-  // borrowing them here gives a dark cursor and a barely-visible selection.
-  export function termTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
+  // 2026-08-05: this went from 4 tokens to 22. Before that the terminal used
+  // xterm's own built-in ANSI 16, so `ls --color` and a git prompt looked
+  // identical under every theme — "six themes" only ever reskinned the chrome
+  // around a terminal that never changed. The ANSI slots now come from the
+  // theme's own palette, which is also what makes a light theme's terminal
+  // legible: it uses the foreground colours its author designed for that
+  // background instead of xterm's dark-background defaults.
+  //
+  // Fallbacks are the default theme's (cream-dark) values, used only where
+  // there is no CSS at all (bare test DOM / SSR).
+  export interface TermTheme {
+    background: string; foreground: string;
+    cursor: string; cursorAccent: string;
+    selectionBackground: string; selectionForeground: string;
+    black: string; red: string; green: string; yellow: string;
+    blue: string; magenta: string; cyan: string; white: string;
+    brightBlack: string; brightRed: string; brightGreen: string; brightYellow: string;
+    brightBlue: string; brightMagenta: string; brightCyan: string; brightWhite: string;
+  }
+
+  /** `--term-ansi-<slot>` → ITheme key, in palette order 0..15. Slot names are
+   *  the CSS side; the camelCase names are xterm's. */
+  const ANSI_SLOTS: ReadonlyArray<[slot: string, key: keyof TermTheme, fallback: string]> = [
+    ["black", "black", "#1f201f"],
+    ["red", "red", "#ea928a"],
+    ["green", "green", "#98c379"],
+    ["yellow", "yellow", "#e5c07b"],
+    ["blue", "blue", "#89a8ce"],
+    ["magenta", "magenta", "#c891d9"],
+    ["cyan", "cyan", "#75b5bc"],
+    ["white", "white", "#ddd9cd"],
+    ["bright-black", "brightBlack", "#8c887e"],
+    ["bright-red", "brightRed", "#f2a29a"],
+    ["bright-green", "brightGreen", "#a9d18e"],
+    ["bright-yellow", "brightYellow", "#f0cf92"],
+    ["bright-blue", "brightBlue", "#a6bde0"],
+    ["bright-magenta", "brightMagenta", "#d9a9e8"],
+    ["bright-cyan", "brightCyan", "#9bced3"],
+    ["bright-white", "brightWhite", "#f8f7f2"],
+  ];
+
+  export function termTheme(): TermTheme {
     const read = (name: string, fallback: string): string => {
       if (typeof getComputedStyle !== "function") return fallback;
       const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
       return v || fallback;
     };
-    return {
-      background: read("--term-bg", "#1b1d20"),
-      foreground: read("--term-text", "#cfd2cd"),
-      cursor: read("--term-accent", "#ff4d00"),
-      selectionBackground: read("--term-selection", "rgba(255, 77, 0, 0.26)"),
-    };
+    const theme = {
+      background: read("--term-bg", "#2d2e2d"),
+      foreground: read("--term-text", "#ddd9cd"),
+      // --term-accent and --term-cursor-text are `var()` aliases in the token
+      // set; getComputedStyle resolves those, so what lands here is a literal.
+      cursor: read("--term-accent", "#e6bf7a"),
+      cursorAccent: read("--term-cursor-text", "#000000"),
+      selectionBackground: read("--term-selection", "#736347"),
+      selectionForeground: read("--term-sel-text", "#f8f7f2"),
+    } as TermTheme;
+    for (const [slot, key, fallback] of ANSI_SLOTS) {
+      theme[key] = read(`--term-ansi-${slot}`, fallback);
+    }
+    return theme;
   }
 </script>
 
@@ -152,8 +196,9 @@
       // 5.5.0 没有这个选项，所以升级前是靠别的路径蒙对的；实测（A/B 对比）只加
       // cursorInactiveStyle 而不加这条，cursor model 恒为 undefined、屏幕上没有光标。
       showCursorImmediately: true,
-      // 终端区两套主题均为深色。xterm 只吃字面色值、不认 CSS 变量，所以在这里
-      // 把 --term-* 读出来喂给它——换肤时改 app.css 一处即可，不会再漏这里。
+      // 终端跟随主题明暗（2026-08-05 起）。xterm 只吃字面色值、不认 CSS 变量，
+      // 所以在这里把 22 个 --term-* 读出来喂给它，ANSI 16 色也在内——换主题
+      // 只需换 .ghostty 文件，不会再漏这里。
       theme: termTheme(),
     });
     fit = new FitAddon();
@@ -472,10 +517,16 @@
       ro.observe(host);
     }
 
-    // Theme switch repaints the terminal: the --term-* tokens differ slightly
-    // between the two themes (both dark), and xterm holds a copy of the colours
-    // taken at construction. Without this the terminal keeps the old background
-    // until it is remounted. Guarded for jsdom (no MutationObserver in some setups).
+    // Theme switch repaints the terminal: xterm holds a copy of the colours
+    // taken at construction, so without this the terminal keeps the old palette
+    // until it is remounted — very visible now that the ANSI 16 and the
+    // background follow the theme.
+    //
+    // data-theme is still the right trigger for custom themes too: `applyTheme`
+    // writes `data-theme="custom:<name>"`, and it does so *after* the swapped
+    // <link href="/theme/custom.css?t=…"> has finished loading (lib/theme.ts),
+    // so by the time this fires the tokens are already resolvable.
+    // Guarded for jsdom (no MutationObserver in some setups).
     let themeObs: MutationObserver | undefined;
     if (typeof MutationObserver !== "undefined") {
       themeObs = new MutationObserver(() => { term.options.theme = termTheme(); });

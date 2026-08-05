@@ -2,8 +2,8 @@
 import { test, expect } from "vitest";
 import {
   parseThemeList, parseCustomThemeList, schemeFromCss, swatchFromCss, isSafeThemeId,
-  customThemeId, customThemeName, isCustomTheme, tokenIdOf,
-  type CssReader,
+  customThemeId, customThemeName, isCustomTheme, tokenIdOf, parseSkips, totalFromCss,
+  truncatedFromCss, type CssReader,
 } from "./theme-css";
 
 /** 用一个普通对象假装 CSS——这正是把读取函数做成参数的理由。 */
@@ -158,4 +158,42 @@ test("swatchFromCss 对自定义主题读连字符形式的令牌", () => {
     "--sw-custom-paper-text": "#111",
   });
   expect(swatchFromCss("custom:paper", read)).toEqual(["#fff", "#eee", "#c00", "#080", "#111"]);
+});
+
+// ── parseSkips / totalFromCss ──
+// 「我把主题拷进去了但列表里没有」是这个功能最容易出的问题。这两项是它唯一的
+// 出口：样式表是 <link> 拉的，响应头（agent 也发了 X-Theme-Truncated）前端看不到。
+
+test("parseSkips 拆 reason:file 条目", () => {
+  expect(parseSkips('"parse:junk.ghostty,name:bad one.ghostty"')).toEqual([
+    { reason: "parse", file: "junk.ghostty" },
+    { reason: "name", file: "bad one.ghostty" },
+  ]);
+});
+
+test("parseSkips 空清单得到 []", () => {
+  for (const raw of ["", '""', "   ", ",,"]) expect(parseSkips(raw), raw).toEqual([]);
+});
+
+test("parseSkips 丢掉认不出的原因和缺文件名的条目，而不是整份作废", () => {
+  // 与 agent 侧「一个坏文件只损失它自己」同一条原则。
+  expect(parseSkips('"parse:a,bogus:b,:c,d,read:e"')).toEqual([
+    { reason: "parse", file: "a" },
+    { reason: "read", file: "e" },
+  ]);
+});
+
+test("totalFromCss 读不到或不是正数时得到 0", () => {
+  expect(totalFromCss(reader({ "--ps-custom-total": " 12 " }))).toBe(12);
+  for (const v of ["", "abc", "0", "-3"]) {
+    expect(totalFromCss(reader({ "--ps-custom-total": v })), v).toBe(0);
+  }
+});
+
+test("truncatedFromCss 只认 agent 明说的 1，其余一律 false", () => {
+  // 宁可不提示也别误报：读不到（agent 没接入）时提示「只显示了前 0 个」是噪音。
+  expect(truncatedFromCss(reader({ "--ps-custom-truncated": " 1 " }))).toBe(true);
+  for (const v of ["", "0", "true", "yes"]) {
+    expect(truncatedFromCss(reader({ "--ps-custom-truncated": v })), v).toBe(false);
+  }
 });

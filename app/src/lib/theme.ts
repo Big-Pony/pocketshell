@@ -13,9 +13,12 @@
 
 import { loadSettings, saveSettings, THEMES, type ThemePref } from "./settings";
 import {
-  MANIFEST_BUILTIN, MANIFEST_CUSTOM, parseThemeList, parseCustomThemeList,
-  schemeFromCss, swatchFromCss, isCustomTheme, type CssReader, type Scheme,
+  MANIFEST_BUILTIN, MANIFEST_CUSTOM, MANIFEST_SKIPPED, parseThemeList, parseCustomThemeList,
+  parseSkips, totalFromCss, truncatedFromCss, schemeFromCss, swatchFromCss, isCustomTheme,
+  customThemeName, type CssReader, type Scheme, type ThemeSkip,
 } from "./theme-css";
+
+export type { ThemeSkip };
 
 /** Every theme except "system", which is a pointer rather than a palette. */
 export type ResolvedTheme = Exclude<ThemePref, "system">;
@@ -75,17 +78,77 @@ export function listThemes(read: CssReader = cssReader()): ThemeEntry[] {
   }));
 }
 
+/** keyDir 里的主题文件情况：装不下的、以及没能成为主题的。 */
+export interface CustomThemeInfo {
+  /** keyDir 里的 `.ghostty` 文件总数（含超出上限被丢掉的）。0 表示 agent 没供给。 */
+  total: number;
+  /** 列表里实际有几套。 */
+  shown: number;
+  /** 触到 50 套上限，UI 要提示「只显示了前 N 套」。**由 agent 明说**，不是从
+   *  `total > shown` 推的——有文件被跳过时那两个数本来就不等。 */
+  truncated: boolean;
+  skipped: ThemeSkip[];
+}
+
 /**
- * @deprecated Task 10 的过渡垫片，届时随 SettingsPanel 改造一并删除。
+ * 自定义主题的「为什么没看到我的文件」信息。
  *
- * 旧的 `THEME_SWATCHES` 是一张手写的「主题 → 5 个色值」表；现在色值全部来自
- * CSS，所以这里改成由 `listThemes()` 填充的**活绑定**：`applyTheme()` 每次刷新
- * 它。之所以不做成函数，是因为 `SettingsPanel.svelte` 还在 `{#each}` 里直接迭代
- * 这个名字，而那个文件属于 Task 10；改成函数就得动它。
- *
- * 值在 `initTheme()`（main.ts，mount 之前）跑完后才有内容——那时 CSS 已就位。
+ * 这些只能从 CSS 里读：样式表是 `<link>` 拉的，拿不到响应头（agent 也发了
+ * `X-Theme-Truncated`，那是给 curl 和将来的 fetch 调用方的）。
  */
-export let THEME_SWATCHES: ThemeEntry[] = [];
+export function customThemeInfo(read: CssReader = cssReader()): CustomThemeInfo {
+  return {
+    total: totalFromCss(read),
+    shown: parseCustomThemeList(read(MANIFEST_CUSTOM)).length,
+    truncated: truncatedFromCss(read),
+    skipped: parseSkips(read(MANIFEST_SKIPPED)),
+  };
+}
+
+/**
+ * 换掉自定义主题样式表的 href，等它加载完再 resolve。
+ *
+ * 为什么要等：agent 只把**选中那套**的完整令牌写进 CSS（设计 4.5，否则 50 套
+ * 就是四分之一兆字节换一套配色）。所以切到自定义主题必须重新请求一次，而在新
+ * CSS 到位之前写 `data-theme` 会有一帧拿不到任何令牌——屏幕上就是闪一下白。
+ *
+ * 失败也 resolve 不 reject：agent 没接入（demo 站）、离线、或主题被别的设备删了，
+ * 这三种都会 404 或超时。那时该做的是回落到内置令牌继续渲染，不是把换主题这个
+ * 动作整个失败掉。
+ */
+function loadCustomCss(name: string | null): Promise<void> {
+  if (typeof document === "undefined") return Promise.resolve();
+  const link = document.querySelector<HTMLLinkElement>('link[data-ps-theme="custom"]');
+  if (!link) return Promise.resolve(); // 页面没挂这个 link（单测/演示构建）
+  const href = name ? `/theme/custom.css?t=${encodeURIComponent(name)}` : "/theme/custom.css";
+  // 已经是这个 href 就别动：重设相同的 href 也会触发一次重新请求，而换回同一套
+  // 主题（比如从设置面板里点两下）本来什么都不用做。
+  if (new URL(link.href, location.href).search === new URL(href, location.href).search) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      link.removeEventListener("load", done);
+      link.removeEventListener("error", done);
+      resolve();
+    };
+    link.addEventListener("load", done);
+    link.addEventListener("error", done);
+    link.href = href;
+  });
+}
+
+/**
+ * 切到某套主题，需要时先把自定义样式表换过来。
+ *
+ * 内置主题走同步的 `applyTheme()` 即可（令牌已经在 `theme-tokens.css` 里）；
+ * 自定义主题必须先等 CSS，所以这个是 async。调用方（设置面板）用它。
+ */
+export async function applyThemeAsync(pref: ThemePref): Promise<ResolvedTheme> {
+  const resolved = resolveTheme(pref, window.matchMedia("(prefers-color-scheme: dark)").matches);
+  await loadCustomCss(customThemeName(resolved));
+  return applyTheme(pref);
+}
 
 /** "system" 在浅色时选哪套。与 DEFAULT_THEME 成对，同属 cream 家族。 */
 export const SYSTEM_LIGHT: ResolvedTheme = "cream-light";
@@ -116,7 +179,6 @@ export function applyTheme(pref: ThemePref): ResolvedTheme {
   // 高于样式表**——不撤掉的话，之后换主题背景会纹丝不动。此刻 app.css 已经到位
   // （main.ts 是 module script，跑在样式表之后），撤掉即由 var(--bg-deep) 接管。
   document.documentElement.style.removeProperty("background");
-  THEME_SWATCHES = listThemes(read); // 过渡垫片，见其声明处
   cacheFirstPaint(read, scheme);
   return resolved;
 }
@@ -149,5 +211,23 @@ export function watchSystem(getPref: () => ThemePref, onChange: () => void): () 
 export function initTheme(): ThemePref {
   const pref = loadSettings().theme;
   applyTheme(pref);
+  return pref;
+}
+
+/**
+ * Boot-time application that also waits for a custom theme's stylesheet.
+ *
+ * The `<link>` in the HTML has no `?t=`, so on a cold load it brings back the
+ * manifest but not the selected theme's tokens (agent only expands the selected
+ * one — design §4.5). A user on a custom theme therefore needs one extra
+ * request before mount, and mounting first would paint the whole app in the
+ * default palette for that round trip.
+ *
+ * Costs nothing for the built-in themes: the href is already the one we want,
+ * so `loadCustomCss` resolves without touching the network.
+ */
+export async function initThemeAsync(): Promise<ThemePref> {
+  const pref = loadSettings().theme;
+  await applyThemeAsync(pref);
   return pref;
 }

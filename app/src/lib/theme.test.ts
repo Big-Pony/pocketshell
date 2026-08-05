@@ -1,7 +1,7 @@
 // app/src/lib/theme.test.ts
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import {
-  resolveTheme, schemeOf, swatchOf, listThemes, applyTheme,
+  resolveTheme, schemeOf, swatchOf, listThemes, applyTheme, applyThemeAsync, customThemeInfo,
   DEFAULT_THEME, SYSTEM_LIGHT,
 } from "./theme";
 import { THEMES } from "./settings";
@@ -128,6 +128,44 @@ test("listThemes 丢掉自定义清单里不安全的名字", () => {
   expect(listThemes(read).filter((e) => e.custom).map((e) => e.id)).toEqual(["custom:ok"]);
 });
 
+// ── customThemeInfo：为什么我的文件没出现 ──
+
+test("customThemeInfo 报出截断与跳过", () => {
+  const read = reader({
+    "--ps-custom-themes": '"a,b"',
+    "--ps-custom-total": "5",
+    "--ps-custom-truncated": "1",
+    "--ps-custom-skipped": '"parse:junk.ghostty"',
+  });
+  expect(customThemeInfo(read)).toEqual({
+    total: 5,
+    shown: 2,
+    truncated: true,
+    skipped: [{ reason: "parse", file: "junk.ghostty" }],
+  });
+});
+
+test("customThemeInfo 在 agent 没接入时是干净的空态", () => {
+  // demo 站与离线：/theme/custom.css 404，这些令牌一个都读不到。不能因此
+  // 在设置面板上冒出「共 0 个主题文件」这类噪音。
+  expect(customThemeInfo(reader({}))).toEqual({ total: 0, shown: 0, truncated: false, skipped: [] });
+});
+
+test("有文件被跳过 ≠ 被截断（total > shown 不能当判据）", () => {
+  // 实测抓到的 bug：目录里 1 个好主题 + 2 个坏文件，total=3、shown=1，用
+  // total>shown 推就会显示「共 3 个主题文件，只显示前 1 个」——那是假话，
+  // 真正的原因（两个文件读不出来）就写在它下面一行。
+  const read = reader({
+    "--ps-custom-themes": '"good"',
+    "--ps-custom-total": "3",
+    "--ps-custom-truncated": "0",
+    "--ps-custom-skipped": '"parse:broken.ghostty,parse:incomplete.ghostty"',
+  });
+  const info = customThemeInfo(read);
+  expect(info.truncated).toBe(false);
+  expect(info.skipped).toHaveLength(2);
+});
+
 // ── applyTheme：写 DOM + 回写首帧缓存 ──
 
 // jsdom 没有 matchMedia，applyTheme 会用它解析 "system"。这里固定成「系统深色」，
@@ -171,4 +209,87 @@ test("applyTheme 在读不到 --bg-deep 时不写脏值", () => {
   const raw = localStorage.getItem("ps.settings");
   expect(raw === null || JSON.parse(raw).bootBg === undefined).toBe(true);
   localStorage.clear();
+});
+
+// ── applyThemeAsync：切自定义主题要先把样式表换过来 ──
+// agent 只把选中那套的完整令牌写进 CSS（设计 4.5，否则 50 套就是四分之一兆字节
+// 换一套配色），所以切过去之前必须重新请求一次。在 CSS 到位前写 data-theme，
+// 屏幕上就是一帧没有任何令牌的白。
+
+/** 装一个假的 <link data-ps-theme="custom">，并让设 href 立刻触发 load。 */
+function withLink(fn: (link: HTMLLinkElement) => Promise<void>): Promise<void> {
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.dataset.psTheme = "custom";
+  link.setAttribute("href", "/theme/custom.css");
+  // jsdom 不发请求也不触发 load，自己补一个（异步，模拟真实的一次往返）。
+  const obs = new MutationObserver(() => setTimeout(() => link.dispatchEvent(new Event("load")), 0));
+  obs.observe(link, { attributes: true, attributeFilter: ["href"] });
+  document.head.appendChild(link);
+  return fn(link).finally(() => { obs.disconnect(); link.remove(); });
+}
+
+test("切到自定义主题会把 link 换成带 ?t= 的地址，并等它加载完再写 data-theme", async () => {
+  await withLink(async (link) => {
+    let hrefWhenApplied = "";
+    const o = new MutationObserver(() => { hrefWhenApplied = link.getAttribute("href") ?? ""; });
+    o.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    await applyThemeAsync("custom:paper");
+    o.disconnect();
+    expect(link.getAttribute("href")).toBe("/theme/custom.css?t=paper");
+    // data-theme 是在新 href 生效之后才写的，不是之前。
+    expect(hrefWhenApplied).toBe("/theme/custom.css?t=paper");
+    expect(document.documentElement.dataset.theme).toBe("custom:paper");
+  });
+});
+
+test("切回内置主题会把 ?t= 去掉", async () => {
+  await withLink(async (link) => {
+    await applyThemeAsync("custom:paper");
+    await applyThemeAsync("nord");
+    expect(link.getAttribute("href")).toBe("/theme/custom.css");
+    expect(document.documentElement.dataset.theme).toBe("nord");
+  });
+});
+
+test("换成同一个 href 不重新请求（点两下同一套主题不该多走一次网络）", async () => {
+  await withLink(async (link) => {
+    await applyThemeAsync("custom:paper");
+    let changed = false;
+    const o = new MutationObserver(() => { changed = true; });
+    o.observe(link, { attributes: true, attributeFilter: ["href"] });
+    await applyThemeAsync("custom:paper");
+    o.disconnect();
+    expect(changed).toBe(false);
+  });
+});
+
+test("样式表加载失败也照常换主题，不把整个动作失败掉", async () => {
+  // agent 没接入（demo 站）、离线、主题被别的设备删了——都会 404。
+  // 该做的是回落到内置令牌继续渲染。
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.dataset.psTheme = "custom";
+  link.setAttribute("href", "/theme/custom.css");
+  const obs = new MutationObserver(() => setTimeout(() => link.dispatchEvent(new Event("error")), 0));
+  obs.observe(link, { attributes: true, attributeFilter: ["href"] });
+  document.head.appendChild(link);
+  try {
+    expect(await applyThemeAsync("custom:gone")).toBe("custom:gone");
+    expect(document.documentElement.dataset.theme).toBe("custom:gone");
+  } finally { obs.disconnect(); link.remove(); }
+});
+
+test("页面上没有那个 link 时 applyThemeAsync 照样工作", async () => {
+  // 演示构建与单测里都没有它。
+  expect(await applyThemeAsync("gruvbox-dark")).toBe("gruvbox-dark");
+  expect(document.documentElement.dataset.theme).toBe("gruvbox-dark");
+});
+
+test("自定义主题名会被 URL 编码", async () => {
+  // 名字来自文件名，agent 侧已经收得很紧，但拼 URL 的一方不该假设这一点。
+  await withLink(async (link) => {
+    await applyThemeAsync("custom:a_b-2");
+    expect(link.getAttribute("href")).toBe("/theme/custom.css?t=a_b-2");
+  });
 });

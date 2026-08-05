@@ -262,6 +262,34 @@ function correctHue(
     contrast(c, surface) > contrast(best, surface) ? c : best);
 }
 
+/**
+ * ANSI slot names, in palette order. These are xterm's `ITheme` keys, which is
+ * the point: `--term-ansi-<name>` maps onto `theme.<camelCase(name)>` with no
+ * lookup table on the app side, and the name is what a person reading the CSS
+ * expects (`--term-ansi-bright-green`, not `--term-ansi-10`).
+ */
+export const ANSI_NAMES: readonly string[] = Object.freeze([
+  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+  "bright-black", "bright-red", "bright-green", "bright-yellow",
+  "bright-blue", "bright-magenta", "bright-cyan", "bright-white",
+]);
+
+/**
+ * The palette, verbatim, as sixteen tokens.
+ *
+ * Deliberately untouched by the hue and contrast filters that the *semantic*
+ * colours (`--ok`, `--red`, `--amber`) go through. Those tokens answer "which
+ * colour means running" and must survive a palette that fills slot 10 with
+ * pink; these answer "what does this program's `\e[32m` look like", where the
+ * only correct answer is whatever the theme author wrote. Correcting them would
+ * make the terminal disagree with the same theme running in Ghostty itself.
+ */
+function ansiTokens(palette: string[]): Tokens {
+  const out: Tokens = {};
+  ANSI_NAMES.forEach((name, i) => { out[`--term-ansi-${name}`] = palette[i]; });
+  return out;
+}
+
 /** Is this hue in the warm half of the circle? Used to keep a heuristic accent
  *  in the same temperature family as the background. */
 const isWarm = (h: number): boolean => h < 110 || h > 330;
@@ -373,6 +401,11 @@ export function derive(p: ParsedTheme): Tokens {
   const blue = ensureContrast(pal[12] ?? pal[4], panel, 4.5);
 
   const selection = p.selectionBackground ?? accent;
+  // Not every theme file sets selection-foreground. Falling back to whichever
+  // of the background/foreground reads better on the selection keeps the pair
+  // legible without inventing a colour that is not in the theme.
+  const selectionText = p.selectionForeground
+    ?? (contrast(fg, selection) >= contrast(bg, selection) ? fg : bg);
 
   // Syntax colours map straight onto the palette, so the editor and the terminal
   // agree by construction and there is no second colour scheme to maintain.
@@ -433,11 +466,32 @@ export function derive(p: ParsedTheme): Tokens {
     // ---- terminal. Follows the scheme now: the ANSI 16 are token-driven from
     // this same palette, so a light theme's terminal uses the light palette its
     // author designed, not xterm's built-in dark-background defaults.
+    //
+    // The cursor stays the UI accent rather than the file's `cursor-color`.
+    // Design §2.3 measured it: six of the seven palettes set cursor-color equal
+    // or near-equal to the foreground, so mapping it faithfully would trade a
+    // recognisable accent-coloured caret for a near-white one in almost every
+    // theme. `--term-cursor-text` is therefore `--on-accent`, which is the
+    // colour the accent pair already guarantees 4.5:1 against — the glyph under
+    // a block cursor has to be legible on the cursor, not on the file's caret.
     "--term-bg": bg,
     "--term-text": fg,
     "--term-dim": dimmer,
     "--term-accent": "var(--accent)",
-    "--term-selection": alpha(selection, 0.35),
+    "--term-cursor-text": "var(--on-accent)",
+    // Selection is the author's own pair, opaque, because both halves are used:
+    // xterm paints selectionForeground over selectionBackground, and the file
+    // was designed with exactly that pairing (4.75–12.95:1 across the seven).
+    // A translucent background here would blend towards the terminal bg and
+    // leave the designed foreground floating on something it was never checked
+    // against. ensureContrast is a no-op for all seven; it guards imports.
+    "--term-selection": selection,
+    "--term-sel-text": ensureContrast(selectionText, selection, 4.5),
+    // ANSI 0-15, verbatim from the palette. Not contrast-corrected on purpose:
+    // `ls --color` and a prompt's git branch have to look like the theme the
+    // user chose, and every terminal in existence renders ANSI black as the
+    // palette's black even when that is nearly the background.
+    ...ansiTokens(pal),
 
     // ---- code preview / editor
     "--code-bg": codeBg,
