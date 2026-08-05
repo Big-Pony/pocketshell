@@ -94,9 +94,12 @@ for plat in "${TARGETS[@]}"; do
   bin="pocketshell-agent-$plat"
   [ -f "$DIST/$bin" ] || { echo "missing built binary: $DIST/$bin" >&2; exit 1; }
   chmod +x "$DIST/$bin"
-  # Archive carries the platform binary plus LICENSE (Apache-2.0 requires the
-  # license to travel with the distribution). Extracts to `./$bin` per README.
-  tar -czf "$DIST/$bin.tar.gz" -C "$DIST" "$bin" -C "$REPO" LICENSE
+  # Archive carries the platform binary, LICENSE (Apache-2.0 requires the notice)
+  # and THIRD-PARTY-FONTS.md — the bundled fonts are OFL/UFL, and both licences
+  # require the copyright notice to travel with the distribution. The binary
+  # embeds the font files, so this file is the only place a user of the tarball
+  # can see them. Extracts to `./$bin` per README.
+  tar -czf "$DIST/$bin.tar.gz" -C "$DIST" "$bin" -C "$REPO" LICENSE THIRD-PARTY-FONTS.md
   echo "[release] packaged $bin.tar.gz ($(du -h "$DIST/$bin.tar.gz" | cut -f1))"
 done
 ( cd "$DIST" && shasum -a 256 ./*.tar.gz > SHA256SUMS.txt )
