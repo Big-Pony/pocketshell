@@ -144,6 +144,15 @@ export default {
         offline: "Not connected to the agent; importing needs a connection",
       },
     },
+    font: {
+      label: "Monospace font",
+      desc: "Shared by the terminal, code preview and editor; all five ship box-drawing and Powerline glyphs",
+      "maple-mono": "Maple Mono",
+      "jetbrains-mono": "JetBrains Mono",
+      "google-sans-code": "Google Sans Code",
+      "monaspace-neon": "Monaspace Neon",
+      "ubuntu-mono": "Ubuntu Mono",
+    },
     language: {
       label: "Language",
       desc: "UI language; follows the browser by default",

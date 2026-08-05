@@ -142,6 +142,16 @@ export default {
         offline: "没连上 agent，导入需要连接",
       },
     },
+    font: {
+      label: "等宽字体",
+      desc: "终端、代码预览与编辑器共用；五套都带终端画框与 Powerline 字形",
+      // 字体名是专有名词，中英文一致、不翻译。加一套字体要在这里补两处词条。
+      "maple-mono": "Maple Mono",
+      "jetbrains-mono": "JetBrains Mono",
+      "google-sans-code": "Google Sans Code",
+      "monaspace-neon": "Monaspace Neon",
+      "ubuntu-mono": "Ubuntu Mono",
+    },
     language: {
       label: "语言",
       desc: "界面语言，默认跟随浏览器",
