@@ -108,17 +108,10 @@
   let downY = 0;                      // pointer Y at the current keydown（flick 的上滑判定要它）
   let pendingKey: { id: string } | undefined; // byte key awaiting its deferred first shot
   let pendingRaf: number | undefined;
-  // flick 专用：有上滑字符的键改用定时器延后首发（见 keyDown 里的说明）。
-  // 与 pendingRaf 互斥——同一次按压只会用其中一个。
-  let pendingTimer: number | undefined;
   const KEY_SWIPE_CANCEL_PX = 12;     // horizontal travel that reclassifies as a swipe
   // flick 的上滑阈值。比横向取消阈值（12px）大，因为竖向要区分于「手指按下时
   // 的自然抖动」；实际手势通常滑 30px 以上。
   const FLICK_UP_PX = 22;
-  // flick 下「这一按是轻点还是上滑」的判定窗口。手指从按下到滑过 22px 通常要
-  // 50ms 以上，而 rAF 只有约 16ms——用 rAF 当窗口，每次上滑都会先送出字母。
-  // 120ms 足够容纳一次从容的上滑，又短到轻点时察觉不出（何况抬手会立即结算）。
-  const FLICK_DECIDE_MS = 120;
 
   // 当前按住的字节键，**跨越 deferred rAF 存活**（`pendingKey` 在第一帧后就被清空，
   // 而真实手指滑完 22px 要 50ms 以上，那时 pendingKey 早没了）。少了它，
@@ -131,11 +124,9 @@
   // false，会把横滑取消整条路径静默废掉。
   const coord = (v: number | undefined) => (Number.isFinite(v as number) ? (v as number) : 0);
 
-  /** 撤销「等待首发」的排程。rAF 与定时器同一次按压只会用一个，但两个都清
-   *  才不会在布局切换、rollover 等路径上漏掉——写成一处，省得七个调用点各漏各的。 */
+  /** 撤销「等待首发」的 rAF。写成一处，省得七个调用点各漏各的。 */
   function cancelPendingShot() {
     if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
-    if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = undefined; }
   }
 
   onMount(() => {
@@ -177,7 +168,12 @@
       repeaters.get(pendingKey.id)?.start(); // fires its first shot + arms repeat
       pendingKey = undefined;
     }
-    keyUp(id); // safety: drop a stale repeater/pending for the same key
+    // safety: drop a stale repeater/pending for the same key.
+    // **不能直接调 keyUp(id)**：带上滑的键在 keyUp 里会「抬手结算」发出字母，
+    // 同一个键重复按下（丢了 pointerup 的情况）就会凭空多打一个字。
+    // 这里要的只是清状态，不是结算，所以先把 heldKey 摘掉再清。
+    if (heldKey?.id === id) heldKey = undefined;
+    keyUp(id);
     const rep = createKeyRepeater(() => fireKey(id));
     repeaters.set(id, rep);
     flickArmed = false;
@@ -186,26 +182,20 @@
     pendingKey = { id };
     cancelPendingShot();
 
-    // 有上滑字符的键：首发要等到「确定不是上滑」为止，而且**不连发**。
+    // 有上滑字符的键：**抬手才输入**（keyUp 里结算），按下什么都不发。
     //
-    // 首发延后的理由：原来走一帧的 rAF（约 16ms）就发首字节，而手指滑完 22px
-    // 要 50ms 以上——结果每次上滑都先蹦出字母，然后才出符号。改用
-    // FLICK_DECIDE_MS 的判定窗口：窗口内越过竖向阈值就走上滑，没越过（或抬手）
-    // 才发字母。抬手时 keyUp 立即结算，所以真正的轻点感觉不到这段延迟。
+    // 试过用定时器延后首发，不成——那只是把问题推后：手指按住超过判定窗口
+    // 再滑，字母照样先蹦出来。只要「按下」这个时刻就决定输出，就永远分不清
+    // 用户是想轻点还是想上滑，因为这两个动作的开头完全一样。
+    // 真正分得清的时刻只有一个：抬手。抬手时手指走过多远已成定局，
+    // 越过阈值就是符号、没越过就是字母，不需要猜。
     //
-    // 不连发的理由：连发和上滑是同一个动作的两种解释——手指按住不动是连发，
-    // 按住往上滑是上滑，而「按住」这一步两者完全一样。留着连发，长按就会一边
-    // 吐字母一边等你滑，两种意图永远分不干净。字母/数字/符号本来也极少需要
-    // 连打（要连打的是退格和方向键，那些键没有 up，走下面的 rAF 分支照常连发）。
+    // 代价是这些键没有长按连发（连发要在按住期间就往外发，与上面的道理直接
+    // 冲突）。字母/数字/符号本来也极少需要连打——要连打的是退格和方向键，
+    // 那些键没有 up，走下面的 rAF 分支，行为一字未动。
     if (up) {
-      pendingTimer = setTimeout(() => {
-        pendingTimer = undefined;
-        if (pendingKey?.id === id && !flickArmed) {
-          pendingKey = undefined;
-          rep.start(); rep.stop();   // 单发：发一次就停，不武装连发
-          repeaters.delete(id);
-        }
-      }, FLICK_DECIDE_MS) as unknown as number;
+      repeaters.delete(id);   // 这个键不用 repeater：既不首发也不连发
+      pendingKey = undefined; // 也不走 deferred 首发那套记账
       return;
     }
 
@@ -229,12 +219,16 @@
     // 加了它会让斜向上的拖动（dx=30/dy=40）从「取消」变成「照发」——那是 classic
     // 行为的改动，而 classic 必须一字不变。
     const cancelled = dx > KEY_SWIPE_CANCEL_PX && (kbLayout !== "flick" || dx >= dy);
-    if (pendingKey && cancelled) {
+    // 判定用 (pendingKey || heldKey) 而不是只看 pendingKey：带上滑的键改成
+    // 「抬手才输入」之后就不再设 pendingKey，只看它会让横滑取消对这些键整条失效
+    // （横滑走了，抬手时 keyUp 照样结算出一个字母）。
+    const active = pendingKey?.id ?? heldKey?.id;
+    if (active && cancelled) {
       cancelPendingShot();
-      repeaters.get(pendingKey.id)?.stop();
-      repeaters.delete(pendingKey.id);
+      repeaters.get(active)?.stop();
+      repeaters.delete(active);
       pendingKey = undefined;
-      heldKey = undefined;
+      heldKey = undefined;   // 清掉它，抬手时就不会再结算
       return;
     }
 
@@ -258,6 +252,17 @@
       repeaters.get(id)?.stop();
       repeaters.delete(id);
       if (up) { onText(up); mods = consumeAfterKey(mods); }
+      return;
+    }
+    // 带上滑的键：按下时什么都没发，抬手才结算成主字符（走到这里说明没越过
+    // 上滑阈值——越过了会被上面那条分支拦下）。这是「按下不输入」的另一半，
+    // 少了它这些键就彻底哑了。
+    if (heldKey?.id === id && heldKey.up) {
+      heldKey = undefined;
+      cancelPendingShot();
+      pendingKey = undefined;
+      repeaters.delete(id);
+      fireKey(id);
       return;
     }
     if (heldKey?.id === id) heldKey = undefined;

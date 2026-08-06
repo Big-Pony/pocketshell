@@ -423,28 +423,21 @@ test("大键位：行高封顶 1.5 倍键宽，键不会被拉成竖条", () => 
 });
 
 // 真机反馈（12 期）：按住一个键上滑，会先蹦出 1 到多个字母，然后才出符号。
-// 根因是首发走一帧的 rAF（约 16ms）就送字节，而手指滑完 22px 要 50ms 以上——
-// 设计文档把这写成「按住 400ms 后再上滑」的边界情形，实际是**每次上滑**都会发生。
-// 修法：有 up 的键把首发推迟到 FLICK_DECIDE_MS(120ms) 的判定窗口之后。
+// 试过用定时器把首发推后，不成——那只是把问题推后：按住超过判定窗口再滑，
+// 字母照样先出。只要「按下」这一刻就决定输出，就永远分不清轻点还是上滑，
+// 因为两个动作的开头完全一样。最终改成 up 键抬手才输入。
 test("flick：上滑不该先送出字母（真机反馈：先蹦字母再出符号）", async () => {
-  vi.useFakeTimers();
-  try {
-    const onText = vi.fn();
-    const { container } = render(Keyboard, {
-      props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
-    });
-    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
-    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
-    // 手指还在路上：60ms 已过了一帧（rAF 的时间尺度），但没到判定窗口
-    vi.advanceTimersByTime(60);
-    expect(onText, "判定窗口内不该送出任何字节").not.toHaveBeenCalled();
-    q.dispatchEvent(pointerEventXY("pointermove", 100, 170));  // 上滑 30px
-    q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
-    expect(onText).toHaveBeenCalledTimes(1);
-    expect(onText).toHaveBeenCalledWith("1");
-  } finally {
-    vi.useRealTimers();
-  }
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  expect(onText, "按下时不该送出任何字节").not.toHaveBeenCalled();
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 170));  // 上滑 30px
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
+  expect(onText).toHaveBeenCalledTimes(1);
+  expect(onText).toHaveBeenCalledWith("1");
 });
 
 test("flick：普通轻点仍然出字母，抬手立即结算不等判定窗口", async () => {
@@ -463,9 +456,10 @@ test("flick：普通轻点仍然出字母，抬手立即结算不等判定窗口
   }
 });
 
-// 带上滑的键**不连发**：连发和上滑是同一个动作的两种解释（按住不动 vs
-// 按住上滑），「按住」这一步完全一样，留着连发两种意图就永远分不干净。
-test("flick：带上滑的键按住不动只出一个字母，不连发", async () => {
+// 带上滑的键是**抬手才输入**：按住期间一个字节都不发，抬手时手指走过多远
+// 已成定局，越过阈值就是符号、没越过就是字母，不需要猜。
+// 这也顺带取消了这些键的长按连发（连发要在按住期间就往外发，与上面直接冲突）。
+test("flick：带上滑的键按住不动，一个字节都不发；抬手才出字母", async () => {
   vi.useFakeTimers();
   try {
     const onText = vi.fn();
@@ -474,11 +468,32 @@ test("flick：带上滑的键按住不动只出一个字母，不连发", async 
     });
     const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
     q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
-    vi.advanceTimersByTime(150);          // 过了判定窗口，确定不是上滑
+    vi.advanceTimersByTime(400 + 60 * 10);  // 远超连发的启动延迟
+    expect(onText, "按住期间不该发任何字节").not.toHaveBeenCalled();
+    q.dispatchEvent(pointerEventXY("pointerup", 100, 200));
     expect(onText).toHaveBeenCalledTimes(1);
     expect(onText).toHaveBeenCalledWith("q");
-    vi.advanceTimersByTime(400 + 60 * 10); // 远超连发的启动延迟
-    expect(onText, "带上滑的键不该连发").toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// 用户报的原始现象：按住上滑，先蹦字母再出符号。按住多久都不该改变结论。
+test("flick：按住很久再上滑，只出符号，不先蹦字母", async () => {
+  vi.useFakeTimers();
+  try {
+    const onText = vi.fn();
+    const { container } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    vi.advanceTimersByTime(1000);           // 按住整整一秒才开始滑
+    expect(onText, "按住期间不该有任何输出").not.toHaveBeenCalled();
+    q.dispatchEvent(pointerEventXY("pointermove", 100, 170));
+    q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
+    expect(onText).toHaveBeenCalledTimes(1);
+    expect(onText).toHaveBeenCalledWith("1");
   } finally {
     vi.useRealTimers();
   }
@@ -538,4 +553,35 @@ test("layered：字母键没有上滑，长按连发照常", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+// keyDown 开头有个「清理同键陈旧状态」的 keyUp(id) 调用。带上滑的键在 keyUp
+// 里会「抬手结算」发字母，若不先摘掉 heldKey，同一个键重复按下（真机上丢了
+// pointerup 就会这样）会凭空多打一个字。
+test("flick：同一个键连续按下两次（丢了 pointerup）不该凭空多出字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));  // pointerup 丢了
+  expect(onText, "重复按下不该产生输出").not.toHaveBeenCalled();
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 200));
+  expect(onText).toHaveBeenCalledTimes(1);
+});
+
+// 横滑取消对带上滑的键同样要生效。这些键不设 pendingKey，所以取消逻辑
+// 必须认 heldKey——只看 pendingKey 会让整条路径对它们失效（横滑走了，
+// 抬手时照样结算出一个字母）。
+test("flick：横滑取消后抬手，不该结算出字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 140, 198));  // 横移 40px
+  q.dispatchEvent(pointerEventXY("pointerup", 140, 198));
+  expect(onText).not.toHaveBeenCalled();
 });
