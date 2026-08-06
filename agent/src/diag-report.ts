@@ -24,7 +24,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas"]);
+const KINDS = new Set(["atlas", "scroll"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -73,6 +73,20 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     if (pu) out.pagesUsed = pu;
     const plv = num(p.pageLayoutVersion);
     if (plv !== undefined) out.pageLayoutVersion = plv;
+    // 需求 3（12 期）的滚动状态快照。与 atlas 共用同一条 rpc 与同一套净化规则；
+    // 字段名与 app/src/lib/term/scroll-probe.ts 的 ScrollSnapshot 逐字对应，
+    // 两边漂移是静默的（字段被白名单丢掉，日志里只是少几个数，什么都不报错）。
+    //
+    // 注意 -1 与 0 的区别必须保住：-1 = 读不到（上游结构变了），0 = 真的塌陷。
+    // num() 原样透传两者，不要在这里做任何归一。
+    if (typeof p.bufferType === "string") out.bufferType = oneLine(p.bufferType, MAX_TAG);
+    for (const k of [
+      "bufferLength", "baseY", "ydisp", "rows", "cols",
+      "cellHeight", "canvasHeight", "scrollHeight", "scrollTop", "clientHeight",
+    ] as const) {
+      const v = num(p[k]);
+      if (v !== undefined) out[k] = v;
+    }
     if (typeof p.error === "string") out.error = oneLine(p.error, MAX_ERROR);
   } catch {
     out.kind = "unknown";

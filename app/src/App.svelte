@@ -5,6 +5,7 @@
   import { registerDevHelpers, unregisterDevHelpers } from "./lib/dev-helpers";
   import { mergeSessions, tombstone, closeTab as closeTabFn, nextSessionName, shouldAdopt, type LocalSession } from "./lib/ui/session-view";
   import { clampSplit, type BottomPanel } from "./lib/ui/shell";
+  import { recallDims } from "./lib/term/fit-guard";
   import TerminalView from "./components/Terminal.svelte";
   import TermCopyOverlay from "./components/TermCopyOverlay.svelte";
   import TopTabs from "./components/TopTabs.svelte";
@@ -470,7 +471,11 @@
   }));
 
   function newSession(name: string, kind: "tmux" | "shell" = "tmux") {
-    conn.newSession(name, { kind });
+    // 兜底尺寸：让新会话一开始就按本机宽度排版，而不是先用 agent 默认的 80x24
+    // 跑一段、再由 refit 纠正——纠正前打进历史的硬换行是回不来的。
+    // 没有兜底（首次使用、隐私模式）时 recallDims 返回 null，行为与从前一致。
+    const d = recallDims();
+    conn.newSession(name, { kind, cols: d?.cols, rows: d?.rows });
     activeId = name;
     backgrounded.delete(name); backgrounded = new Set(backgrounded);
     tabOrder = appendOrder(tabOrder, name);

@@ -266,18 +266,10 @@
   {:else}
     <div class="ops">
       <div class="ops-row">
-        <button class="key" data-key-id="Esc"
-          onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
-          onpointerup={() => keyUp("Esc")} onpointercancel={() => keyUp("Esc")} onpointerleave={() => keyUp("Esc")}>Esc</button>
-        <button class="key" data-key-id="Tab"
-          onpointerdown={(e) => { e.preventDefault(); keyDown("Tab"); }}
-          onpointerup={() => keyUp("Tab")} onpointercancel={() => keyUp("Tab")} onpointerleave={() => keyUp("Tab")}>Tab</button>
-        <button class="key" data-key-id="Del"
-          onpointerdown={(e) => { e.preventDefault(); keyDown("Del"); }}
-          onpointerup={() => keyUp("Del")} onpointercancel={() => keyUp("Del")} onpointerleave={() => keyUp("Del")}>Del</button>
-        <button class="key" data-key-id="Space"
-          onpointerdown={(e) => { e.preventDefault(); keyDown("Space"); }}
-          onpointerup={() => keyUp("Space")} onpointercancel={() => keyUp("Space")} onpointerleave={() => keyUp("Space")}>space</button>
+        <button class="act" onclick={() => onCommand({ type: "copyMode" })}>{$t('keyboard.ops.selectText')}</button>
+        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>{$t('keyboard.ops.copyAll')}</button>
+        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>{$t('keyboard.ops.copyOutput')}</button>
+        <button class="act" onclick={() => onCommand({ type: "paste" })}>{$t('keyboard.ops.paste')}</button>
       </div>
       <div class="ops-main">
         <div class="dpad">
@@ -297,22 +289,38 @@
             onpointerup={() => keyUp("ArrowDown")} onpointercancel={() => keyUp("ArrowDown")} onpointerleave={() => keyUp("ArrowDown")}>↓</button>
           <div></div>
         </div>
+        <!-- 2×2 网格按行填充：DOM 顺序 Esc, Tab, Del, Space 渲染出的视觉排布是
+             左上 Esc / 右上 Tab / 左下 Del / 右下 Space，即需求要的「从左上开始
+             顺时针 esc, tab, space, del」。改动这四个的顺序前先看 Keyboard.test.ts
+             里那条 DOM 顺序断言。 -->
         <div class="ops-nav2">
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("Home"); }}
-            onpointerup={() => keyUp("Home")} onpointercancel={() => keyUp("Home")} onpointerleave={() => keyUp("Home")}>Home</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("End"); }}
-            onpointerup={() => keyUp("End")} onpointercancel={() => keyUp("End")} onpointerleave={() => keyUp("End")}>End</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("PgUp"); }}
-            onpointerup={() => keyUp("PgUp")} onpointercancel={() => keyUp("PgUp")} onpointerleave={() => keyUp("PgUp")}>PgUp</button>
-          <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("PgDn"); }}
-            onpointerup={() => keyUp("PgDn")} onpointercancel={() => keyUp("PgDn")} onpointerleave={() => keyUp("PgDn")}>PgDn</button>
+          <button class="key" data-key-id="Esc"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
+            onpointerup={() => keyUp("Esc")} onpointercancel={() => keyUp("Esc")} onpointerleave={() => keyUp("Esc")}>Esc</button>
+          <button class="key" data-key-id="Tab"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Tab"); }}
+            onpointerup={() => keyUp("Tab")} onpointercancel={() => keyUp("Tab")} onpointerleave={() => keyUp("Tab")}>Tab</button>
+          <!-- 需求 1（12 期）：这里原本是 id "Del" → SEQ.Del → \x1b[3~（前向删除）。
+               手机上「删掉刚打错的字」要的是退格，而前向删除在行尾什么也不做，
+               表现就是「删除按钮失效」。键帽用 ⌫ 而非 Del：发的既然是退格，
+               写 Del 会与笔记本上 Del 键的含义正好相反。 -->
+          <button class="key" data-key-id="Backspace"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Backspace"); }}
+            onpointerup={() => keyUp("Backspace")} onpointercancel={() => keyUp("Backspace")} onpointerleave={() => keyUp("Backspace")}>⌫</button>
+          <button class="key" data-key-id="Space"
+            onpointerdown={(e) => { e.preventDefault(); keyDown("Space"); }}
+            onpointerup={() => keyUp("Space")} onpointercancel={() => keyUp("Space")} onpointerleave={() => keyUp("Space")}>space</button>
         </div>
       </div>
       <div class="ops-bottom">
-        <button class="act" onclick={() => onCommand({ type: "copyMode" })}>{$t('keyboard.ops.selectText')}</button>
-        <button class="act" onclick={() => onCommand({ type: "selectAllCopy" })}>{$t('keyboard.ops.copyAll')}</button>
-        <button class="act" onclick={() => onCommand({ type: "copyVisible" })}>{$t('keyboard.ops.copyOutput')}</button>
-        <button class="act" onclick={() => onCommand({ type: "paste" })}>{$t('keyboard.ops.paste')}</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("Home"); }}
+          onpointerup={() => keyUp("Home")} onpointercancel={() => keyUp("Home")} onpointerleave={() => keyUp("Home")}>Home</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("End"); }}
+          onpointerup={() => keyUp("End")} onpointercancel={() => keyUp("End")} onpointerleave={() => keyUp("End")}>End</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("PgUp"); }}
+          onpointerup={() => keyUp("PgUp")} onpointercancel={() => keyUp("PgUp")} onpointerleave={() => keyUp("PgUp")}>PgUp</button>
+        <button class="key" onpointerdown={(e) => { e.preventDefault(); keyDown("PgDn"); }}
+          onpointerup={() => keyUp("PgDn")} onpointercancel={() => keyUp("PgDn")} onpointerleave={() => keyUp("PgDn")}>PgDn</button>
       </div>
     </div>
   {/if}
@@ -564,7 +572,7 @@
     grid-template-columns: repeat(4, 1fr);
     gap: 4px;
   }
-  .ops-row .key { min-height: 2.6em; font-size: 0.74rem; }
+  .ops-row .act { padding: 10px 0; font-size: 0.72rem; }
   .ops-main {
     display: flex;
     gap: 6px;
@@ -610,10 +618,7 @@
     grid-template-columns: repeat(4, 1fr);
     gap: 4px;
   }
-  .ops-bottom .act {
-    padding: 10px 0;
-    font-size: 0.72rem;
-  }
+  .ops-bottom .key { min-height: 2.6em; font-size: 0.74rem; }
   .act {
     background: var(--key);
     color: var(--key-text);

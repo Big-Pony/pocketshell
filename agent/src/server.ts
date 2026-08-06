@@ -13,6 +13,7 @@ import { sweepTmp } from "./fs-service";
 import { RPC_FIT_SAFE_BYTES, chunkRpcPayload } from "./rpc-fit";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
 import { sessionListsEqual } from "./sessions-diff";
+import { isSaneSize } from "./sane-size";
 import { toB64, fromB64 } from "./bytes";
 import { createResponderChannel, type SecureChannel } from "./secure-channel";
 import { resolveStatic, contentEtag, isNotModified } from "./static-serve";
@@ -520,7 +521,13 @@ export function startServer(deps: Deps = {}) {
               sendSecure(conn, { type: "error", code: "name_taken", message: `session "${msg.name}" already exists` });
               break;
             }
-            terminal.ensure(msg.name, { cmd: msg.cmd, cwd: msg.cwd, env: notifyEnv(msg.name) });
+            // 客户端捎来的本机尺寸：可信才用，否则退回 ensure 内部的 80x24 默认。
+            const hinted = isSaneSize(msg.cols, msg.rows);
+            terminal.ensure(msg.name, {
+              cmd: msg.cmd, cwd: msg.cwd, env: notifyEnv(msg.name),
+              cols: hinted ? msg.cols : undefined,
+              rows: hinted ? msg.rows : undefined,
+            });
           }
         }
         catch (e) { sendSecure(conn, { type: "error", code: "ensure_failed", message: String(e) }); }
@@ -575,6 +582,11 @@ export function startServer(deps: Deps = {}) {
         else terminal.write(msg.sessionId, fromB64(msg.data));
         break;
       case "resize":
+        // 纵深防御：塌陷尺寸会让上游程序按错误宽度把硬换行打进 tmux 历史，而那
+        // **不可逆**（tmux 只能反折自己折的软折行）。客户端已在 fit-guard.ts 修掉
+        // 根因，这里再挡一道，保证任何版本/任何实现的客户端都毁不掉用户的历史。
+        // 丢弃而非夹取：夹到 20 列照样污染，保住上一次的正确尺寸才是对的。
+        if (!isSaneSize(msg.cols, msg.rows)) break;
         if (shell.has(msg.sessionId)) shell.resize(msg.sessionId, msg.cols, msg.rows);
         else terminal.resize(msg.sessionId, msg.cols, msg.rows);
         break;

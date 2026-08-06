@@ -575,8 +575,16 @@ export class Connection {
     socket.send(frame);
   }
 
-  newSession(name: string, opt: { cmd?: string; cwd?: string; kind?: "tmux" | "shell" } = {}): void {
-    this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd, kind: opt.kind });
+  // 新建会话时捎上本机上次的可信尺寸（recallDims）。目的不是省一次 resize，而是
+  // 让会话**从第一个字节起**就按本机宽度排版：agent 默认的 80x24 与手机实际的
+  // ~41 列差得远，而在第一次 refit 纠正之前，Claude Code 已经按 80 列把硬换行打
+  // 进历史了——那部分 tmux 反折不回来（详见 lib/term/fit-guard.ts）。
+  // 读不到兜底时不传，行为与从前一致。
+  newSession(
+    name: string,
+    opt: { cmd?: string; cwd?: string; kind?: "tmux" | "shell"; cols?: number; rows?: number } = {},
+  ): void {
+    this.send({ type: "newSession", name, cmd: opt.cmd, cwd: opt.cwd, kind: opt.kind, cols: opt.cols, rows: opt.rows });
   }
   // opts.seed：这次 attach 紧跟在一份 term.history 快照之后，传入的 seq 就是
   // 快照那一刻的进度，必须覆盖 seen —— 重挂载时 seen 里可能残留上一轮的旧值。
