@@ -165,6 +165,24 @@ export default {
       label: "Keyboard layout",
       desc: "The full-keyboard tab uses a laptop layout; default Mac",
     },
+    // Distinct from `layout` above (Mac/Win keycap wording): that one only swaps
+    // the Cmd/Win legend, this one swaps the whole key arrangement and key size.
+    // "Flick" is deliberately not "Swipe": swipe keyboards mean glide typing
+    // (Swype/Gboard) in English, which is a feature we do not have.
+    kbLayout: {
+      label: "Key layout",
+      desc: "Key positions and size on the full-keyboard tab",
+      classic: "Classic",
+      classicDesc: "Full laptop layout, every character directly available",
+      layered: "Layered",
+      layeredDesc: "Bigger keys; digits and symbols on a second layer",
+      flick: "Flick",
+      flickDesc: "Bigger keys; flick up on a key for its symbol",
+      replay: "Replay keyboard tutorial",
+      replayDesc: "Show the Layered and Flick walkthroughs again",
+      replayBtn: "Replay",
+      replayDone: "Reset",
+    },
     groupTabs: {
       label: "Group tabs by type",
       desc: "Terminals on the left, files on the right; each sorted by most recently opened",
@@ -287,6 +305,19 @@ export default {
       copyOutput: "Copy output",
       paste: "Paste",
     },
+  },
+  // Shown once when switching to layered / flick. Each variant teaches only the
+  // single new thing that layout requires.
+  kbTutorial: {
+    switched: "Switched to the \"{name}\" keyboard",
+    ok: "Got it",
+    go: "Start typing",
+    layeredLead: "Digits and symbols live on a second layer.",
+    layeredBody: "They moved so the keys could get bigger — tap 123 on the bottom row to switch, then abc to come back.",
+    layeredNote: "esc / tab / ctrl / alt / arrows stay out here; no switching needed.",
+    flickLead: "Flick up on a key to type its symbol.",
+    flickBody: "The small character in a key's top-right corner is its second character. Press and flick up to type it — no layer switching.",
+    flickNote: "A plain tap still types the letter. Digits 1–0 sit on the top letter row.",
   },
   copymode: {
     title: "Copy mode",

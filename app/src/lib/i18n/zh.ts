@@ -164,6 +164,22 @@ export default {
       label: "键盘布局",
       desc: "全键盘 tab 采用笔记本布局，默认 Mac",
     },
+    // 与上面的 layout（Mac/Win 键帽标注）是两回事：那个只换 Cmd/Win 的字，
+    // 这个换整套键位与键的大小，故标签叫「键盘键位」以示区分。
+    kbLayout: {
+      label: "键盘键位",
+      desc: "全键盘 tab 的键位与键的大小",
+      classic: "经典",
+      classicDesc: "完整笔记本布局，字符全部直出",
+      layered: "分层",
+      layeredDesc: "键更大，数字符号在第二层",
+      flick: "上滑",
+      flickDesc: "键更大，在键上向上滑取符号",
+      replay: "重看键盘教程",
+      replayDesc: "再看一次「分层」与「上滑」的用法说明",
+      replayBtn: "重看",
+      replayDone: "已重置",
+    },
     groupTabs: {
       label: "分类排列标签",
       desc: "终端标签靠左、文件标签靠右，各自按最近打开排序",
@@ -286,6 +302,18 @@ export default {
       copyOutput: "复制输出",
       paste: "粘贴",
     },
+  },
+  // 切到 layered / flick 时弹一次的教程弹窗。每套只讲它唯一需要学的那件事。
+  kbTutorial: {
+    switched: "已切换到「{name}」键盘",
+    ok: "知道了",
+    go: "开始使用",
+    layeredLead: "数字和符号在第二层。",
+    layeredBody: "为了把键做大，它们收了起来——点底排的 123 键切过去，再点 abc 回来。",
+    layeredNote: "esc / tab / ctrl / alt / 方向键始终在外面，不用切层。",
+    flickLead: "在键上向上滑，输符号。",
+    flickBody: "键帽右上角的小字就是它的第二个字符，按住上滑即可输入，不用切层。",
+    flickNote: "直接轻点还是打原来的字母。数字 1–0 在第一排字母键上。",
   },
   copymode: {
     title: "复制模式",
