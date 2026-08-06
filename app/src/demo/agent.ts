@@ -9,7 +9,7 @@ import type { ClientMsg, ServerMsg, SessionMeta } from "../lib/net/protocol";
 import { toB64 } from "../lib/bytes";
 import { DEMO_ROOT, resolvePath, listDir, readFile, lookup, treeAt } from "./fs";
 import { tr } from "../lib/i18n";
-import { GIT_BRANCHES, GIT_STATUS, GIT_LOG, DIFF_HUNKS, DEMO_HINTS, DEMO_SNIPPETS } from "./git";
+import { GIT_BRANCHES, GIT_STATUS, GIT_LOG, DIFF_HUNKS, DEMO_HINTS, demoSnippets } from "./git";
 
 export interface DemoScheduler {
   setTimeout(fn: () => void, ms: number): number;
@@ -72,6 +72,16 @@ export class DemoAgent {
   /** 断线：不再往外推，但内部计时器照跑。Task 3 用。 */
   detachTransport(): void { this.push = null; }
 
+  /**
+   * 主动推一次 snippets。**对齐真 agent 的语义**：真后端在增删改后调
+   * `pushSnippets()` 广播全量列表（server.ts:394），前端 SnippetPanel 只在挂载时
+   * 拉一次、之后靠推送更新。
+   *
+   * 演示里的触发源是**切语言**——标签取自 i18n，语言变了列表内容就变了，
+   * 不重推的话面板会一直显示切换前那套（组件把 items 存在自己的 state 里）。
+   */
+  pushSnippets(): void { this.send({ type: "snippets", items: demoSnippets() }); }
+
   snapshotSessions(): SessionMeta[] { return this.sessions.map((s) => ({ ...s })); }
 
   handle(msg: ClientMsg): void {
@@ -101,7 +111,7 @@ export class DemoAgent {
         this.broadcastSessions();
         break;
       case "rpc":        this.onRpc(msg.id, msg.method, msg.params); break;
-      case "listSnippets": this.send({ type: "snippets", items: DEMO_SNIPPETS }); break;
+      case "listSnippets": this.pushSnippets(); break;
       // resize / presence 无副作用；其余（hints、pair…）在后续任务接。
       default: break;
     }

@@ -6,16 +6,36 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { initTheme } from "../lib/theme";
+  import { loadSettings, saveSettings, type Language } from "../lib/settings";
+  import { applyLanguage } from "../lib/i18n";
 
   let frame: HTMLIFrameElement | undefined = $state();
+  let lang: Language = $state(loadSettings().language);
 
   function tryOffline() {
     frame?.contentWindow?.postMessage({ source: "pocketshell-demo", action: "drop" }, location.origin);
   }
 
+  // 切语言：本页立即生效 + 打进 iframe。两边各有一份 svelte-i18n runtime，
+  // 不同步的话会出现「左边英文、右边中文」。
+  function toggleLang() {
+    const next: Language = lang === "zh" ? "en" : "zh";
+    lang = next;
+    saveSettings({ ...loadSettings(), language: next });
+    applyLanguage(next);
+    frame?.contentWindow?.postMessage({ source: "pocketshell-demo", action: "lang", lang: next }, location.origin);
+  }
+
   onMount(() => {
-    // 访客在框内切主题时 ps.settings 变了，storage 事件会派发到本文档。
-    const onStorage = (e: StorageEvent) => { if (e.key === "ps.settings") initTheme(); };
+    // 访客在框内切主题或语言时 ps.settings 变了，storage 事件会派发到本文档。
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "ps.settings") return;
+      initTheme();
+      const next = loadSettings().language;
+      if (next === lang) return;
+      lang = next;
+      applyLanguage(next);
+    };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   });
@@ -23,6 +43,7 @@
 
 <main class="stage">
   <section class="pitch">
+    <button class="btn-lang" onclick={toggleLang}>{lang === "zh" ? "English" : "中文"}</button>
     <h1>{$t("demo.showcase.title")}</h1>
     <p class="lede">{$t("demo.showcase.lede")}</p>
 
@@ -77,6 +98,20 @@
     box-sizing: border-box;
   }
   .pitch { max-width: 460px; }
+  /* 按钮文字刻意不进 i18n——它永远显示「对方语言」，与官网 .btn-lang 惯例一致。 */
+  .btn-lang {
+    font: inherit;
+    font-size: 0.78rem;
+    color: var(--dim);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 99px;
+    padding: 5px 14px;
+    margin-bottom: 14px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .btn-lang:hover { color: var(--text); border-color: var(--accent); }
   h1 { font-size: 1.6rem; margin: 0 0 10px; }
   .lede { color: var(--dim); margin: 0 0 22px; line-height: 1.6; }
 

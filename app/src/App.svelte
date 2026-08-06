@@ -353,8 +353,14 @@
       // 展台页（桌面）经 postMessage 触发同一个入口。同源，故 origin 可校验。
       const onMsg = (e: MessageEvent) => {
         if (e.origin !== location.origin) return;
-        const d = e.data as { source?: string; action?: string } | null;
-        if (d?.source === "pocketshell-demo" && d.action === "drop") demo.director.playDropScene();
+        const d = e.data as { source?: string; action?: string; lang?: string } | null;
+        if (d?.source !== "pocketshell-demo") return;
+        if (d.action === "drop") demo.director.playDropScene();
+        // 展台页切语言：走 applySettings 这条既有通路，settings 才会被持久化，
+        // 手机框内 Settings 面板的选中态也才跟得上。
+        if (d.action === "lang" && (d.lang === "zh" || d.lang === "en")) {
+          applySettings({ ...settings, language: d.lang });
+        }
       };
       window.addEventListener("message", onMsg);
       // 任何输入立即停自动播放（设计文档 2.5）。

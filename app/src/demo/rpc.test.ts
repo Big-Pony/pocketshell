@@ -144,3 +144,38 @@ test("完全没见过的 method 也必有 response（前端不会挂到超时）
   const r = h.call("totally.unknown.method");
   expect(r.ok).toBe(false);
 });
+
+test("listSnippets 的标签跟随 locale 切换（惰性求值守卫）", async () => {
+  const { locale } = await import("svelte-i18n");
+  const grab = () => {
+    const out: ServerMsg[] = [];
+    const agent = new DemoAgent({ push: (m) => out.push(m) });
+    agent.handle({ type: "listSnippets" });
+    const msg = out.find((m) => m.type === "snippets");
+    return (msg as Extract<ServerMsg, { type: "snippets" }>).items.map((i) => i.label);
+  };
+  const zhLabels = grab();
+  locale.set("en");
+  const enLabels = grab();
+  locale.set("zh"); // 复位
+  expect(zhLabels).toContain("派活给 Claude");
+  expect(enLabels).toContain("Ask Claude");
+});
+
+test("pushSnippets 主动推全量列表（切语言后刷新面板靠它）", async () => {
+  // 回归守卫：SnippetPanel 只在挂载时 listSnippets 一次，之后把 items 存在自己
+  // 的 state 里。切语言只让 demoSnippets() 的**下一次**求值变英文，已经推过去的
+  // 那份不会自己更新——浏览器实测过：切成中文后面板仍显示 "Ask Claude"。
+  // 修法是对齐真后端语义（server.ts:394）主动重推，此用例锁住那条通路存在。
+  const { locale } = await import("svelte-i18n");
+  const out: ServerMsg[] = [];
+  const agent = new DemoAgent({ push: (m) => out.push(m) });
+  agent.handle({ type: "listSnippets" }); // 首拉（zh）
+  locale.set("en");
+  agent.pushSnippets();                   // 切语言后重推
+  locale.set("zh");                       // 复位
+  const pushes = out.filter((m) => m.type === "snippets") as Extract<ServerMsg, { type: "snippets" }>[];
+  expect(pushes).toHaveLength(2);
+  expect(pushes[0].items.map((i) => i.label)).toContain("派活给 Claude");
+  expect(pushes[1].items.map((i) => i.label)).toContain("Ask Claude");
+});

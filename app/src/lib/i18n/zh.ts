@@ -69,6 +69,38 @@ export default {
     tryOffline: "试试断网",
     installCta: "装到自己机器上 →",
     disabled: "演示中不可用",
+    files: {
+      readme: `# demo-project
+
+一个用来演示 PocketShell 的示例仓库。**这里的一切都是假的** —— 你现在看到的
+是一个跑在浏览器里的沙盘，没有服务器，也没有真的文件。
+
+![logo](docs/logo.png)
+
+## 能试什么
+
+- 在终端里敲 \`ls\` / \`cd src\` / \`cat auth.ts\`
+- 敲 \`claude\` 看它跑起来
+- 点顶栏的「试试断网」，看断开期间的输出在重连后如何补齐
+- 在设置里切换七套主题、中英文
+
+## 装到自己机器上
+
+\`\`\`bash
+curl -fsSL https://pocketshell.net/install.sh | sh
+\`\`\`
+`,
+    },
+    snippets: {
+      groupAi: "AI",
+      groupGit: "Git",
+      groupTest: "测试",
+      assign: "派活给 Claude",
+      continue: "继续",
+      gitStatus: "看改动",
+      gitDiff: "看 diff",
+      runTests: "跑测试",
+    },
     showcase: {
       title: "PocketShell 演示沙盘",
       lede: "这是真的前端，假的后端。随便点、随便敲——刷新即还原。",

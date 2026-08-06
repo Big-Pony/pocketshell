@@ -2,12 +2,21 @@
 //
 // 结构对齐 agent/src/fs-service.ts 的 TreeResult/ReadResult —— 前端 FilePanel
 // 与 FilePreview 是照那个形状写的，对不上就渲染不出来。
+import { tr } from "../lib/i18n";
+
 export const DEMO_ROOT = "/home/demo/project";
 
 export interface DemoNode {
   type: "dir" | "file";
   git?: "M" | "A" | "D" | "?";
-  content?: string;
+  /**
+   * 字面量，或惰性求值函数。
+   *
+   * **走 i18n 的内容必须用函数形式**：模块级常量在 import 期求值，而
+   * demo-main.ts 的 setupI18n() 在所有 import 之后才跑——直接写
+   * `tr(...)` 会拿到原始 key 并永久冻结，之后切语言也不会变。
+   */
+  content?: string | (() => string);
   children?: Record<string, DemoNode>;
 }
 
@@ -18,7 +27,7 @@ export interface Session {
   expiresAt: number;
 }
 
-// 会话校验：过期即拒，签名不符即拒。
+// Session check: reject when expired, reject when the signature does not match.
 export function checkSession(token: string): Session | null {
   const claims = verify(token);
   if (!claims) return null;
@@ -45,27 +54,6 @@ export function verify(token: string): { sub: string; expiresAt: number } | null
 }
 `;
 
-const README_MD = `# demo-project
-
-一个用来演示 PocketShell 的示例仓库。**这里的一切都是假的** —— 你现在看到的
-是一个跑在浏览器里的沙盘，没有服务器，也没有真的文件。
-
-![logo](docs/logo.png)
-
-## 能试什么
-
-- 在终端里敲 \`ls\` / \`cd src\` / \`cat auth.ts\`
-- 敲 \`claude\` 看它跑起来
-- 点顶栏的「试试断网」，看断开期间的输出在重连后如何补齐
-- 左下角切换六套主题、中英文
-
-## 装到自己机器上
-
-\`\`\`bash
-curl -fsSL https://pocketshell.net/install.sh | sh
-\`\`\`
-`;
-
 const PKG_JSON = `{
   "name": "demo-project",
   "version": "0.3.1",
@@ -86,7 +74,7 @@ const REPORT_HTML = `<!doctype html>
 const AUTH_TEST = `import { test, expect } from "vitest";
 import { checkSession } from "../src/auth";
 
-test("过期的 token 被拒", () => {
+test("rejects an expired token", () => {
   expect(checkSession("expired.sig")).toBeNull();
 });
 `;
@@ -94,7 +82,7 @@ test("过期的 token 被拒", () => {
 export const TREE: DemoNode = {
   type: "dir",
   children: {
-    "README.md": { type: "file", content: README_MD },
+    "README.md": { type: "file", content: () => tr("demo.files.readme") },
     "package.json": { type: "file", content: PKG_JSON },
     src: {
       type: "dir",
@@ -187,5 +175,10 @@ export function readFile(abs: string): { content: string; lang: string; mtime: n
   const node = lookup(abs);
   if (!node || node.type !== "file") return null;
   const name = abs.slice(abs.lastIndexOf("/") + 1);
-  return { content: node.content ?? "", lang: langOf(name), mtime: MTIME };
+  const raw = node.content;
+  return {
+    content: typeof raw === "function" ? raw() : raw ?? "",
+    lang: langOf(name),
+    mtime: MTIME,
+  };
 }

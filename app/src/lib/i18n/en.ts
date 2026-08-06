@@ -69,6 +69,39 @@ export default {
     tryOffline: "Try going offline",
     installCta: "Install it on your own machine →",
     disabled: "Not available in the demo",
+    files: {
+      readme: `# demo-project
+
+A sample repository for demoing PocketShell. **Everything here is fake** — what
+you are looking at is a sandbox running entirely in your browser. There is no
+server and there are no real files.
+
+![logo](docs/logo.png)
+
+## What to try
+
+- Type \`ls\` / \`cd src\` / \`cat auth.ts\` in the terminal
+- Type \`claude\` and watch it run
+- Hit "Try going offline" in the top bar, then watch the gap fill in on reconnect
+- Switch among seven themes and two languages in Settings
+
+## Install it on your own machine
+
+\`\`\`bash
+curl -fsSL https://pocketshell.net/install.sh | sh
+\`\`\`
+`,
+    },
+    snippets: {
+      groupAi: "AI",
+      groupGit: "Git",
+      groupTest: "Tests",
+      assign: "Ask Claude",
+      continue: "Continue",
+      gitStatus: "See changes",
+      gitDiff: "See the diff",
+      runTests: "Run tests",
+    },
     showcase: {
       title: "PocketShell demo sandbox",
       lede: "A real frontend on a fake backend. Poke at anything — a refresh resets it.",

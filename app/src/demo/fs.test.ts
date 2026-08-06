@@ -66,3 +66,14 @@ test("树里有演示需要的四类文件：ts / md / 图片 / html", () => {
   expect(lookup(`${DEMO_ROOT}/docs/logo.png`)).not.toBeNull();
   expect(lookup(`${DEMO_ROOT}/docs/report.html`)).not.toBeNull();
 });
+
+test("README 内容跟随 locale 切换（惰性求值守卫，勿改回模块级常量）", async () => {
+  const { locale } = await import("svelte-i18n");
+  const zhText = readFile(`${DEMO_ROOT}/README.md`)!.content;
+  locale.set("en");
+  const enText = readFile(`${DEMO_ROOT}/README.md`)!.content;
+  locale.set("zh"); // 复位，免得污染同文件后续用例（vitest-setup 钉死 zh）
+  expect(zhText).not.toBe(enText);
+  expect(enText).toContain("Everything here is fake");
+  expect(zhText).toContain("这里的一切都是假的");
+});
