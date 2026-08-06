@@ -775,9 +775,20 @@
     --key-gap-y: 5px;
     gap: var(--key-gap-y);
     padding: var(--key-gap-y) var(--key-gap-x);
+    /* 五行按比例分掉可用高度，不滚动。
+       用固定行高（min-height）会在分割条压低键盘区时把最后一行——**方向键**——
+       挤出可视区，而方向键是终端里最高频的键，藏进滚动区等于没有。
+       所以高度富余时键更大，高度紧张时一起收缩，行数恒定。 */
+    overflow: hidden;
+    min-height: 0;
   }
-  .rows.big .row { gap: var(--key-gap-x); }
-  .rows.big .key { min-height: 2.9em; font-size: 0.92rem; }
+  .rows.big .row {
+    gap: var(--key-gap-x);
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  /* 键高由行撑满，只保留一个不至于按不到的下限（触控目标约 34px） */
+  .rows.big .key { min-height: 2.1em; height: 100%; font-size: 0.92rem; }
   .rows.big .key.mod { font-size: 0.66rem; }
   /* 9 键行缩进半个键宽居中对齐 10 键行。缩进量随 gap 算，写死百分比改 gap 会错位。 */
   .rows.big .row.indent {

@@ -376,3 +376,23 @@ test("flick：没有 up 的键（Shift/Backspace）上滑等同轻点", async ()
   bs.dispatchEvent(pointerEventXY("pointerup", 100, 160));
   expect(onText).toHaveBeenCalledWith("\x7f");
 });
+
+// 上面几条 flick 用例都是同步派发 pointerdown→move→up，那是 jsdom 的时间尺度，
+// 不是手指的：真人滑完 22px 要 50ms 以上，中间隔着好几帧。而 keyDown 排的那个
+// rAF 会在第一帧后清掉 pendingKey——若把上滑判定挂在 pendingKey 上，同步测试
+// 照样全绿，真机上却永远滑不出符号（heldKey 就是为此存在的）。
+// 这条用例专门跨过那一帧，是该实现的守门人。
+test("flick：等 rAF 跑完（真人手指的时间尺度）之后再上滑，仍然出符号", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  // 让 keyDown 排的 rAF 真正执行：这一刻 pendingKey 已被清空、首发字节已送出
+  await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  onText.mockClear();   // 首发的 "q" 是既定行为（长按语义），本条只看滑动的结果
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 170));  // 上滑 30px > 22
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
+  expect(onText).toHaveBeenCalledWith("1");
+});
