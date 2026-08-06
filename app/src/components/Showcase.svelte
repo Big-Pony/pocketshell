@@ -83,6 +83,24 @@
 </main>
 
 <style>
+  /*
+   * 展台页要能滚。`app.css` 给 `html,body` 设了 `height:100%` + `overflow:hidden`,
+   * 那是**为 App 服务的**——终端 UI 是固定视口，页面级滚动会让它橡皮筋乱弹。
+   * 但展台页跟 App 共用同一份 app.css（main.ts 与 demo-main.ts 都 import 它），
+   * 于是内容超出视口时被直接裁掉且没有滚动条：矮窗口（笔电全屏 + 书签栏，
+   * 实测 577px 高）下内容有 760px，底部的二维码与三个 CTA 整块够不着。
+   *
+   * 只在展台页覆盖，用 `:global()` 打到 html/body（Svelte 会把普通选择器
+   * 作用域化，打不到组件外的元素）。**这里不能改 app.css**——那会连 App
+   * 一起放开，把终端页面变成可滚的。
+   */
+  :global(html),
+  :global(body) {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
   /* 全部走语义令牌，六套主题自动适配（CLAUDE.md 第 4 条）。 */
   .stage {
     min-height: 100dvh;

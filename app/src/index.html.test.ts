@@ -183,6 +183,23 @@ test("分流与 iframe 都指向无扩展名的 /app，不是 /app.html", () => 
   expect(showcase).not.toContain('"/app.html"');
 });
 
+test("展台页放开页面级滚动，且只在展台页放开（App 必须保持不可滚）", () => {
+  // app.css 给 html,body 设了 height:100% + overflow:hidden——那是**为 App 服务的**
+  // （终端 UI 固定视口，页面级滚动会让它橡皮筋乱弹）。展台页与 App 共用同一份
+  // app.css，于是内容超出视口时被直接裁掉且没有滚动条：矮窗口（笔电全屏 + 书签栏，
+  // 实测 577px 高）下内容有 760px，底部二维码与三个 CTA 整块够不着。
+  //
+  // 修法是在 Showcase.svelte 里用 :global() 覆盖（Svelte 会把普通选择器作用域化，
+  // 打不到组件外的 html/body）。**判据同时锁两头**：展台页要有覆盖，app.css 要保持
+  // hidden——把覆盖搬进 app.css 同样能让展台页滚起来，但会连 App 一起放开。
+  const showcase = readFileSync(resolve(__dirname, "./components/Showcase.svelte"), "utf8");
+  expect(showcase, "Showcase 缺 :global(body) 覆盖，展台页会不可滚").toMatch(/:global\(body\)/);
+  expect(showcase, "覆盖里要把 overflow 放开").toMatch(/overflow:\s*visible/);
+
+  const appCss = readFileSync(resolve(__dirname, "./app.css"), "utf8");
+  expect(appCss, "app.css 里 body 的 overflow:hidden 是 App 的前提，不能删").toMatch(/overflow:\s*hidden/);
+});
+
 test("demo.html 不引 manifest 与 apple-touch-icon（演示站不做 PWA）", () => {
   expect(DEMO_HTML).not.toContain("manifest.webmanifest");
   expect(DEMO_HTML).not.toContain("apple-touch-icon");
