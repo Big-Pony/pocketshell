@@ -421,3 +421,76 @@ test("大键位：行高封顶 1.5 倍键宽，键不会被拉成竖条", () => 
     .toMatch(/100vw/);
   expect(block).toMatch(/\*\s*1\.5/);
 });
+
+// 真机反馈（12 期）：按住一个键上滑，会先蹦出 1 到多个字母，然后才出符号。
+// 根因是首发走一帧的 rAF（约 16ms）就送字节，而手指滑完 22px 要 50ms 以上——
+// 设计文档把这写成「按住 400ms 后再上滑」的边界情形，实际是**每次上滑**都会发生。
+// 修法：有 up 的键把首发推迟到 FLICK_DECIDE_MS(120ms) 的判定窗口之后。
+test("flick：上滑不该先送出字母（真机反馈：先蹦字母再出符号）", async () => {
+  vi.useFakeTimers();
+  try {
+    const onText = vi.fn();
+    const { container } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    // 手指还在路上：60ms 已过了一帧（rAF 的时间尺度），但没到判定窗口
+    vi.advanceTimersByTime(60);
+    expect(onText, "判定窗口内不该送出任何字节").not.toHaveBeenCalled();
+    q.dispatchEvent(pointerEventXY("pointermove", 100, 170));  // 上滑 30px
+    q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
+    expect(onText).toHaveBeenCalledTimes(1);
+    expect(onText).toHaveBeenCalledWith("1");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("flick：普通轻点仍然出字母，抬手立即结算不等判定窗口", async () => {
+  vi.useFakeTimers();
+  try {
+    const onText = vi.fn();
+    const { container } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    q.dispatchEvent(pointerEventXY("pointerup", 100, 200));   // 立刻抬手，没等 120ms
+    expect(onText, "轻点必须立即出字母，用户感觉不到判定窗口").toHaveBeenCalledWith("q");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("flick：按住不动超过判定窗口，字母照常送出并开始连发", async () => {
+  vi.useFakeTimers();
+  try {
+    const onText = vi.fn();
+    const { container } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    vi.advanceTimersByTime(150);          // 过了判定窗口，确定不是上滑
+    expect(onText).toHaveBeenCalledWith("q");
+    vi.advanceTimersByTime(400 + 60 * 3); // 长按连发照常
+    expect(onText.mock.calls.length).toBeGreaterThan(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("layered / classic 的首发不受判定窗口影响（没有 up 就没有上滑）", async () => {
+  for (const kbLayout of ["classic", "layered"] as const) {
+    const onText = vi.fn();
+    const { container, unmount } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    q.dispatchEvent(pointerEventXY("pointerup", 100, 200));
+    expect(onText, `${kbLayout} 的轻点应照常出字母`).toHaveBeenCalledWith("q");
+    unmount();
+  }
+});

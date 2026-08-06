@@ -108,10 +108,17 @@
   let downY = 0;                      // pointer Y at the current keydown（flick 的上滑判定要它）
   let pendingKey: { id: string } | undefined; // byte key awaiting its deferred first shot
   let pendingRaf: number | undefined;
+  // flick 专用：有上滑字符的键改用定时器延后首发（见 keyDown 里的说明）。
+  // 与 pendingRaf 互斥——同一次按压只会用其中一个。
+  let pendingTimer: number | undefined;
   const KEY_SWIPE_CANCEL_PX = 12;     // horizontal travel that reclassifies as a swipe
   // flick 的上滑阈值。比横向取消阈值（12px）大，因为竖向要区分于「手指按下时
   // 的自然抖动」；实际手势通常滑 30px 以上。
   const FLICK_UP_PX = 22;
+  // flick 下「这一按是轻点还是上滑」的判定窗口。手指从按下到滑过 22px 通常要
+  // 50ms 以上，而 rAF 只有约 16ms——用 rAF 当窗口，每次上滑都会先送出字母。
+  // 120ms 足够容纳一次从容的上滑，又短到轻点时察觉不出（何况抬手会立即结算）。
+  const FLICK_DECIDE_MS = 120;
 
   // 当前按住的字节键，**跨越 deferred rAF 存活**（`pendingKey` 在第一帧后就被清空，
   // 而真实手指滑完 22px 要 50ms 以上，那时 pendingKey 早没了）。少了它，
@@ -123,6 +130,13 @@
   // 这样）。缺失的坐标当 0，而不是让 undefined 流进减法——NaN 参与的比较一律为
   // false，会把横滑取消整条路径静默废掉。
   const coord = (v: number | undefined) => (Number.isFinite(v as number) ? (v as number) : 0);
+
+  /** 撤销「等待首发」的排程。rAF 与定时器同一次按压只会用一个，但两个都清
+   *  才不会在布局切换、rollover 等路径上漏掉——写成一处，省得七个调用点各漏各的。 */
+  function cancelPendingShot() {
+    if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+    if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = undefined; }
+  }
 
   onMount(() => {
     const onDownCap = (e: PointerEvent) => { downX = coord(e.clientX); downY = coord(e.clientY); };
@@ -159,7 +173,7 @@
     // its repeat armed if still held) instead of dropping it when we reassign
     // pendingKey/pendingRaf below.
     if (pendingKey && pendingKey.id !== id) {
-      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      cancelPendingShot();
       repeaters.get(pendingKey.id)?.start(); // fires its first shot + arms repeat
       pendingKey = undefined;
     }
@@ -167,9 +181,25 @@
     const rep = createKeyRepeater(() => fireKey(id));
     repeaters.set(id, rep);
     flickArmed = false;
-    heldKey = { id, up: capUpOf(id) };
+    const up = capUpOf(id);
+    heldKey = { id, up };
     pendingKey = { id };
-    if (pendingRaf) cancelAnimationFrame(pendingRaf);
+    cancelPendingShot();
+
+    // 有上滑字符的键：首发要等到「确定不是上滑」为止。
+    // 原来走一帧的 rAF（约 16ms）就发首字节，而手指滑完 22px 要 50ms 以上——
+    // 结果每次上滑都先蹦出字母，滑得慢还连发好几个，然后才出符号。
+    // 改用一个 FLICK_DECIDE_MS 的定时器：这段时间内越过竖向阈值就走上滑，
+    // 没越过（或抬手）才发字母。抬手时 keyUp 会立刻结算，所以真正的轻点
+    // 感觉不到这段延迟——它只在手指还按着的时候才存在。
+    if (up) {
+      pendingTimer = setTimeout(() => {
+        pendingTimer = undefined;
+        if (pendingKey?.id === id && !flickArmed) { pendingKey = undefined; rep.start(); }
+      }, FLICK_DECIDE_MS) as unknown as number;
+      return;
+    }
+
     pendingRaf = requestAnimationFrame(() => {
       pendingRaf = undefined;
       if (pendingKey?.id === id) { pendingKey = undefined; rep.start(); } // first shot + arm repeat
@@ -191,7 +221,7 @@
     // 行为的改动，而 classic 必须一字不变。
     const cancelled = dx > KEY_SWIPE_CANCEL_PX && (kbLayout !== "flick" || dx >= dy);
     if (pendingKey && cancelled) {
-      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      cancelPendingShot();
       repeaters.get(pendingKey.id)?.stop();
       repeaters.delete(pendingKey.id);
       pendingKey = undefined;
@@ -201,7 +231,7 @@
 
     if (!flickArmed && dy > FLICK_UP_PX && heldKey?.up) {
       flickArmed = true;
-      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      cancelPendingShot();
       pendingKey = undefined;                 // 这一下不再走轻点路径
       repeaters.get(heldKey.id)?.stop();      // 上滑不连发
       repeaters.delete(heldKey.id);
@@ -212,7 +242,7 @@
     // 上滑已判定：发角标字符，不发主字符，也不走 repeater。
     if (flickArmed && heldKey?.id === id) {
       const up = heldKey.up;
-      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      cancelPendingShot();
       pendingKey = undefined;
       heldKey = undefined;
       flickArmed = false;
@@ -225,7 +255,7 @@
     // Released before the deferred frame (a very fast tap, no swipe): fire the
     // single shot now so the key isn't dropped.
     if (pendingKey?.id === id) {
-      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      cancelPendingShot();
       pendingKey = undefined;
       const rep = repeaters.get(id);
       if (rep) { rep.start(); rep.stop(); repeaters.delete(id); } // one shot, no repeat
@@ -236,7 +266,7 @@
   }
 
   onDestroy(() => {
-    if (pendingRaf) cancelAnimationFrame(pendingRaf);
+    cancelPendingShot();
     pendingKey = undefined;
     heldKey = undefined;
     flickArmed = false;
@@ -330,7 +360,7 @@
         </div>
       {/if}
     </div>
-    <div class="rows" class:big={isBig}>
+    <div class="rows" class:big={isBig} class:flick={kbLayout === "flick"}>
       {#each mainRows as row}
         <div class="row" class:indent={isBig && row.length === 9 && !row.some((k) => MODSET.has(k.id))}>
           {#each row as k (k.id)}
@@ -791,10 +821,10 @@
     gap: var(--key-gap-x);
     flex: 1 1 0;
     /* 行可以被压到 24px（键盘区被分割条挤到很小时），但不再往下——
-       比这更矮就按不准了。真到了这一步宁可让键区滚动，也不让键小到没法用。
-       24 这个值是算出来的：默认分割比例下主键区约 154px，5 行 + 4 个 5px 行距
-       需要 5h+20 ≤ 154，即 h ≤ 26.8；取 24 留出富余，避免功能行字号变化时
-       又把这几 px 吃回去。 */
+       比这更矮主字符自己就该被 overflow:hidden 切了。
+       角标不参与这个下限：flick 把它绝对定位到了右上角，不占垂直空间。
+       24 是算出来的：默认分割比例下主键区 154px，5 行 + 4 个 5px 行距 +
+       上下各 5px padding 需要 5h+30 ≤ 154，即 h ≤ 24.8。 */
     min-height: 24px;
     /* 键高封顶 = 键宽 × 1.5。行高被 flex 拉大时，键不跟着抽成细长竖条——
        那个形状既难看也难按（拇指落点靠键的中心判断，太高会频繁点到相邻行）。
@@ -811,6 +841,20 @@
      高度下限交给行来保证（.rows.big .row 的 min-height），键只负责填满行。 */
   .rows.big .key { min-height: 0; height: 100%; font-size: 0.92rem; }
   .rows.big .key.mod { font-size: 0.66rem; }
+  /* flick 的角标绝对定位到右上角，不占垂直空间。
+     classic/layered 的 `up` 是「Shift 时的字符」，上下叠放是对的（两者会互换）；
+     flick 的 `up` 是「上滑发出的字符」，恒定显示，叠放会让键内容需要 32px 高，
+     而键盘区被压缩时行只有 30px —— .key 的 overflow:hidden 会把角标切掉，
+     用户就看不见能滑出什么符号了。挪到角上，键再矮也切不着，
+     和教程动画里演示的键帽长得也一致。 */
+  .rows.big.flick .key.has-up { padding-top: 4px; position: relative; }
+  .rows.big.flick .key.has-up .up {
+    position: absolute;
+    top: 2px;
+    right: 3px;
+    font-size: 0.5rem;
+    line-height: 1;
+  }
   /* 9 键行缩进半个键宽居中对齐 10 键行。缩进量随 gap 算，写死百分比改 gap 会错位。 */
   .rows.big .row.indent {
     padding: 0 calc((100% - 9 * var(--key-gap-x)) / 20 + var(--key-gap-x) / 2);
