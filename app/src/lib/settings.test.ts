@@ -21,8 +21,8 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" });
+  saveSettings({ layout: "win", kbLayout: "layered", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", kbLayout: "layered", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
@@ -260,4 +260,30 @@ test("bootFontUrl 只放行本地 /fonts/*.woff2 路径，拒绝协议相对/跨
     localStorage.setItem("ps.settings", JSON.stringify({ bootFontUrl: good }));
     expect(loadSettings().bootFontUrl, good).toBe(good);
   }
+});
+
+test("kbLayout 默认 classic —— 老用户升级手感不变", () => {
+  expect(DEFAULT_SETTINGS.kbLayout).toBe("classic");
+});
+
+test("kbLayout 读得回三个合法值", () => {
+  for (const id of ["classic", "layered", "flick"] as const) {
+    const store = memStore();
+    store.setItem("ps.settings", JSON.stringify({ kbLayout: id }));
+    expect(loadSettings(store).kbLayout).toBe(id);
+  }
+});
+
+test("kbLayout 脏值回落 classic（id 会拼进 CSS 选择器，脏值只会静默失配）", () => {
+  for (const bad of ["swipe", "", null, 42, { a: 1 }]) {
+    const store = memStore();
+    store.setItem("ps.settings", JSON.stringify({ kbLayout: bad }));
+    expect(loadSettings(store).kbLayout).toBe("classic");
+  }
+});
+
+test("旧版本存档没有 kbLayout 字段时也回落 classic", () => {
+  const store = memStore();
+  store.setItem("ps.settings", JSON.stringify({ theme: "nord", fontSize: 12 }));
+  expect(loadSettings(store).kbLayout).toBe("classic");
 });

@@ -5,6 +5,7 @@
 
 import { CUSTOM_PREFIX, isSafeThemeId } from "./theme-css";
 import type { FontId } from "./font";
+import type { KbLayoutId } from "./term/keymap";
 
 const KEY = "ps.settings";
 
@@ -33,6 +34,14 @@ export type VibrateLevel = "off" | "light" | "medium" | "strong";
 
 export interface Settings {
   layout: "mac" | "win";
+  /**
+   * 全键盘的键位布局。与 `layout`（Mac/Win 键帽标注）是两回事：
+   * 那个只换 Cmd/Win 的字，这个换整套键位与键的大小。
+   *   classic —— 完整笔记本布局，14 键一行（24×34px），默认
+   *   layered —— 10 键一行（36×46px），数字符号在第二层
+   *   flick   —— 10 键一行，按住上滑取符号
+   */
+  kbLayout: KbLayoutId;
   fontSize: number;
   vibrate: VibrateLevel;
   theme: ThemePref;
@@ -54,6 +63,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   layout: "mac",
+  kbLayout: "classic",
   fontSize: 10,
   vibrate: "medium",
   theme: "cream-dark",
@@ -103,6 +113,15 @@ function coerceFont(v: unknown): FontId {
     : DEFAULT_SETTINGS.fontFamily;
 }
 
+/** 菜单序。默认排第一。 */
+export const KB_LAYOUTS: KbLayoutId[] = ["classic", "layered", "flick"];
+
+function coerceKbLayout(v: unknown): KbLayoutId {
+  return typeof v === "string" && (KB_LAYOUTS as string[]).includes(v)
+    ? (v as KbLayoutId)
+    : DEFAULT_SETTINGS.kbLayout;
+}
+
 /** 首帧缓存值是要直接写进 DOM 的，只收干净的短字符串。
  *  上限 64：最长的字体 URL 是 /fonts/google-sans-code-regular.woff2（36 字符），
  *  32 装不下。 */
@@ -144,6 +163,7 @@ export function loadSettings(store: Storage = localStorage): Settings {
       language: LANGS.includes(parsed.language) ? parsed.language : detectLanguage(),
       groupTabsByType: parsed.groupTabsByType === true,
       fontFamily: coerceFont(parsed.fontFamily),
+      kbLayout: coerceKbLayout(parsed.kbLayout),
     };
     // 只在真有值时挂上，缺省保持 undefined —— 这样 `toEqual(DEFAULT_SETTINGS)`
     // 之类的断言不会被两个可选字段搅乱。
