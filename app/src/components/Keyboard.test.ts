@@ -293,3 +293,86 @@ test("大写键帽跟随在 classic 下同样生效（Caps 锁定不自动释放
   await fireEvent.pointerUp(caps);
   expect(capText("a")).toBe("A");
 });
+
+// ---- flick 上滑手势 ----
+// 既有 helper 只塞 clientX（jsdom 没有原生 PointerEvent）。上滑判定要 Y，补一个。
+function pointerEventXY(type: string, clientX: number, clientY: number): Event {
+  const ev = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clientX", { value: clientX });
+  Object.defineProperty(ev, "clientY", { value: clientY });
+  return ev;
+}
+
+test("flick：在键上向上滑超过阈值，发出的是角标字符而不是字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 170));  // 上滑 30px > 22
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
+  expect(onText).toHaveBeenCalledWith("1");
+  expect(onText).not.toHaveBeenCalledWith("q");
+});
+
+test("flick：滑动距离不够（10px）仍然是普通轻点，出字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 190));  // 只 10px < 22
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 190));
+  expect(onText).toHaveBeenCalledWith("q");
+});
+
+test("flick：向下滑不触发（只认向上）", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 240));  // 下滑 40px
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 240));
+  expect(onText).toHaveBeenCalledWith("q");
+  expect(onText).not.toHaveBeenCalledWith("1");
+});
+
+test("flick：横向先越阈（12px）判为滑动取消，什么都不发", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 130, 198));  // 横 30 / 竖 2
+  q.dispatchEvent(pointerEventXY("pointerup", 130, 198));
+  expect(onText).not.toHaveBeenCalled();
+});
+
+test("classic 下上滑不改变行为（手势只在 flick 生效）", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn() },   // 默认 classic
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 170));
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
+  expect(onText).toHaveBeenCalledWith("q");
+});
+
+test("flick：没有 up 的键（Shift/Backspace）上滑等同轻点", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const bs = container.querySelector('[data-key-id="Backspace"]') as HTMLElement;
+  bs.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  bs.dispatchEvent(pointerEventXY("pointermove", 100, 160));
+  bs.dispatchEvent(pointerEventXY("pointerup", 100, 160));
+  expect(onText).toHaveBeenCalledWith("\x7f");
+});

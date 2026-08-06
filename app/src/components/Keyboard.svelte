@@ -105,12 +105,27 @@
   // (需求8 Phase 3). Self-contained: no cross-component state.
   let kbEl: HTMLElement;              // root, for the capture-phase start-X tracker
   let downX = 0;                      // pointer X at the current keydown
+  let downY = 0;                      // pointer Y at the current keydown（flick 的上滑判定要它）
   let pendingKey: { id: string } | undefined; // byte key awaiting its deferred first shot
   let pendingRaf: number | undefined;
   const KEY_SWIPE_CANCEL_PX = 12;     // horizontal travel that reclassifies as a swipe
+  // flick 的上滑阈值。比横向取消阈值（12px）大，因为竖向要区分于「手指按下时
+  // 的自然抖动」；实际手势通常滑 30px 以上。
+  const FLICK_UP_PX = 22;
+
+  // 当前按住的字节键，**跨越 deferred rAF 存活**（`pendingKey` 在第一帧后就被清空，
+  // 而真实手指滑完 22px 要 50ms 以上，那时 pendingKey 早没了）。少了它，
+  // 上滑在真机上永远判不成立——只有 jsdom 里同步派发事件才碰巧成立。
+  let heldKey: { id: string; up?: string } | undefined;
+  let flickArmed = false;             // 本次按压已越过上滑阈值
+
+  // 合成事件可能只带 clientX（jsdom 没有原生 PointerEvent，测试里的 helper 就是
+  // 这样）。缺失的坐标当 0，而不是让 undefined 流进减法——NaN 参与的比较一律为
+  // false，会把横滑取消整条路径静默废掉。
+  const coord = (v: number | undefined) => (Number.isFinite(v as number) ? (v as number) : 0);
 
   onMount(() => {
-    const onDownCap = (e: PointerEvent) => { downX = e.clientX; };
+    const onDownCap = (e: PointerEvent) => { downX = coord(e.clientX); downY = coord(e.clientY); };
     kbEl?.addEventListener("pointerdown", onDownCap, { capture: true });
     return () => kbEl?.removeEventListener("pointerdown", onDownCap, { capture: true });
   });
@@ -151,6 +166,8 @@
     keyUp(id); // safety: drop a stale repeater/pending for the same key
     const rep = createKeyRepeater(() => fireKey(id));
     repeaters.set(id, rep);
+    flickArmed = false;
+    heldKey = { id, up: capUpOf(id) };
     pendingKey = { id };
     if (pendingRaf) cancelAnimationFrame(pendingRaf);
     pendingRaf = requestAnimationFrame(() => {
@@ -159,19 +176,52 @@
     });
   }
 
-  // A horizontal drag during the deferred first frame is a panel swipe, not a
-  // key — cancel the pending key + its repeater so nothing is sent.
+  // 指针移动的三种归宿（取最先越阈的方向，不做两轴叠加）：
+  //  1. 横向越 12px  → 这是面板滑动/误触，取消本次按键，什么都不发
+  //     （只在 deferred 帧内有效，与既有行为逐字一致：pendingKey 已清就不再取消）
+  //  2. 竖向上滑越 22px（仅 flick）→ 改发角标字符，并立刻停掉长按连发
+  //     （否则「按住 400ms 再上滑」会一边连发字母一边出符号）
+  //  3. 都没越 → 继续等，当普通轻点处理
   function keyMove(e: PointerEvent) {
-    if (!pendingKey) return;
-    if (Math.abs(e.clientX - downX) > KEY_SWIPE_CANCEL_PX) {
+    const dx = Math.abs(coord(e.clientX) - downX);
+    const dy = downY - coord(e.clientY);      // 正数 = 向上
+
+    // `dx >= dy` 这个「谁先越阈」的裁决只在 flick 下加进来：另两套布局没有上滑，
+    // 加了它会让斜向上的拖动（dx=30/dy=40）从「取消」变成「照发」——那是 classic
+    // 行为的改动，而 classic 必须一字不变。
+    const cancelled = dx > KEY_SWIPE_CANCEL_PX && (kbLayout !== "flick" || dx >= dy);
+    if (pendingKey && cancelled) {
       if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
       repeaters.get(pendingKey.id)?.stop();
       repeaters.delete(pendingKey.id);
       pendingKey = undefined;
+      heldKey = undefined;
+      return;
+    }
+
+    if (!flickArmed && dy > FLICK_UP_PX && heldKey?.up) {
+      flickArmed = true;
+      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      pendingKey = undefined;                 // 这一下不再走轻点路径
+      repeaters.get(heldKey.id)?.stop();      // 上滑不连发
+      repeaters.delete(heldKey.id);
     }
   }
 
   function keyUp(id: string) {
+    // 上滑已判定：发角标字符，不发主字符，也不走 repeater。
+    if (flickArmed && heldKey?.id === id) {
+      const up = heldKey.up;
+      if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
+      pendingKey = undefined;
+      heldKey = undefined;
+      flickArmed = false;
+      repeaters.get(id)?.stop();
+      repeaters.delete(id);
+      if (up) { onText(up); mods = consumeAfterKey(mods); }
+      return;
+    }
+    if (heldKey?.id === id) heldKey = undefined;
     // Released before the deferred frame (a very fast tap, no swipe): fire the
     // single shot now so the key isn't dropped.
     if (pendingKey?.id === id) {
@@ -188,6 +238,8 @@
   onDestroy(() => {
     if (pendingRaf) cancelAnimationFrame(pendingRaf);
     pendingKey = undefined;
+    heldKey = undefined;
+    flickArmed = false;
     for (const rep of repeaters.values()) rep.stop();
     repeaters.clear();
   });
@@ -204,6 +256,16 @@
 
   const isModOn = (id: string) => MODSET.has(id) && mods[id as ModName] !== "off";
   const isModLocked = (id: string) => MODSET.has(id) && mods[id as ModName] === "locked";
+
+  /** 该键在当前布局下的上滑字符；非 flick 或没有第二字符时返回 undefined。 */
+  function capUpOf(id: string): string | undefined {
+    if (kbLayout !== "flick") return undefined;
+    for (const row of mainRows) {
+      const k = row.find((c) => c.id === id);
+      if (k) return k.up;
+    }
+    return undefined;
+  }
 
   // 键帽文字。两件事：
   //  1) 大写跟随——大布局下 Shift/Caps 亮着时字母键帽直接显示大写，省去用户心算。
