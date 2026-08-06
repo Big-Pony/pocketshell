@@ -186,16 +186,25 @@
     pendingKey = { id };
     cancelPendingShot();
 
-    // 有上滑字符的键：首发要等到「确定不是上滑」为止。
-    // 原来走一帧的 rAF（约 16ms）就发首字节，而手指滑完 22px 要 50ms 以上——
-    // 结果每次上滑都先蹦出字母，滑得慢还连发好几个，然后才出符号。
-    // 改用一个 FLICK_DECIDE_MS 的定时器：这段时间内越过竖向阈值就走上滑，
-    // 没越过（或抬手）才发字母。抬手时 keyUp 会立刻结算，所以真正的轻点
-    // 感觉不到这段延迟——它只在手指还按着的时候才存在。
+    // 有上滑字符的键：首发要等到「确定不是上滑」为止，而且**不连发**。
+    //
+    // 首发延后的理由：原来走一帧的 rAF（约 16ms）就发首字节，而手指滑完 22px
+    // 要 50ms 以上——结果每次上滑都先蹦出字母，然后才出符号。改用
+    // FLICK_DECIDE_MS 的判定窗口：窗口内越过竖向阈值就走上滑，没越过（或抬手）
+    // 才发字母。抬手时 keyUp 立即结算，所以真正的轻点感觉不到这段延迟。
+    //
+    // 不连发的理由：连发和上滑是同一个动作的两种解释——手指按住不动是连发，
+    // 按住往上滑是上滑，而「按住」这一步两者完全一样。留着连发，长按就会一边
+    // 吐字母一边等你滑，两种意图永远分不干净。字母/数字/符号本来也极少需要
+    // 连打（要连打的是退格和方向键，那些键没有 up，走下面的 rAF 分支照常连发）。
     if (up) {
       pendingTimer = setTimeout(() => {
         pendingTimer = undefined;
-        if (pendingKey?.id === id && !flickArmed) { pendingKey = undefined; rep.start(); }
+        if (pendingKey?.id === id && !flickArmed) {
+          pendingKey = undefined;
+          rep.start(); rep.stop();   // 单发：发一次就停，不武装连发
+          repeaters.delete(id);
+        }
       }, FLICK_DECIDE_MS) as unknown as number;
       return;
     }

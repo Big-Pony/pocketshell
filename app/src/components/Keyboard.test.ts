@@ -463,7 +463,9 @@ test("flick：普通轻点仍然出字母，抬手立即结算不等判定窗口
   }
 });
 
-test("flick：按住不动超过判定窗口，字母照常送出并开始连发", async () => {
+// 带上滑的键**不连发**：连发和上滑是同一个动作的两种解释（按住不动 vs
+// 按住上滑），「按住」这一步完全一样，留着连发两种意图就永远分不干净。
+test("flick：带上滑的键按住不动只出一个字母，不连发", async () => {
   vi.useFakeTimers();
   try {
     const onText = vi.fn();
@@ -473,9 +475,31 @@ test("flick：按住不动超过判定窗口，字母照常送出并开始连发
     const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
     q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
     vi.advanceTimersByTime(150);          // 过了判定窗口，确定不是上滑
+    expect(onText).toHaveBeenCalledTimes(1);
     expect(onText).toHaveBeenCalledWith("q");
-    vi.advanceTimersByTime(400 + 60 * 3); // 长按连发照常
-    expect(onText.mock.calls.length).toBeGreaterThan(1);
+    vi.advanceTimersByTime(400 + 60 * 10); // 远超连发的启动延迟
+    expect(onText, "带上滑的键不该连发").toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// 反面：没有上滑字符的键（退格、方向键、space）连发照常——那才是真正需要
+// 连打的键，删一长串路径全靠它。
+test("flick：没有上滑的键（退格）仍然长按连发", async () => {
+  vi.useFakeTimers();
+  try {
+    const onText = vi.fn();
+    const { container } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+    });
+    const bs = container.querySelector('[data-key-id="Backspace"]') as HTMLElement;
+    bs.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    vi.advanceTimersByTime(16);            // rAF 分支：首发照旧一帧就走
+    expect(onText).toHaveBeenCalledWith("\x7f");
+    const first = onText.mock.calls.length;
+    vi.advanceTimersByTime(400 + 60 * 5);  // 启动延迟 + 5 个连发周期
+    expect(onText.mock.calls.length, "退格必须连发").toBeGreaterThan(first);
   } finally {
     vi.useRealTimers();
   }
@@ -492,5 +516,26 @@ test("layered / classic 的首发不受判定窗口影响（没有 up 就没有�
     q.dispatchEvent(pointerEventXY("pointerup", 100, 200));
     expect(onText, `${kbLayout} 的轻点应照常出字母`).toHaveBeenCalledWith("q");
     unmount();
+  }
+});
+
+// layered 的字母键没有 up（数字符号在第二层，不靠上滑），所以连发照常。
+// 「取消连发」只针对带上滑的键，不是对所有大布局一刀切。
+test("layered：字母键没有上滑，长按连发照常", async () => {
+  vi.useFakeTimers();
+  try {
+    const onText = vi.fn();
+    const { container } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), kbLayout: "layered" },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    vi.advanceTimersByTime(16);
+    const first = onText.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+    vi.advanceTimersByTime(400 + 60 * 5);
+    expect(onText.mock.calls.length, "layered 字母键应连发").toBeGreaterThan(first);
+  } finally {
+    vi.useRealTimers();
   }
 });
