@@ -476,7 +476,21 @@
         if (seq !== paneInfoSeq) return; // stale response superseded by a newer poll
         if (typeof info.alternateOn !== "boolean") return; // malformed → keep current mode
         const mode: PaneMode = info.alternateOn ? "alt" : "normal";
-        if (mode === appliedMode) return; // edge-triggered: unchanged → leave the screen alone
+        // 判定要带上 xterm 的**真实**缓冲区，不能只比 appliedMode。
+        //
+        // appliedMode 只是「我们以为」的状态。两者一旦脱钩（xterm 留在 alt 屏而
+        // appliedMode 写着 normal），tmux 报 normal、我们记的也是 normal，边沿判定
+        // 认为「一致」→ 永久不进修复分支。真机实测到的正是这个死锁：
+        //     tmux alternate_on=0，探针拍到 xterm bufferType=alternate
+        //     len=26(=rows) baseY=0 scrollH==clientH  → 上方零行可滚
+        // 现象是「内容照常刷新，但怎么都滚不上去，只有关掉 tab 重开才好」——
+        // alt 屏本来就没有 scrollback，几千行历史都在 normal 缓冲区里没显示。
+        //
+        // currentBuffer 由 onBufferChange 忠实跟踪，修复所需的信息本来就在手上，
+        // 只是没人去看。带上它，2 秒一轮的 poll 天然就是自愈节拍：脱钩最多持续
+        // 一个轮询周期，且不需要任何新状态。
+        const actual: PaneMode = currentBuffer === "alternate" ? "alt" : "normal";
+        if (mode === appliedMode && mode === actual) return; // 两边都对上才放行
         appliedMode = mode;
         if (mode === "normal") {
           // Back to the normal buffer: leave any alt buffer and reseed history so
