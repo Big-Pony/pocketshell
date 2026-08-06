@@ -85,9 +85,37 @@ test("flick 的字母键都带 up（上滑字符），且 1-0 十个数字都能
   for (const d of "1234567890") expect(ups, `数字 ${d} 滑不出来`).toContain(d);
 });
 
-test("flick 的 up 映射无重复 —— 同一个字符挂两个键，用户学不会该滑哪个", () => {
-  const ups = LAYOUT_FLICK.flat().map((k) => k.up).filter(Boolean);
-  expect(new Set(ups).size).toBe(ups.length);
+test("flick 的 up/down 合起来无重复 —— 同一个字符挂两个键，用户学不会该滑哪个", () => {
+  const chars = LAYOUT_FLICK.flat().flatMap((k) => [k.up, k.down]).filter(Boolean);
+  expect(new Set(chars).size).toBe(chars.length);
+});
+
+// 这一条是本次缺口的守门人：flick 上线时只有上滑，26 个位配不下 32 个符号，
+// 于是静默少了 16 个（`! # % ( ) + ; < > ? @ ^ _ ` { }`），用户在真机上才发现。
+// 布局表是手写的，漏一个符号没有任何编译期信号——只能靠断言。
+test("flick 能打的字符集覆盖 layered，一个不少", () => {
+  const flick = new Set(LAYOUT_FLICK.flat().flatMap((k) => [k.up, k.down]).filter(Boolean));
+  // layered 符号层：键帽本身 + Shift 位，都是用户点得出来的
+  const layered = new Set(
+    LAYOUT_LAYERED_SYM.flat()
+      .filter((k) => !MOD_IDS.includes(k.id as never) && k.id !== "Backspace")
+      .flatMap((k) => [k.cap, k.up])
+      .filter(Boolean),
+  );
+  const missing = [...layered].filter((c) => !flick.has(c as string)).sort();
+  expect(missing, `flick 打不出这些字符：${missing.join(" ")}`).toEqual([]);
+});
+
+// down 的分配规则只有一条，破了它这套布局就没法「记一条规则走天下」。
+// 方向不固定：a（`~`/`` ` ``）与 l（`:`/`;`）把 shift 位放在上滑，因为那两个才是
+// 终端里的高频字符，高频的该占更省力的手势。所以断言的是「成对」而非「谁在上」。
+test("flick 的 up/down 恒是一对 Shift 组合", () => {
+  for (const k of LAYOUT_FLICK.flat()) {
+    if (!k.down) continue;
+    const paired =
+      SHIFT_SYMBOLS[k.up as string] === k.down || SHIFT_SYMBOLS[k.down] === k.up;
+    expect(paired, `${k.id}: up=${k.up} down=${k.down} 不成 Shift 对`).toBe(true);
+  }
 });
 
 test("layered 符号层三行，且不含字母（字母在另一层）", () => {

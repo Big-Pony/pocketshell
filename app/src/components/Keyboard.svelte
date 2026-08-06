@@ -109,15 +109,17 @@
   let pendingKey: { id: string } | undefined; // byte key awaiting its deferred first shot
   let pendingRaf: number | undefined;
   const KEY_SWIPE_CANCEL_PX = 12;     // horizontal travel that reclassifies as a swipe
-  // flick 的上滑阈值。比横向取消阈值（12px）大，因为竖向要区分于「手指按下时
-  // 的自然抖动」；实际手势通常滑 30px 以上。
-  const FLICK_UP_PX = 22;
+  // flick 的竖向阈值，上下同值。比横向取消阈值（12px）大，因为竖向要区分于
+  // 「手指按下时的自然抖动」；实际手势通常滑 30px 以上。
+  // **上下必须同值**：不对称会让人觉得某个方向「难触发」，手上很别扭。
+  const FLICK_PX = 22;
 
   // 当前按住的字节键，**跨越 deferred rAF 存活**（`pendingKey` 在第一帧后就被清空，
   // 而真实手指滑完 22px 要 50ms 以上，那时 pendingKey 早没了）。少了它，
   // 上滑在真机上永远判不成立——只有 jsdom 里同步派发事件才碰巧成立。
-  let heldKey: { id: string; up?: string } | undefined;
-  let flickArmed = false;             // 本次按压已越过上滑阈值
+  let heldKey: { id: string; up?: string; down?: string } | undefined;
+  // 本次按压已判定的滑动方向；undefined = 尚未越阈（还可能是轻点）。
+  let flickDir: "up" | "down" | undefined;
 
   // 合成事件可能只带 clientX（jsdom 没有原生 PointerEvent，测试里的 helper 就是
   // 这样）。缺失的坐标当 0，而不是让 undefined 流进减法——NaN 参与的比较一律为
@@ -176,13 +178,13 @@
     keyUp(id);
     const rep = createKeyRepeater(() => fireKey(id));
     repeaters.set(id, rep);
-    flickArmed = false;
-    const up = capUpOf(id);
-    heldKey = { id, up };
+    flickDir = undefined;
+    const { up, down } = capFlickOf(id);
+    heldKey = { id, up, down };
     pendingKey = { id };
     cancelPendingShot();
 
-    // 有上滑字符的键：**抬手才输入**（keyUp 里结算），按下什么都不发。
+    // 有滑动字符的键（上滑或下滑）：**抬手才输入**（keyUp 里结算），按下什么都不发。
     //
     // 试过用定时器延后首发，不成——那只是把问题推后：手指按住超过判定窗口
     // 再滑，字母照样先蹦出来。只要「按下」这个时刻就决定输出，就永远分不清
@@ -193,7 +195,7 @@
     // 代价是这些键没有长按连发（连发要在按住期间就往外发，与上面的道理直接
     // 冲突）。字母/数字/符号本来也极少需要连打——要连打的是退格和方向键，
     // 那些键没有 up，走下面的 rAF 分支，行为一字未动。
-    if (up) {
+    if (up || down) {
       repeaters.delete(id);   // 这个键不用 repeater：既不首发也不连发
       pendingKey = undefined; // 也不走 deferred 首发那套记账
       return;
@@ -208,18 +210,21 @@
   // 指针移动的三种归宿（取最先越阈的方向，不做两轴叠加）：
   //  1. 横向越 12px  → 这是面板滑动/误触，取消本次按键，什么都不发
   //     （只在 deferred 帧内有效，与既有行为逐字一致：pendingKey 已清就不再取消）
-  //  2. 竖向上滑越 22px（仅 flick）→ 改发角标字符，并立刻停掉长按连发
-  //     （否则「按住 400ms 再上滑」会一边连发字母一边出符号）
+  //  2. 竖向越 22px（仅 flick，上下同阈）→ 改发对应角标字符，并立刻停掉长按连发
+  //     （否则「按住 400ms 再滑」会一边连发字母一边出符号）
   //  3. 都没越 → 继续等，当普通轻点处理
   function keyMove(e: PointerEvent) {
     const dx = Math.abs(coord(e.clientX) - downX);
-    const dy = downY - coord(e.clientY);      // 正数 = 向上
+    const dySigned = downY - coord(e.clientY); // 正数 = 向上，负数 = 向下
+    const dy = Math.abs(dySigned);
 
-    // `dx >= dy` 这个「谁先越阈」的裁决只在 flick 下加进来：另两套布局没有上滑，
-    // 加了它会让斜向上的拖动（dx=30/dy=40）从「取消」变成「照发」——那是 classic
+    // `dx >= dy` 这个「谁先越阈」的裁决只在 flick 下加进来：另两套布局没有滑动手势，
+    // 加了它会让斜向的拖动（dx=30/dy=40）从「取消」变成「照发」——那是 classic
     // 行为的改动，而 classic 必须一字不变。
+    // 这里用的是 dy 的**绝对值**：下滑补全（12 期）之后竖向两个方向都要参与裁决，
+    // 只看有符号的 dySigned 会让斜下拖动恒判为「横滑取消」，下滑就再也滑不出来。
     const cancelled = dx > KEY_SWIPE_CANCEL_PX && (kbLayout !== "flick" || dx >= dy);
-    // 判定用 (pendingKey || heldKey) 而不是只看 pendingKey：带上滑的键改成
+    // 判定用 (pendingKey || heldKey) 而不是只看 pendingKey：带滑动的键改成
     // 「抬手才输入」之后就不再设 pendingKey，只看它会让横滑取消对这些键整条失效
     // （横滑走了，抬手时 keyUp 照样结算出一个字母）。
     const active = pendingKey?.id ?? heldKey?.id;
@@ -232,32 +237,36 @@
       return;
     }
 
-    if (!flickArmed && dy > FLICK_UP_PX && heldKey?.up) {
-      flickArmed = true;
-      cancelPendingShot();
-      pendingKey = undefined;                 // 这一下不再走轻点路径
-      repeaters.get(heldKey.id)?.stop();      // 上滑不连发
-      repeaters.delete(heldKey.id);
-    }
+    if (flickDir || dy <= FLICK_PX) return;
+    // 该方向没配字符就不武断：这个键下滑退化成轻点（10 个键刻意没配 down）。
+    // 判定不成立时保持 flickDir 为 undefined，抬手照常结算出字母——静默吞掉的话
+    // 用户滑歪一点就丢一个字符，且毫无反馈。
+    const dir = dySigned > 0 ? "up" : "down";
+    if (!(dir === "up" ? heldKey?.up : heldKey?.down)) return;
+    flickDir = dir;
+    cancelPendingShot();
+    pendingKey = undefined;                 // 这一下不再走轻点路径
+    repeaters.get(heldKey!.id)?.stop();     // 滑动不连发
+    repeaters.delete(heldKey!.id);
   }
 
   function keyUp(id: string) {
-    // 上滑已判定：发角标字符，不发主字符，也不走 repeater。
-    if (flickArmed && heldKey?.id === id) {
-      const up = heldKey.up;
+    // 滑动已判定：发对应角标字符，不发主字符，也不走 repeater。
+    if (flickDir && heldKey?.id === id) {
+      const ch = flickDir === "up" ? heldKey.up : heldKey.down;
       cancelPendingShot();
       pendingKey = undefined;
       heldKey = undefined;
-      flickArmed = false;
+      flickDir = undefined;
       repeaters.get(id)?.stop();
       repeaters.delete(id);
-      if (up) { onText(up); mods = consumeAfterKey(mods); }
+      if (ch) { onText(ch); mods = consumeAfterKey(mods); }
       return;
     }
-    // 带上滑的键：按下时什么都没发，抬手才结算成主字符（走到这里说明没越过
-    // 上滑阈值——越过了会被上面那条分支拦下）。这是「按下不输入」的另一半，
-    // 少了它这些键就彻底哑了。
-    if (heldKey?.id === id && heldKey.up) {
+    // 带滑动的键：按下时什么都没发，抬手才结算成主字符（走到这里说明没越过
+    // 竖向阈值，或滑的那个方向没配字符——两种情况都该出字母）。这是「按下不
+    // 输入」的另一半，少了它这些键就彻底哑了。
+    if (heldKey?.id === id && (heldKey.up || heldKey.down)) {
       heldKey = undefined;
       cancelPendingShot();
       pendingKey = undefined;
@@ -283,7 +292,7 @@
     cancelPendingShot();
     pendingKey = undefined;
     heldKey = undefined;
-    flickArmed = false;
+    flickDir = undefined;
     for (const rep of repeaters.values()) rep.stop();
     repeaters.clear();
   });
@@ -301,14 +310,14 @@
   const isModOn = (id: string) => MODSET.has(id) && mods[id as ModName] !== "off";
   const isModLocked = (id: string) => MODSET.has(id) && mods[id as ModName] === "locked";
 
-  /** 该键在当前布局下的上滑字符；非 flick 或没有第二字符时返回 undefined。 */
-  function capUpOf(id: string): string | undefined {
-    if (kbLayout !== "flick") return undefined;
+  /** 该键在当前布局下的上/下滑字符；非 flick 时两个都是 undefined。 */
+  function capFlickOf(id: string): { up?: string; down?: string } {
+    if (kbLayout !== "flick") return {};
     for (const row of mainRows) {
       const k = row.find((c) => c.id === id);
-      if (k) return k.up;
+      if (k) return { up: k.up, down: k.down };
     }
-    return undefined;
+    return {};
   }
 
   // 键帽文字。两件事：
@@ -317,20 +326,21 @@
   //     改成跟随就是改了 classic 的行为，`getByText("Q")` 那条既有断言是它的守门人。
   //     只改字母：符号的 shift 变体在 layered 的符号层里是独立键位，跟着变反而对不上。
   //  2) 第二字符——classic/layered 的 `up` 是「Shift 时的字符」（随 shift 上下互换），
-  //     flick 的 `up` 是「上滑发出的字符」（恒定显示在右上角，不随 shift 动）。
-  function keyLabel(k: import("../lib/term/keymap").KeyCap): { main: string; upper?: string } {
+  //     flick 的 `up`/`down` 是「上/下滑发出的字符」（恒定显示在右上/左下角，不随
+  //     shift 动）。**不印方向箭头**：键只有 36×46、角标 0.5rem，两个角都塞图形会
+  //     糊成一团；角标所在的角本身已经暗示了方向。
+  function keyLabel(k: import("../lib/term/keymap").KeyCap): { main: string; upper?: string; lower?: string } {
     const m = activeMods(mods);
+    const flick = kbLayout === "flick";
     if (/^[a-z]$/.test(k.id)) {
       const main = kbLayout === "classic"
         ? capFor(k, layout)
         : (m.shift || m.caps ? k.id.toUpperCase() : k.id);
-      return kbLayout === "flick" && k.up ? { main, upper: k.up } : { main };
+      return flick ? { main, upper: k.up, lower: k.down } : { main };
     }
     const main = capFor(k, layout);
-    if (k.up) {
-      if (kbLayout === "flick") return { main, upper: k.up };
-      return m.shift ? { main: k.up, upper: main } : { main, upper: k.up };
-    }
+    if (flick) return { main, upper: k.up, lower: k.down };
+    if (k.up) return m.shift ? { main: k.up, upper: main } : { main, upper: k.up };
     return { main };
   }
 </script>
@@ -388,6 +398,7 @@
               class:on
               class:locked
               class:has-up={label.upper}
+              class:has-down={label.lower}
               data-key-id={k.id}
               style="flex-grow: {k.wide ?? 1};"
               onpointerdown={(e) => { e.preventDefault(); keyDown(k.id); }}
@@ -397,6 +408,7 @@
             >
               {#if label.upper}<span class="up">{label.upper}</span>{/if}
               <span class="main">{label.main}</span>
+              {#if label.lower}<span class="down">{label.lower}</span>{/if}
             </button>
           {/each}
         </div>
@@ -866,14 +878,25 @@
        layered —— Shift 时的字符，按下 Shift 时与主字符**互换位置**
                   （keyLabel 负责换，样式只管摆放，互换在角上照样成立）。
      classic 不在此列：它的键更小更密，角标挤在角上会糊成一团，维持叠放。 */
-  .rows.big .key.has-up { padding-top: 4px; position: relative; }
-  .rows.big .key.has-up .up {
+  .rows.big .key.has-up,
+  .rows.big .key.has-down { padding-top: 4px; position: relative; }
+  .rows.big .key.has-up .up,
+  .rows.big .key.has-down .down {
     position: absolute;
-    top: 2px;
-    right: 3px;
     font-size: 0.5rem;
     line-height: 1;
+    /* 角标宽度封顶到键宽的三分之一。键被分割条压到 25px 高时，上角标、主字符、
+       下角标在**垂直方向本来就重叠**（实测 36×24.8 的键：角标占 3–11 与 13.8–21.8，
+       主字符占 5–20），三者互不干扰全靠水平错开。不封顶的话，将来换个更宽的
+       符号或更窄的键就会直接撞进主字符里。 */
+    max-width: 33%;
+    overflow: hidden;
   }
+  .rows.big .key.has-up .up { top: 2px; right: 3px; }
+  /* 下滑角标在左下角（12 期补全）。位置本身就是方向提示，所以**不加箭头**。
+     对角摆放而不是同侧：同侧两个 0.5rem 字符在 36px 宽的键上会挤成一坨，
+     且分不清哪个对应哪个方向。 */
+  .rows.big .key.has-down .down { bottom: 2px; left: 3px; }
   /* 9 键行缩进半个键宽居中对齐 10 键行。缩进量随 gap 算，写死百分比改 gap 会错位。 */
   .rows.big .row.indent {
     padding: 0 calc((100% - 9 * var(--key-gap-x)) / 20 + var(--key-gap-x) / 2);

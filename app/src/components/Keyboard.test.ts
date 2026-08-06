@@ -330,17 +330,93 @@ test("flick：滑动距离不够（10px）仍然是普通轻点，出字母", as
   expect(onText).toHaveBeenCalledWith("q");
 });
 
-test("flick：向下滑不触发（只认向上）", async () => {
+// 下滑（12 期补全）：只有上滑时 flick 打不出 16 个符号（`!` `?` `@` `{` `}` 等
+// shell 常用字符）。多开一个方向就多 26 个位，够补齐还有富余。
+test("flick：向下滑超过阈值，发出的是左下角标字符", async () => {
   const onText = vi.fn();
   const { container } = render(Keyboard, {
     props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
   });
   const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
   q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
-  q.dispatchEvent(pointerEventXY("pointermove", 100, 240));  // 下滑 40px
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 240));  // 下滑 40px > 22
   q.dispatchEvent(pointerEventXY("pointerup", 100, 240));
-  expect(onText).toHaveBeenCalledWith("q");
+  expect(onText).toHaveBeenCalledWith("!");
+  expect(onText).not.toHaveBeenCalledWith("q");
   expect(onText).not.toHaveBeenCalledWith("1");
+});
+
+// 10 个键刻意没配 down（它们 up 的 shift 位已在别处占位）。这些键下滑必须**退化
+// 成轻点**出字母，而不是静默吞掉——吞掉的话用户滑歪一点就丢一个字符，且毫无反馈。
+test("flick：没配 down 的键（r）下滑退化为轻点，出字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const r = container.querySelector('[data-key-id="r"]') as HTMLElement;
+  r.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  r.dispatchEvent(pointerEventXY("pointermove", 100, 240));  // 下滑 40px
+  r.dispatchEvent(pointerEventXY("pointerup", 100, 240));
+  expect(onText).toHaveBeenCalledWith("r");
+});
+
+test("flick：下滑距离不够（10px）仍然是普通轻点，出字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 210));  // 只 10px < 22
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 210));
+  expect(onText).toHaveBeenCalledWith("q");
+});
+
+// 与上滑同理（那条是「先蹦字母再出符号」的真机 bug 守门人）：下滑走的是同一套
+// 「抬手才结算」路径，按住期间一个字节都不该出去。
+test("flick：下滑不该先送出字母", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  expect(onText).not.toHaveBeenCalled();          // 按住期间静默
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 240));
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 240));
+  expect(onText).toHaveBeenCalledTimes(1);
+  expect(onText).toHaveBeenCalledWith("!");
+});
+
+// 上滑那条已有同款守门人。下滑同样必须跨过 rAF 才算数：真人滑完 22px 要 50ms 以上。
+test("flick：等 rAF 跑完之后再下滑，仍然出符号", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+  await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  q.dispatchEvent(pointerEventXY("pointermove", 100, 240));
+  q.dispatchEvent(pointerEventXY("pointerup", 100, 240));
+  expect(onText).toHaveBeenCalledWith("!");
+  expect(onText).not.toHaveBeenCalledWith("q");
+});
+
+test("classic / layered 下滑不改变行为（手势只在 flick 生效）", async () => {
+  for (const kbLayout of [undefined, "layered"] as const) {
+    const onText = vi.fn();
+    const { container, unmount } = render(Keyboard, {
+      props: { onText, onCommand: vi.fn(), ...(kbLayout ? { kbLayout } : {}) },
+    });
+    const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+    q.dispatchEvent(pointerEventXY("pointerdown", 100, 200));
+    q.dispatchEvent(pointerEventXY("pointermove", 100, 240));
+    q.dispatchEvent(pointerEventXY("pointerup", 100, 240));
+    expect(onText, `${kbLayout ?? "classic"} 下滑行为被改了`).toHaveBeenCalledWith("q");
+    unmount();
+  }
 });
 
 test("flick：横向先越阈（12px）判为滑动取消，什么都不发", async () => {
@@ -593,9 +669,14 @@ test("大键位：副字符规则作用于整个 .rows.big，不是只有 flick"
   const css = readFileSync(resolve(__dirname, "./Keyboard.svelte"), "utf8");
   expect(css, "只限定 flick 会让 layered 符号层继续叠放")
     .not.toMatch(/\.rows\.big\.flick\s+\.key\.has-up/);
-  const block = css.match(/\.rows\.big \.key\.has-up \.up \{[\s\S]*?\}/)?.[0] ?? "";
+  // 绝对定位是关键：叠放会让键内容需要 32px，而压缩时行只有 25px，
+  // .key 的 overflow:hidden 会把角标切掉。
+  const block = css.match(/\.rows\.big \.key\.has-up \.up,[\s\S]*?\}/)?.[0] ?? "";
   expect(block, "副字符规则块没找到").toBeTruthy();
   expect(block).toMatch(/position:\s*absolute/);
+  // 上滑在右上、下滑在左下——对角摆放。同侧会挤成一坨且分不清方向。
+  expect(css).toMatch(/\.key\.has-up \.up \{[^}]*top:[^}]*right:/);
+  expect(css).toMatch(/\.key\.has-down \.down \{[^}]*bottom:[^}]*left:/);
 });
 
 // layered 符号层按下 Shift 时主副字符**互换**（3/# → #/3）。摆到角上是样式，

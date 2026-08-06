@@ -1,7 +1,7 @@
 // app/src/lib/keymap.ts
 // Static keyboard layout + escape sequences for the custom on-screen keyboard.
 // Mobile adaptation: modifiers appear once (sticky), arrows share one bottom row.
-export interface KeyCap { id: string; cap: string; up?: string; wide?: number }
+export interface KeyCap { id: string; cap: string; up?: string; down?: string; wide?: number }
 
 export const MOD_IDS = ["Shift", "Ctrl", "Alt", "Cmd", "Fn", "Caps"] as const;
 
@@ -119,29 +119,46 @@ export const LAYOUT_BOTTOM_LAYERED: KeyCap[] = [
 ];
 
 // ---- flick ----
-// up = 上滑发出的字符。分配原则：数字按 qwerty 行的自然顺序（和笔记本数字行
-// 位置对得上），第二三行放 shell 里最常打的符号。
+// up   = 上滑发出的字符，印在键帽右上角。
+// down = 下滑发出的字符，印在键帽左下角。
+//
+// **分配规则只有一条：一个键的上下两滑是一对 Shift 组合**（`-`/`_`、`[`/`{`、
+// `1`/`!`…）。用户记一条规则即可，不必记 16 个位置，而且这条规则和笔记本键盘
+// 完全一致——`Shift+[` 本来就是 `{`。
+//
+// 方向不固定在「上=原位、下=shift 位」：a（`~`/`` ` ``）与 l（`:`/`;`）反过来，
+// 因为 `~`（家目录）和 `:` 在终端里远比 `` ` `` 和 `;` 常用，高频字符该占更省力
+// 的上滑。规则是「成对」，不是「谁在上」。
+//
+// up 的分配（不动，flick 上线即如此）：数字按 qwerty 行的自然顺序（和笔记本
+// 数字行位置对得上），第二三行放 shell 里最常打的符号。
+//
+// **有 10 个键刻意不配 down**（r u i g h j k z x c）。终端要用的符号一共 32 个，
+// 26 个 up 已覆盖 26 个，只缺 16 个——配满 26 个 down 就必然重复，而重复的角标
+// 会让「下滑=Shift 位」这条规则出现例外，反而更难记。这些键留白正是因为它们
+// up 的 Shift 位已经在别处占了位（`$` 在 c、`&` 在 x、`*` 在 z、`|` 在 h、
+// `"` 在 k），规则依然自洽，只是无位可配。
 export const LAYOUT_FLICK: KeyCap[][] = [
   [
-    { id: "q", cap: "q", up: "1" }, { id: "w", cap: "w", up: "2" },
-    { id: "e", cap: "e", up: "3" }, { id: "r", cap: "r", up: "4" },
-    { id: "t", cap: "t", up: "5" }, { id: "y", cap: "y", up: "6" },
+    { id: "q", cap: "q", up: "1", down: "!" }, { id: "w", cap: "w", up: "2", down: "@" },
+    { id: "e", cap: "e", up: "3", down: "#" }, { id: "r", cap: "r", up: "4" },
+    { id: "t", cap: "t", up: "5", down: "%" }, { id: "y", cap: "y", up: "6", down: "^" },
     { id: "u", cap: "u", up: "7" }, { id: "i", cap: "i", up: "8" },
-    { id: "o", cap: "o", up: "9" }, { id: "p", cap: "p", up: "0" },
+    { id: "o", cap: "o", up: "9", down: "(" }, { id: "p", cap: "p", up: "0", down: ")" },
   ],
   [
-    { id: "a", cap: "a", up: "~" }, { id: "s", cap: "s", up: "-" },
-    { id: "d", cap: "d", up: "=" }, { id: "f", cap: "f", up: "/" },
+    { id: "a", cap: "a", up: "~", down: "`" }, { id: "s", cap: "s", up: "-", down: "_" },
+    { id: "d", cap: "d", up: "=", down: "+" }, { id: "f", cap: "f", up: "/", down: "?" },
     { id: "g", cap: "g", up: "\\" }, { id: "h", cap: "h", up: "|" },
     { id: "j", cap: "j", up: "'" }, { id: "k", cap: "k", up: "\"" },
-    { id: "l", cap: "l", up: ":" },
+    { id: "l", cap: "l", up: ":", down: ";" },
   ],
   [
     { id: "Shift", cap: "⇧", wide: 1.5 },
     { id: "z", cap: "z", up: "*" }, { id: "x", cap: "x", up: "&" },
-    { id: "c", cap: "c", up: "$" }, { id: "v", cap: "v", up: "[" },
-    { id: "b", cap: "b", up: "]" }, { id: "n", cap: "n", up: "." },
-    { id: "m", cap: "m", up: "," },
+    { id: "c", cap: "c", up: "$" }, { id: "v", cap: "v", up: "[", down: "{" },
+    { id: "b", cap: "b", up: "]", down: "}" }, { id: "n", cap: "n", up: ".", down: ">" },
+    { id: "m", cap: "m", up: ",", down: "<" },
     { id: "Backspace", cap: "⌫", wide: 1.5 },
   ],
 ];

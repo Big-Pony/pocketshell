@@ -28,11 +28,15 @@
       <p><b>{$t('kbTutorial.layeredLead')}</b>{$t('kbTutorial.layeredBody')}</p>
       <p class="note">{$t('kbTutorial.layeredNote')}</p>
     {:else}
-      <!-- 手指按住 h 键上滑，角标 | 跟着飞出并留一条轨迹 -->
+      <!-- 一个 6s 循环演示两个方向：前半上滑出 [，后半下滑出 {。
+           用 v 键而不是随便一个键——[ 与 { 是一对 Shift 组合，正好把
+           「同一个键的上下两符号成对」这条规则演给用户看。 -->
       <div class="stage demo-flick" aria-hidden="true">
-        <div class="trail"></div>
-        <div class="fly">|</div>
-        <div class="dk"><span class="sub">|</span>h</div>
+        <div class="trail up"></div>
+        <div class="trail down"></div>
+        <div class="fly up">[</div>
+        <div class="fly down">&#123;</div>
+        <div class="dk"><span class="sub up">[</span>v<span class="sub down">&#123;</span></div>
         <div class="finger"></div>
       </div>
       <p><b>{$t('kbTutorial.flickLead')}</b>{$t('kbTutorial.flickBody')}</p>
@@ -115,53 +119,89 @@
     76%,100% { left: 37%; top: 88%; opacity: 0; }
   }
 
-  /* flick：手指上滑，符号跟着飞出 */
-  .dk { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); animation: ktLift 3s infinite; }
-  .dk .sub {
-    position: absolute; top: 3px; right: 4px; font-size: 0.5rem; color: var(--dim);
-    width: auto; height: auto; background: none; border: 0; box-shadow: none;
-    animation: ktSub 3s infinite;
+  /* flick：一个 6s 循环演示两个方向 —— 0–50% 上滑，50–100% 下滑。
+     键固定在舞台竖直中央（不再贴底），上下都要留出飞行距离。
+     两个方向共用一条时间轴、各自延后半程，所以所有 flick 动画都是 6s：
+     改时长要整组一起改，单独改一个会让手指和飞字脱节。 */
+  .dk {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); animation: ktLift 6s infinite;
   }
+  .dk .sub {
+    position: absolute; font-size: 0.5rem; color: var(--dim);
+    width: auto; height: auto; background: none; border: 0; box-shadow: none;
+  }
+  /* 角标位置与真键帽一致：上滑在右上、下滑在左下（Keyboard.svelte 同款对角摆放） */
+  .dk .sub.up { top: 3px; right: 4px; animation: ktSub 6s infinite; }
+  .dk .sub.down { bottom: 3px; left: 4px; animation: ktSub 6s infinite -3s; }
   @keyframes ktLift {
-    0%,22% { background: var(--key); border-color: var(--key-line); }
-    30%,58% { background: var(--accent-soft); border-color: var(--accent); }
-    66%,100% { background: var(--key); border-color: var(--key-line); }
+    0%,11% { background: var(--key); border-color: var(--key-line); }
+    15%,29% { background: var(--accent-soft); border-color: var(--accent); }
+    33%,61% { background: var(--key); border-color: var(--key-line); }
+    65%,79% { background: var(--accent-soft); border-color: var(--accent); }
+    83%,100% { background: var(--key); border-color: var(--key-line); }
   }
   @keyframes ktSub {
-    0%,22% { color: var(--dim); }
-    34%,58% { color: var(--accent); }
-    66%,100% { color: var(--dim); }
+    0%,11% { color: var(--dim); }
+    17%,29% { color: var(--accent); }
+    33%,100% { color: var(--dim); }
   }
-  .demo-flick .finger { transform: translateX(-50%); animation: ktSwipe 3s infinite; }
+  .demo-flick .finger { animation: ktSwipe 6s infinite; }
+  /* 手指走一个来回：先从键上向上抽离，再回到键上向下抽离。
+     top 百分比相对 .stage 高度（150px），键在 50% 处。 */
   @keyframes ktSwipe {
-    0%,10% { left: 50%; bottom: 22px; opacity: 0; }
-    18% { left: 50%; bottom: 22px; opacity: 1; }
-    28% { left: 50%; bottom: 26px; opacity: 1; }
-    56% { left: 50%; bottom: 104px; opacity: 1; }
-    70%,100% { left: 50%; bottom: 112px; opacity: 0; }
+    0%,5% { left: 50%; top: 50%; opacity: 0; }
+    9%,14% { left: 50%; top: 50%; opacity: 1; }
+    28% { left: 50%; top: 8%; opacity: 1; }
+    35%,50% { left: 50%; top: 4%; opacity: 0; }
+    55%,64% { left: 50%; top: 50%; opacity: 1; }
+    78% { left: 50%; top: 92%; opacity: 1; }
+    85%,100% { left: 50%; top: 96%; opacity: 0; }
   }
   .fly {
     position: absolute; left: 50%; transform: translateX(-50%);
     font-size: 1.5rem; font-weight: 700; line-height: 1;
-    color: var(--accent); pointer-events: none; animation: ktFly 3s infinite;
+    color: var(--accent); pointer-events: none;
   }
-  @keyframes ktFly {
-    0%,26% { bottom: 44px; opacity: 0; }
-    38% { bottom: 58px; opacity: 1; }
-    58% { bottom: 108px; opacity: 1; }
-    72%,100% { bottom: 118px; opacity: 0; }
+  .fly.up { animation: ktFlyUp 6s infinite; }
+  .fly.down { animation: ktFlyDown 6s infinite; }
+  @keyframes ktFlyUp {
+    0%,13% { top: 42%; opacity: 0; }
+    19% { top: 30%; opacity: 1; }
+    29% { top: 8%; opacity: 1; }
+    36%,100% { top: 4%; opacity: 0; }
+  }
+  @keyframes ktFlyDown {
+    0%,63% { top: 52%; opacity: 0; }
+    69% { top: 64%; opacity: 1; }
+    79% { top: 86%; opacity: 1; }
+    86%,100% { top: 90%; opacity: 0; }
   }
   .trail {
     position: absolute; left: 50%; transform: translateX(-50%);
-    width: 2px; border-radius: 2px; bottom: 62px;
-    background: linear-gradient(180deg, transparent, var(--accent));
-    animation: ktTrail 3s infinite;
+    width: 2px; border-radius: 2px;
   }
-  @keyframes ktTrail {
-    0%,26% { height: 0; opacity: 0; }
-    42% { height: 26px; opacity: 0.5; }
-    58% { height: 52px; opacity: 0.5; }
-    72%,100% { height: 52px; opacity: 0; }
+  .trail.up {
+    bottom: 58%;
+    background: linear-gradient(180deg, transparent, var(--accent));
+    animation: ktTrailUp 6s infinite;
+  }
+  .trail.down {
+    top: 58%;
+    background: linear-gradient(0deg, transparent, var(--accent));
+    animation: ktTrailDown 6s infinite;
+  }
+  @keyframes ktTrailUp {
+    0%,13% { height: 0; opacity: 0; }
+    21% { height: 20px; opacity: 0.5; }
+    29% { height: 40px; opacity: 0.5; }
+    36%,100% { height: 40px; opacity: 0; }
+  }
+  @keyframes ktTrailDown {
+    0%,63% { height: 0; opacity: 0; }
+    71% { height: 20px; opacity: 0.5; }
+    79% { height: 40px; opacity: 0.5; }
+    86%,100% { height: 40px; opacity: 0; }
   }
 
   /* 系统开了「减少动态效果」就别动 —— 静态图配文案同样讲得清楚 */
