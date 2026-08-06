@@ -62,3 +62,93 @@ export const LAYOUT: KeyCap[][] = [
     { id: "ArrowLeft", cap: "←" }, { id: "ArrowUp", cap: "↑" }, { id: "ArrowDown", cap: "↓" }, { id: "ArrowRight", cap: "→" },
   ],
 ];
+
+// ---------------------------------------------------------------------------
+// 大键位布局（12 期）：一行 10 键，字母键从 24×34 涨到 36×46（触控面积 2 倍）。
+// 代价是数字符号放不下，两套布局各用一种办法解决：
+//   layered —— 收进第二层，点 123 键切换（全部轻点，无手势）
+//   flick   —— 标在键帽右上角，按住上滑取用（不切层，但手势要学）
+// classic（上面的 LAYOUT）原样保留，是默认值。
+// ---------------------------------------------------------------------------
+
+export type KbLayoutId = "classic" | "layered" | "flick";
+
+/** 层切换键的哨兵 id。它不发字节、不在 SEQ 里，由 Keyboard.svelte 拦下切层。 */
+export const LAYER_KEY_ID = "__layer";
+
+/** 方向键独立成行：终端里 ↑ 翻历史、←→ 移光标比任何字母都高频，
+ *  classic 把它们和字母挤在一起只有 35×34，独立成行能到 94×46。 */
+export const LAYOUT_ARROWS: KeyCap[] = [
+  { id: "ArrowLeft", cap: "←" }, { id: "ArrowUp", cap: "↑" },
+  { id: "ArrowDown", cap: "↓" }, { id: "ArrowRight", cap: "→" },
+];
+
+// ---- layered ----
+export const LAYOUT_LAYERED_ALPHA: KeyCap[][] = [
+  letters("qwertyuiop"),
+  letters("asdfghjkl"),
+  [{ id: "Shift", cap: "⇧", wide: 1.5 }, ...letters("zxcvbnm"),
+   { id: "Backspace", cap: "⌫", wide: 1.5 }],
+];
+
+export const LAYOUT_LAYERED_SYM: KeyCap[][] = [
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+    .map((c) => ({ id: c, cap: c, up: SHIFT_SYMBOLS[c] })),
+  [
+    { id: "-", cap: "-", up: "_" }, { id: "=", cap: "=", up: "+" },
+    { id: "[", cap: "[", up: "{" }, { id: "]", cap: "]", up: "}" },
+    { id: "\\", cap: "\\", up: "|" }, { id: ";", cap: ";", up: ":" },
+    { id: "'", cap: "'", up: "\"" }, { id: ",", cap: ",", up: "<" },
+    { id: ".", cap: ".", up: ">" }, { id: "/", cap: "/", up: "?" },
+  ],
+  [
+    { id: "Shift", cap: "⇧", wide: 1.5 },
+    { id: "`", cap: "`", up: "~" }, { id: "~", cap: "~" }, { id: "|", cap: "|" },
+    { id: "&", cap: "&" }, { id: "$", cap: "$" }, { id: "*", cap: "*" },
+    { id: "!", cap: "!" },
+    { id: "Backspace", cap: "⌫", wide: 1.5 },
+  ],
+];
+
+/** layered 底行：修饰键 + 层切换 + 空格 + 回车。方向键在 LAYOUT_ARROWS。 */
+export const LAYOUT_BOTTOM_LAYERED: KeyCap[] = [
+  { id: "Ctrl", cap: "ctrl" }, { id: "Alt", cap: "alt" },
+  { id: LAYER_KEY_ID, cap: "123" },
+  { id: "Space", cap: "space", wide: 3 },
+  { id: "Enter", cap: "⏎", wide: 2 },
+];
+
+// ---- flick ----
+// up = 上滑发出的字符。分配原则：数字按 qwerty 行的自然顺序（和笔记本数字行
+// 位置对得上），第二三行放 shell 里最常打的符号。
+export const LAYOUT_FLICK: KeyCap[][] = [
+  [
+    { id: "q", cap: "q", up: "1" }, { id: "w", cap: "w", up: "2" },
+    { id: "e", cap: "e", up: "3" }, { id: "r", cap: "r", up: "4" },
+    { id: "t", cap: "t", up: "5" }, { id: "y", cap: "y", up: "6" },
+    { id: "u", cap: "u", up: "7" }, { id: "i", cap: "i", up: "8" },
+    { id: "o", cap: "o", up: "9" }, { id: "p", cap: "p", up: "0" },
+  ],
+  [
+    { id: "a", cap: "a", up: "~" }, { id: "s", cap: "s", up: "-" },
+    { id: "d", cap: "d", up: "=" }, { id: "f", cap: "f", up: "/" },
+    { id: "g", cap: "g", up: "\\" }, { id: "h", cap: "h", up: "|" },
+    { id: "j", cap: "j", up: "'" }, { id: "k", cap: "k", up: "\"" },
+    { id: "l", cap: "l", up: ":" },
+  ],
+  [
+    { id: "Shift", cap: "⇧", wide: 1.5 },
+    { id: "z", cap: "z", up: "*" }, { id: "x", cap: "x", up: "&" },
+    { id: "c", cap: "c", up: "$" }, { id: "v", cap: "v", up: "[" },
+    { id: "b", cap: "b", up: "]" }, { id: "n", cap: "n", up: "." },
+    { id: "m", cap: "m", up: "," },
+    { id: "Backspace", cap: "⌫", wide: 1.5 },
+  ],
+];
+
+/** flick 底行：不需要层切换键，空出来的位置给 ctrl/alt 更宽的落点。 */
+export const LAYOUT_BOTTOM_FLICK: KeyCap[] = [
+  { id: "Ctrl", cap: "ctrl" }, { id: "Alt", cap: "alt" },
+  { id: "Space", cap: "space", wide: 3 },
+  { id: "Enter", cap: "⏎", wide: 2 },
+];
