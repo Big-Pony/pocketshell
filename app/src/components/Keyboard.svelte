@@ -2,20 +2,42 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor } from "../lib/term/keymap";
+  import {
+    LAYOUT, FKEYS, ESC_KEY, MOD_IDS, capFor,
+    LAYOUT_LAYERED_ALPHA, LAYOUT_LAYERED_SYM, LAYOUT_FLICK,
+    LAYOUT_BOTTOM_LAYERED, LAYOUT_BOTTOM_FLICK, LAYOUT_ARROWS, LAYER_KEY_ID,
+    type KbLayoutId,
+  } from "../lib/term/keymap";
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/term/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/term/key-repeat";
   import { imeSendText } from "../lib/term/ime-send";
   import type { VibrateLevel } from "../lib/settings";
   import { keyboardHeight, isKeyboardOpen, type ViewportMetrics } from "../lib/term/keyboard-inset";
 
-  let { onText, onCommand, vibrate = "medium" as VibrateLevel, layout = "mac", hints = [], onHint = (_c: string) => {} }: {
+  let { onText, onCommand, vibrate = "medium" as VibrateLevel, layout = "mac", hints = [], onHint = (_c: string) => {}, kbLayout = "classic" as KbLayoutId }: {
     onText: (text: string) => void; onCommand: (c: AppCommand) => void;
     vibrate?: VibrateLevel; layout?: "mac" | "win";
     hints?: string[]; onHint?: (cmd: string) => void;
+    kbLayout?: KbLayoutId;
   } = $props();
 
   let sub = $state<"keys" | "ime" | "ops">("keys");
+
+  // layered 的当前层。切布局时重置回字母层——留在符号层切走再切回来会看到
+  // 一屏符号，用户以为坏了。
+  let symLayer = $state(false);
+  $effect(() => { void kbLayout; symLayer = false; });
+
+  // 当前要渲染的主键区（不含功能行、底行、方向键行）。
+  const mainRows = $derived(
+    kbLayout === "layered" ? (symLayer ? LAYOUT_LAYERED_SYM : LAYOUT_LAYERED_ALPHA)
+    : kbLayout === "flick" ? LAYOUT_FLICK
+    : LAYOUT);
+  const bottomRow = $derived(
+    kbLayout === "layered" ? LAYOUT_BOTTOM_LAYERED
+    : kbLayout === "flick" ? LAYOUT_BOTTOM_FLICK
+    : null);   // classic 的底行在 LAYOUT 里，不单独渲染
+  const isBig = $derived(kbLayout !== "classic");
   let mods = $state<ModState>({ ...EMPTY_MODS });
   let imeBuf = $state("");
 
@@ -108,6 +130,8 @@
   // selection-mode arrows) fire once, exactly like before.
   function keyDown(id: string) {
     buzz(); // vibrate on keydown only — repeating it would be a constant hum
+    // 层切换键是哨兵，不在 SEQ 里，也不该走 resolveKey（那会把它当普通字符发出去）。
+    if (id === LAYER_KEY_ID) { symLayer = !symLayer; return; }
     if (MODSET.has(id)) { mods = tapMod(mods, id as ModName); return; }
     const r = resolveKey(id, activeMods(mods));
     if (r.kind !== "bytes") {
@@ -181,11 +205,25 @@
   const isModOn = (id: string) => MODSET.has(id) && mods[id as ModName] !== "off";
   const isModLocked = (id: string) => MODSET.has(id) && mods[id as ModName] === "locked";
 
+  // 键帽文字。两件事：
+  //  1) 大写跟随——大布局下 Shift/Caps 亮着时字母键帽直接显示大写，省去用户心算。
+  //     classic 的字母键帽历来恒为大写（照抄笔记本键帽的印刷），这里**不动**：
+  //     改成跟随就是改了 classic 的行为，`getByText("Q")` 那条既有断言是它的守门人。
+  //     只改字母：符号的 shift 变体在 layered 的符号层里是独立键位，跟着变反而对不上。
+  //  2) 第二字符——classic/layered 的 `up` 是「Shift 时的字符」（随 shift 上下互换），
+  //     flick 的 `up` 是「上滑发出的字符」（恒定显示在右上角，不随 shift 动）。
   function keyLabel(k: import("../lib/term/keymap").KeyCap): { main: string; upper?: string } {
+    const m = activeMods(mods);
+    if (/^[a-z]$/.test(k.id)) {
+      const main = kbLayout === "classic"
+        ? capFor(k, layout)
+        : (m.shift || m.caps ? k.id.toUpperCase() : k.id);
+      return kbLayout === "flick" && k.up ? { main, upper: k.up } : { main };
+    }
     const main = capFor(k, layout);
-    const shifted = activeMods(mods).shift;
     if (k.up) {
-      return shifted ? { main: k.up, upper: main } : { main, upper: k.up };
+      if (kbLayout === "flick") return { main, upper: k.up };
+      return m.shift ? { main: k.up, upper: main } : { main, upper: k.up };
     }
     return { main };
   }
@@ -205,6 +243,13 @@
         onpointerup={() => keyUp("Esc")}
         onpointercancel={() => keyUp("Esc")}
         onpointerleave={() => keyUp("Esc")}>{ESC_KEY.cap}</button>
+      {#if isBig}
+        <button class="key fnk" data-key-id="Tab"
+          onpointerdown={(e) => { e.preventDefault(); keyDown("Tab"); }}
+          onpointerup={() => keyUp("Tab")}
+          onpointercancel={() => keyUp("Tab")}
+          onpointerleave={() => keyUp("Tab")}>Tab</button>
+      {/if}
       {#if isModOn("Fn")}
         <div class="fkeys">
           {#each FKEYS as k (k.id)}
@@ -223,9 +268,9 @@
         </div>
       {/if}
     </div>
-    <div class="rows">
-      {#each LAYOUT as row}
-        <div class="row">
+    <div class="rows" class:big={isBig}>
+      {#each mainRows as row}
+        <div class="row" class:indent={isBig && row.length === 9 && !row.some((k) => MODSET.has(k.id))}>
           {#each row as k (k.id)}
             {@const label = keyLabel(k)}
             {@const isMod = MODSET.has(k.id)}
@@ -250,6 +295,38 @@
           {/each}
         </div>
       {/each}
+      {#if bottomRow}
+        <div class="row">
+          {#each bottomRow as k (k.id)}
+            {@const isMod = MODSET.has(k.id)}
+            <button
+              class="key"
+              class:mod={isMod}
+              class:on={isModOn(k.id)}
+              class:locked={isModLocked(k.id)}
+              class:layerkey={k.id === LAYER_KEY_ID}
+              data-key-id={k.id}
+              style="flex-grow: {k.wide ?? 1};"
+              onpointerdown={(e) => { e.preventDefault(); keyDown(k.id); }}
+              onpointerup={() => keyUp(k.id)}
+              onpointercancel={() => keyUp(k.id)}
+              onpointerleave={() => keyUp(k.id)}
+            >
+              <span class="main">{k.id === LAYER_KEY_ID ? (symLayer ? "abc" : "123") : capFor(k, layout)}</span>
+            </button>
+          {/each}
+        </div>
+        <div class="row arrows">
+          {#each LAYOUT_ARROWS as k (k.id)}
+            <button class="key" data-key-id={k.id}
+              onpointerdown={(e) => { e.preventDefault(); keyDown(k.id); }}
+              onpointerup={() => keyUp(k.id)}
+              onpointercancel={() => keyUp(k.id)}
+              onpointerleave={() => keyUp(k.id)}
+            ><span class="main">{k.cap}</span></button>
+          {/each}
+        </div>
+      {/if}
     </div>
   {:else if sub === "ime"}
     <div class="ime" class:floating={imeFocused && kbOpen} style={imeFocused && kbOpen && !hasVK ? `bottom:${kbHeight}px` : ""}>
@@ -626,5 +703,30 @@
     border-radius: var(--radius-md);
     padding: 6px 0;
     font-size: 0.72rem;
+  }
+
+  /* ---- 大键位布局（layered / flick）----
+     一行 10 键让字母键从 24×34 涨到 36×46。键距横竖分开：横向是误触主方向
+     且间隔直接吃键宽，竖向反而要留够，否则拇指上下滑一点就串行。 */
+  .rows.big {
+    --key-gap-x: 3px;
+    --key-gap-y: 5px;
+    gap: var(--key-gap-y);
+    padding: var(--key-gap-y) var(--key-gap-x);
+  }
+  .rows.big .row { gap: var(--key-gap-x); }
+  .rows.big .key { min-height: 2.9em; font-size: 0.92rem; }
+  .rows.big .key.mod { font-size: 0.66rem; }
+  /* 9 键行缩进半个键宽居中对齐 10 键行。缩进量随 gap 算，写死百分比改 gap 会错位。 */
+  .rows.big .row.indent {
+    padding: 0 calc((100% - 9 * var(--key-gap-x)) / 20 + var(--key-gap-x) / 2);
+  }
+  /* 方向键独立行：终端里 ↑ 翻历史、←→ 移光标比字母还高频，值得整整一行 */
+  .rows.big .row.arrows .key { font-size: 1.05rem; }
+  .rows.big .key.layerkey { background: var(--key-mod-bg); color: var(--dim); font-size: 0.7rem; }
+  /* 功能行的 tab：与 esc 并成左侧固定簇，定宽——
+     让它跟联想条抢 flex 会被压到 14px，比字母键还难按。 */
+  .funcrow .key.fnk {
+    flex: 0 0 auto; min-width: 3em; min-height: 2.3em; font-size: 0.62rem;
   }
 </style>

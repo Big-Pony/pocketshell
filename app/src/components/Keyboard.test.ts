@@ -190,3 +190,106 @@ test("ops sub-tab: Home/End/PgUp/PgDn move to the last row and stay functional",
   const caps = Array.from(bottom.querySelectorAll("button")).map((b) => b.textContent?.trim());
   expect(caps).toEqual(["Home", "End", "PgUp", "PgDn"]);
 });
+
+// ---------------------------------------------------------------------------
+// 12 期：键盘布局三选一（classic / layered / flick）。
+// classic 是默认值且行为逐字不变 —— 上面所有既有断言都不带 kbLayout，
+// 它们继续通过就是这条硬要求的守门人。
+// ---------------------------------------------------------------------------
+
+test("默认 classic：14 键的数字行还在（既有布局零改动）", () => {
+  const { container } = render(Keyboard, { props: { onText: vi.fn(), onCommand: vi.fn() } });
+  expect(container.querySelector('[data-key-id="`"]')).toBeTruthy();
+  expect(container.querySelector('[data-key-id="Caps"]')).toBeTruthy();
+});
+
+test("layered：字母层没有数字键，底行有层切换键", () => {
+  const { container } = render(Keyboard, {
+    props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout: "layered" },
+  });
+  expect(container.querySelector('[data-key-id="1"]')).toBeNull();
+  expect(container.querySelector('[data-key-id="q"]')).toBeTruthy();
+  expect(container.querySelector('[data-key-id="__layer"]')).toBeTruthy();
+});
+
+test("layered：点层切换键翻到符号层，再点翻回来", async () => {
+  const { container } = render(Keyboard, {
+    props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout: "layered" },
+  });
+  const layer = container.querySelector('[data-key-id="__layer"]') as HTMLElement;
+  await fireEvent.pointerDown(layer);
+  await fireEvent.pointerUp(layer);
+  expect(container.querySelector('[data-key-id="1"]'), "切层后应出现数字").toBeTruthy();
+  expect(container.querySelector('[data-key-id="q"]'), "切层后字母应隐藏").toBeNull();
+  await fireEvent.pointerDown(layer);
+  await fireEvent.pointerUp(layer);
+  expect(container.querySelector('[data-key-id="q"]'), "再切应回到字母").toBeTruthy();
+});
+
+test("层切换键自己不发任何字节", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "layered" },
+  });
+  const layer = container.querySelector('[data-key-id="__layer"]') as HTMLElement;
+  await fireEvent.pointerDown(layer);
+  await fireEvent.pointerUp(layer);
+  expect(onText).not.toHaveBeenCalled();
+});
+
+test("flick：字母键帽带角标（第二字符），q 的角标是 1", () => {
+  const { container } = render(Keyboard, {
+    props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout: "flick" },
+  });
+  const q = container.querySelector('[data-key-id="q"]') as HTMLElement;
+  expect(q.querySelector(".up")?.textContent).toBe("1");
+});
+
+test("layered / flick 都有独立方向键行", () => {
+  for (const kbLayout of ["layered", "flick"] as const) {
+    const { container } = render(Keyboard, {
+      props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout },
+    });
+    for (const id of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+      expect(container.querySelector(`[data-key-id="${id}"]`), `${kbLayout} 缺 ${id}`).toBeTruthy();
+    }
+  }
+});
+
+test("三套布局的 esc/tab/ctrl/alt 都在（终端高频键不进第二层）", () => {
+  for (const kbLayout of ["classic", "layered", "flick"] as const) {
+    const { container } = render(Keyboard, {
+      props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout },
+    });
+    for (const id of ["Esc", "Tab", "Ctrl", "Alt"]) {
+      expect(container.querySelector(`[data-key-id="${id}"]`), `${kbLayout} 缺 ${id}`).toBeTruthy();
+    }
+  }
+});
+
+test("大写键帽跟随：Shift 按下后字母键帽显示大写，打一个键后回小写", async () => {
+  const { container } = render(Keyboard, {
+    props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout: "layered" },
+  });
+  const capText = (id: string) =>
+    (container.querySelector(`[data-key-id="${id}"] .main`) as HTMLElement)?.textContent;
+  expect(capText("a")).toBe("a");
+  const shift = container.querySelector('[data-key-id="Shift"]') as HTMLElement;
+  await fireEvent.pointerDown(shift);
+  await fireEvent.pointerUp(shift);
+  expect(capText("a"), "Shift armed 时键帽应大写").toBe("A");
+  const s = container.querySelector('[data-key-id="s"]') as HTMLElement;
+  await fireEvent.pointerDown(s);
+  await fireEvent.pointerUp(s);
+  expect(capText("a"), "armed 被消耗后应回小写").toBe("a");
+});
+
+test("大写键帽跟随在 classic 下同样生效（Caps 锁定不自动释放）", async () => {
+  const { container } = render(Keyboard, { props: { onText: vi.fn(), onCommand: vi.fn() } });
+  const capText = (id: string) =>
+    (container.querySelector(`[data-key-id="${id}"] .main`) as HTMLElement)?.textContent;
+  const caps = container.querySelector('[data-key-id="Caps"]') as HTMLElement;
+  await fireEvent.pointerDown(caps);  // off -> armed
+  await fireEvent.pointerUp(caps);
+  expect(capText("a")).toBe("A");
+});
