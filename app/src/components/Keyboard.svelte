@@ -299,7 +299,7 @@
   </div>
 
   {#if sub === "keys"}
-    <div class="funcrow">
+    <div class="funcrow" class:big={isBig}>
       <button class="key esc" data-key-id="Esc"
         onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
         onpointerup={() => keyUp("Esc")}
@@ -781,14 +781,35 @@
        所以高度富余时键更大，高度紧张时一起收缩，行数恒定。 */
     overflow: hidden;
     min-height: 0;
+    /* 行高封顶后总高可能小于容器，富余的空白集中到底部一处，
+       不要散在行与行之间（那样看起来像行距忽大忽小）。
+       **不能用 flex-end**：一旦内容反过来超出容器（比如功能行变高挤占了
+       主键区），flex-end 会把最上面一行切掉，比溢出更糟。 */
+    justify-content: flex-start;
   }
   .rows.big .row {
     gap: var(--key-gap-x);
     flex: 1 1 0;
-    min-height: 0;
+    /* 行可以被压到 24px（键盘区被分割条挤到很小时），但不再往下——
+       比这更矮就按不准了。真到了这一步宁可让键区滚动，也不让键小到没法用。
+       24 这个值是算出来的：默认分割比例下主键区约 154px，5 行 + 4 个 5px 行距
+       需要 5h+20 ≤ 154，即 h ≤ 26.8；取 24 留出富余，避免功能行字号变化时
+       又把这几 px 吃回去。 */
+    min-height: 24px;
+    /* 键高封顶 = 键宽 × 1.5。行高被 flex 拉大时，键不跟着抽成细长竖条——
+       那个形状既难看也难按（拇指落点靠键的中心判断，太高会频繁点到相邻行）。
+       封顶后多出来的高度留白，行仍均分容器，不会溢出。
+       键宽 = (键盘可用宽 - 9 个间隔) / 10 列，可用宽 = 视口宽 - 左右 padding。
+       用 100vw 而不是 100%：百分比在 max-height 里是相对父元素**高度**算的，
+       写 100% 会得到一个跟宽度毫无关系的值。 */
+    max-height: calc(
+      (100vw - 2 * var(--key-gap-x) - 9 * var(--key-gap-x)) / 10 * 1.5
+    );
   }
-  /* 键高由行撑满，只保留一个不至于按不到的下限（触控目标约 34px） */
-  .rows.big .key { min-height: 2.1em; height: 100%; font-size: 0.92rem; }
+  /* 行内键撑满行高。**不设 min-height**：键的下限会顶破被 flex 压扁的行，
+     多出来的那几 px 直接变成整个键区的溢出（方向键行又被推出可视区）。
+     高度下限交给行来保证（.rows.big .row 的 min-height），键只负责填满行。 */
+  .rows.big .key { min-height: 0; height: 100%; font-size: 0.92rem; }
   .rows.big .key.mod { font-size: 0.66rem; }
   /* 9 键行缩进半个键宽居中对齐 10 键行。缩进量随 gap 算，写死百分比改 gap 会错位。 */
   .rows.big .row.indent {
@@ -797,9 +818,17 @@
   /* 方向键独立行：终端里 ↑ 翻历史、←→ 移光标比字母还高频，值得整整一行 */
   .rows.big .row.arrows .key { font-size: 1.05rem; }
   .rows.big .key.layerkey { background: var(--key-mod-bg); color: var(--dim); font-size: 0.7rem; }
-  /* 功能行的 tab：与 esc 并成左侧固定簇，定宽——
-     让它跟联想条抢 flex 会被压到 14px，比字母键还难按。 */
-  .funcrow .key.fnk {
-    flex: 0 0 auto; min-width: 3em; min-height: 2.3em; font-size: 0.62rem;
+  /* 功能行的 esc / tab：与 esc 并成左侧固定簇，定宽——
+     让它跟联想条抢 flex 会被压到 14px，比字母键还难按。
+     尺寸写成 px 而不是 em：em 会跟着 font-size:0.62rem 缩水，算下来只有
+     30×23，比字母键（36×31）还小，而这两个是终端里最常按的键之一。
+     字号仍留 0.62rem——键帽是三个字母，太大反而挤。
+     **不碰 .hint-chip**：它有自己的 font-size/min-height，联想条字号不受影响。 */
+  .funcrow .key.fnk,
+  .funcrow.big .key.esc {
+    flex: 0 0 auto;
+    min-width: 46px;
+    min-height: 34px;
+    font-size: 0.62rem;
   }
 </style>

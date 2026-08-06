@@ -1,5 +1,7 @@
 import { test, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import Keyboard from "./Keyboard.svelte";
 
 function openOps(onText = vi.fn(), onCommand = vi.fn(), extra = {}) {
@@ -395,4 +397,27 @@ test("flick：等 rAF 跑完（真人手指的时间尺度）之后再上滑，�
   q.dispatchEvent(pointerEventXY("pointermove", 100, 170));  // 上滑 30px > 22
   q.dispatchEvent(pointerEventXY("pointerup", 100, 170));
   expect(onText).toHaveBeenCalledWith("1");
+});
+
+// ---- 大键位的两条尺寸约束（源码级防回潮）----
+// jsdom 不做真实布局，getBoundingClientRect 一律返回 0，尺寸只能从 CSS 源码断言。
+// 这两条都是真机上一眼能看出、但改别处极易碰坏的约束，各自都返工过一轮。
+test("大键位：esc/tab 的尺寸下限写成 px，不能退回 em", () => {
+  const css = readFileSync(resolve(__dirname, "./Keyboard.svelte"), "utf8");
+  const block = css.match(/\.funcrow \.key\.fnk,[\s\S]*?\}/)?.[0] ?? "";
+  expect(block, "esc/tab 规则块没找到，选择器被改过了？").toMatch(/min-width:\s*\d+px/);
+  expect(block).toMatch(/min-height:\s*\d+px/);
+  // em 会跟着 font-size:0.62rem 缩水，算下来 30×23 —— 比字母键（36×31）还小，
+  // 而 esc/tab 是终端里最常按的键之一。
+  expect(block, "尺寸退回 em 会让 esc/tab 比字母键还小").not.toMatch(/min-(width|height):\s*[\d.]+em/);
+});
+
+test("大键位：行高封顶 1.5 倍键宽，键不会被拉成竖条", () => {
+  const css = readFileSync(resolve(__dirname, "./Keyboard.svelte"), "utf8");
+  const block = css.match(/\.rows\.big \.row \{[\s\S]*?\}/)?.[0] ?? "";
+  expect(block, ".rows.big .row 规则块没找到").toBeTruthy();
+  expect(block, "行高必须有封顶，否则 flex:1 会把键抽成细长竖条").toMatch(/max-height:/);
+  expect(block, "封顶按视口宽算：max-height 里的百分比是相对父元素高度的，写 % 会得到无关的值")
+    .toMatch(/100vw/);
+  expect(block).toMatch(/\*\s*1\.5/);
 });
