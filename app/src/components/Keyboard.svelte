@@ -374,7 +374,7 @@
         </div>
       {/if}
     </div>
-    <div class="rows" class:big={isBig} class:flick={kbLayout === "flick"}>
+    <div class="rows" class:big={isBig}>
       {#each mainRows as row}
         <div class="row" class:indent={isBig && row.length === 9 && !row.some((k) => MODSET.has(k.id))}>
           {#each row as k (k.id)}
@@ -855,14 +855,19 @@
      高度下限交给行来保证（.rows.big .row 的 min-height），键只负责填满行。 */
   .rows.big .key { min-height: 0; height: 100%; font-size: 0.92rem; }
   .rows.big .key.mod { font-size: 0.66rem; }
-  /* flick 的角标绝对定位到右上角，不占垂直空间。
-     classic/layered 的 `up` 是「Shift 时的字符」，上下叠放是对的（两者会互换）；
-     flick 的 `up` 是「上滑发出的字符」，恒定显示，叠放会让键内容需要 32px 高，
-     而键盘区被压缩时行只有 30px —— .key 的 overflow:hidden 会把角标切掉，
-     用户就看不见能滑出什么符号了。挪到角上，键再矮也切不着，
-     和教程动画里演示的键帽长得也一致。 */
-  .rows.big.flick .key.has-up { padding-top: 4px; position: relative; }
-  .rows.big.flick .key.has-up .up {
+  /* 副字符一律绝对定位到右上角，不占垂直空间——两套大布局统一。
+     上下叠放会让键内容需要 32px 高，而键盘区被分割条压缩时行只有 25px，
+     .key 的 overflow:hidden 会把它切掉：flick 是看不见能滑出什么符号，
+     layered 符号层是看不见 Shift 能打出什么，两边都等于废掉半个键帽。
+     挪到角上，键再矮也切不着，和教程动画里演示的键帽也一致。
+
+     两套布局的 `up` 语义不同，但都适合放角上：
+       flick   —— 上滑发出的字符，恒定显示；
+       layered —— Shift 时的字符，按下 Shift 时与主字符**互换位置**
+                  （keyLabel 负责换，样式只管摆放，互换在角上照样成立）。
+     classic 不在此列：它的键更小更密，角标挤在角上会糊成一团，维持叠放。 */
+  .rows.big .key.has-up { padding-top: 4px; position: relative; }
+  .rows.big .key.has-up .up {
     position: absolute;
     top: 2px;
     right: 3px;

@@ -585,3 +585,35 @@ test("flick：横滑取消后抬手，不该结算出字母", async () => {
   q.dispatchEvent(pointerEventXY("pointerup", 140, 198));
   expect(onText).not.toHaveBeenCalled();
 });
+
+// 副字符（角标）在两套大布局里都摆右上角：叠放会让键内容需要 32px 高，而键盘区
+// 被分割条压缩时行只有 25px，.key 的 overflow:hidden 会切掉它。规则写在
+// `.rows.big` 上而不是 `.rows.big.flick`，两套布局才会一起生效。
+test("大键位：副字符规则作用于整个 .rows.big，不是只有 flick", () => {
+  const css = readFileSync(resolve(__dirname, "./Keyboard.svelte"), "utf8");
+  expect(css, "只限定 flick 会让 layered 符号层继续叠放")
+    .not.toMatch(/\.rows\.big\.flick\s+\.key\.has-up/);
+  const block = css.match(/\.rows\.big \.key\.has-up \.up \{[\s\S]*?\}/)?.[0] ?? "";
+  expect(block, "副字符规则块没找到").toBeTruthy();
+  expect(block).toMatch(/position:\s*absolute/);
+});
+
+// layered 符号层按下 Shift 时主副字符**互换**（3/# → #/3）。摆到角上是样式，
+// 互换是 keyLabel 的语义，两者互不影响——这条钉住互换没被样式改动带偏。
+test("layered 符号层：Shift 让主副字符互换，与角标位置无关", async () => {
+  const { container } = render(Keyboard, {
+    props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout: "layered" },
+  });
+  const layer = container.querySelector('[data-key-id="__layer"]') as HTMLElement;
+  await fireEvent.pointerDown(layer);
+  await fireEvent.pointerUp(layer);
+  const cap = () => {
+    const k = container.querySelector('[data-key-id="3"]') as HTMLElement;
+    return { main: k.querySelector(".main")?.textContent, up: k.querySelector(".up")?.textContent };
+  };
+  expect(cap()).toEqual({ main: "3", up: "#" });
+  const shift = container.querySelector('.rows [data-key-id="Shift"]') as HTMLElement;
+  await fireEvent.pointerDown(shift);
+  await fireEvent.pointerUp(shift);
+  expect(cap(), "Shift 按下后应互换").toEqual({ main: "#", up: "3" });
+});
