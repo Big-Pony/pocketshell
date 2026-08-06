@@ -24,29 +24,29 @@
 <table>
   <tr>
     <td align="center">
-      <a href="assets/screenshots/01-launch-task.jpg"><img src="assets/screenshots/01-launch-task.jpg" alt="用输入法缓冲写一整段中文需求" width="200"/></a><br/>
+      <a href="assets/screenshots/01-launch-task-v2.webp"><img src="assets/screenshots/01-launch-task-v2.webp" alt="用输入法缓冲写一整段中文需求" width="200"/></a><br/>
       <sub>① 整段派活</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/03-push-notification.jpg"><img src="assets/screenshots/03-push-notification.jpg" alt="锁屏推送：Claude 在等你输入" width="200"/></a><br/>
+      <a href="assets/screenshots/03-push-notification-v2.webp"><img src="assets/screenshots/03-push-notification-v2.webp" alt="锁屏推送：Claude 在等你输入" width="200"/></a><br/>
       <sub>② 锁屏推送叫你</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/04-task-done-git.jpg"><img src="assets/screenshots/04-task-done-git.jpg" alt="任务完成，Git 面板显示已提交" width="200"/></a><br/>
+      <a href="assets/screenshots/04-task-done-git-v2.webp"><img src="assets/screenshots/04-task-done-git-v2.webp" alt="任务完成，Git 面板显示已提交" width="200"/></a><br/>
       <sub>③ 回来输出已补齐</sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <a href="assets/screenshots/06-task-panel.jpg"><img src="assets/screenshots/06-task-panel.jpg" alt="任务面板：多个 tmux 会话三态" width="200"/></a><br/>
+      <a href="assets/screenshots/06-task-panel-v2.webp"><img src="assets/screenshots/06-task-panel-v2.webp" alt="任务面板：多个 tmux 会话三态" width="200"/></a><br/>
       <sub>④ 下半部：三态任务面板</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/07-keyboard-full.jpg"><img src="assets/screenshots/07-keyboard-full.jpg" alt="全键盘 - 笔记本布局" width="200"/></a><br/>
+      <a href="assets/screenshots/07-keyboard-full-v2.webp"><img src="assets/screenshots/07-keyboard-full-v2.webp" alt="全键盘 - 笔记本布局" width="200"/></a><br/>
       <sub>⑤ 自定义全键盘</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/10-markdown-preview.jpg"><img src="assets/screenshots/10-markdown-preview.jpg" alt="Markdown 渲染预览" width="200"/></a><br/>
+      <a href="assets/screenshots/10-markdown-preview-v2.webp"><img src="assets/screenshots/10-markdown-preview-v2.webp" alt="Markdown 渲染预览" width="200"/></a><br/>
       <sub>⑥ 文件预览与 Git</sub>
     </td>
   </tr>

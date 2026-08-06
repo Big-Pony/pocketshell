@@ -24,29 +24,29 @@ Type `claude`, hit **"Try going offline"** and watch the output replay on reconn
 <table>
   <tr>
     <td align="center">
-      <a href="assets/screenshots/01-launch-task.jpg"><img src="assets/screenshots/01-launch-task.jpg" alt="Compose a whole prompt in the IME buffer" width="200"/></a><br/>
+      <a href="assets/screenshots/01-launch-task-v2.webp"><img src="assets/screenshots/01-launch-task-v2.webp" alt="Compose a whole prompt in the IME buffer" width="200"/></a><br/>
       <sub>① Send the whole prompt</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/03-push-notification.jpg"><img src="assets/screenshots/03-push-notification.jpg" alt="Lock-screen push: Claude is waiting for your input" width="200"/></a><br/>
+      <a href="assets/screenshots/03-push-notification-v2.webp"><img src="assets/screenshots/03-push-notification-v2.webp" alt="Lock-screen push: Claude is waiting for your input" width="200"/></a><br/>
       <sub>② A push calls you back</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/04-task-done-git.jpg"><img src="assets/screenshots/04-task-done-git.jpg" alt="Task done, the Git panel shows the commit" width="200"/></a><br/>
+      <a href="assets/screenshots/04-task-done-git-v2.webp"><img src="assets/screenshots/04-task-done-git-v2.webp" alt="Task done, the Git panel shows the commit" width="200"/></a><br/>
       <sub>③ Output already replayed</sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <a href="assets/screenshots/06-task-panel.jpg"><img src="assets/screenshots/06-task-panel.jpg" alt="Task panel: several tmux sessions with three states" width="200"/></a><br/>
+      <a href="assets/screenshots/06-task-panel-v2.webp"><img src="assets/screenshots/06-task-panel-v2.webp" alt="Task panel: several tmux sessions with three states" width="200"/></a><br/>
       <sub>④ Bottom pane: task panel</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/07-keyboard-full.jpg"><img src="assets/screenshots/07-keyboard-full.jpg" alt="Full keyboard — laptop layout" width="200"/></a><br/>
+      <a href="assets/screenshots/07-keyboard-full-v2.webp"><img src="assets/screenshots/07-keyboard-full-v2.webp" alt="Full keyboard — laptop layout" width="200"/></a><br/>
       <sub>⑤ Custom full keyboard</sub>
     </td>
     <td align="center">
-      <a href="assets/screenshots/10-markdown-preview.jpg"><img src="assets/screenshots/10-markdown-preview.jpg" alt="Rendered Markdown preview" width="200"/></a><br/>
+      <a href="assets/screenshots/10-markdown-preview-v2.webp"><img src="assets/screenshots/10-markdown-preview-v2.webp" alt="Rendered Markdown preview" width="200"/></a><br/>
       <sub>⑥ File preview and Git</sub>
     </td>
   </tr>

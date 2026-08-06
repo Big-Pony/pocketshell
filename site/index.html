@@ -28,7 +28,7 @@
 <meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
 
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/site.css?v=20260803b" />
+<link rel="stylesheet" href="/site.css?v=20260806" />
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -58,6 +58,7 @@
     <nav class="nav-links">
       <a href="https://demo.pocketshell.net">Live demo</a>
       <a href="#how">How it works</a>
+      <a href="#video">Video</a>
       <a href="#features">Features</a>
       <a href="#vs">vs SSH</a>
       <a href="#quickstart">Quick start</a>
@@ -80,9 +81,9 @@
     </div>
     <p class="cta-note">The demo needs no install and no host — real frontend, simulated agent.</p>
     <div class="phones">
-      <div class="phone"><img src="/assets/screenshots/01-launch-task.jpg" width="1220" height="2712" alt="Composing a whole prompt for Claude Code in the IME buffer" /></div>
-      <div class="phone"><img src="/assets/screenshots/03-push-notification.jpg" width="1220" height="2712" alt="Lock-screen push: Claude is waiting for your input" /></div>
-      <div class="phone"><img src="/assets/screenshots/04-task-done-git.jpg" width="1220" height="2712" alt="Back online, the output has replayed and the Git panel shows the commit" /></div>
+      <div class="phone"><img src="/assets/screenshots/01-launch-task-v2.webp" width="1224" height="2720" alt="Composing a whole prompt for Claude Code in the IME buffer" /></div>
+      <div class="phone"><img src="/assets/screenshots/03-push-notification-v2.webp" width="1224" height="2720" alt="Lock-screen push: Claude is waiting for your input" /></div>
+      <div class="phone"><img src="/assets/screenshots/04-task-done-git-v2.webp" width="1224" height="2720" alt="Back online, the output has replayed and the Git panel shows the commit" /></div>
     </div>
   </div>
 </section>
@@ -156,16 +157,47 @@
       <div class="carousel" id="car">
         <div class="car-phone">
           <div class="car-track">
-            <img class="on" src="/assets/screenshots/07-keyboard-full.jpg" width="1220" height="2712" alt="The Classic key layout: a laptop-grade full keyboard with F1–F12, arrows and sticky modifiers" data-cap="<b>Classic layout</b> · F1–F12, arrows and modifiers, all there — or switch to bigger keys" />
-            <img src="/assets/screenshots/08-keyboard-hints.jpg" width="1220" height="2712" loading="lazy" alt="Smart command-hint bar suggesting completions by prefix" data-cap="<b>Command hints</b> · prefix suggestions, tap to complete" />
-            <img src="/assets/screenshots/10-markdown-preview.jpg" width="1220" height="2712" loading="lazy" alt="Rendered Markdown preview alongside the file tree" data-cap="<b>Markdown preview</b> · read docs rendered, not raw" />
-            <img src="/assets/screenshots/12-file-menu.jpg" width="1220" height="2712" loading="lazy" alt="File action menu: rename, upload, download, set as project root" data-cap="<b>File actions</b> · rename, upload, download, set project root" />
-            <img src="/assets/screenshots/13-snippets.jpg" width="1220" height="2712" loading="lazy" alt="Snippets: save your own commands, synced across devices" data-cap="<b>Snippets</b> · save your commands, synced across devices" />
+            <img class="on" src="/assets/screenshots/07-keyboard-full-v2.webp" width="1224" height="2720" alt="The Classic key layout: a laptop-grade full keyboard with F1–F12, arrows and sticky modifiers" data-cap="<b>Classic layout</b> · F1–F12, arrows and modifiers, all there — or switch to bigger keys" />
+            <img src="/assets/screenshots/08-keyboard-hints-v2.webp" width="1224" height="2720" loading="lazy" alt="Smart command-hint bar suggesting completions by prefix" data-cap="<b>Command hints</b> · prefix suggestions, tap to complete" />
+            <img src="/assets/screenshots/10-markdown-preview-v2.webp" width="1224" height="2720" loading="lazy" alt="Rendered Markdown preview alongside the file tree" data-cap="<b>Markdown preview</b> · read docs rendered, not raw" />
+            <img src="/assets/screenshots/12-file-menu-v2.webp" width="1224" height="2720" loading="lazy" alt="File action menu: rename, upload, download, set as project root" data-cap="<b>File actions</b> · rename, upload, download, set project root" />
+            <img src="/assets/screenshots/13-snippets-v2.webp" width="1224" height="2720" loading="lazy" alt="Snippets: save your own commands, synced across devices" data-cap="<b>Snippets</b> · save your commands, synced across devices" />
           </div>
         </div>
         <div class="car-cap" id="car-cap"></div>
         <div class="car-dots" id="car-dots" data-label="Slide %n"></div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="video" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Watch it</div>
+      <h2>Forty seconds,<br />hand-off to answer</h2>
+      <p>One continuous take: kick a task off, put the phone away, get called back when it's done.</p>
+    </div>
+    <div class="demo-video">
+      <div class="dv-frame">
+        <!-- preload="none"：这节在首屏之下，视频不点不取。poster 复用同一批截图，
+             不为它单独多一个文件；width/height 给浏览器算 CLS 预留位。 -->
+        <video class="dv-player" controls preload="none" playsinline
+               width="864" height="1920"
+               poster="/assets/screenshots/01-launch-task-v2.webp">
+          <source src="/assets/demo.mp4" type="video/mp4" />
+          Your browser can't play this video. <a href="/assets/demo.mp4">Download it instead.</a>
+        </video>
+      </div>
+      <ol class="dv-beats">
+        <li>Unlock the phone, tap the icon on the home screen, open PocketShell</li>
+        <li>Start a new tmux session</li>
+        <li>Launch Claude Code from a saved snippet</li>
+        <li>Write the whole request in the system keyboard, send it in one shot</li>
+        <li>Straight back to the home screen and lock it — nothing left to watch</li>
+        <li>The lock screen lights up: the task is finished</li>
+        <li>Tap the notification, land back in the session, read the answer</li>
+      </ol>
     </div>
   </div>
 </section>

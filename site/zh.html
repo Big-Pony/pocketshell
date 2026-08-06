@@ -28,7 +28,7 @@
 <meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
 
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<link rel="stylesheet" href="/site.css?v=20260803b" />
+<link rel="stylesheet" href="/site.css?v=20260806" />
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -58,6 +58,7 @@
     <nav class="nav-links">
       <a href="https://demo.pocketshell.net">在线演示</a>
       <a href="#how">工作方式</a>
+      <a href="#video">演示视频</a>
       <a href="#features">功能</a>
       <a href="#vs">vs SSH</a>
       <a href="#quickstart">快速开始</a>
@@ -80,9 +81,9 @@
     </div>
     <p class="cta-note">演示站不用装、不用配机器 —— 真的前端，模拟的 agent。</p>
     <div class="phones">
-      <div class="phone"><img src="/assets/screenshots/01-launch-task.jpg" width="1220" height="2712" alt="用系统输入法整段派活给 Claude Code" /></div>
-      <div class="phone"><img src="/assets/screenshots/03-push-notification.jpg" width="1220" height="2712" alt="锁屏推送：Claude 等待你的输入" /></div>
-      <div class="phone"><img src="/assets/screenshots/04-task-done-git.jpg" width="1220" height="2712" alt="重连后输出已补齐，Git 面板显示提交" /></div>
+      <div class="phone"><img src="/assets/screenshots/01-launch-task-v2.webp" width="1224" height="2720" alt="用系统输入法整段派活给 Claude Code" /></div>
+      <div class="phone"><img src="/assets/screenshots/03-push-notification-v2.webp" width="1224" height="2720" alt="锁屏推送：Claude 等待你的输入" /></div>
+      <div class="phone"><img src="/assets/screenshots/04-task-done-git-v2.webp" width="1224" height="2720" alt="重连后输出已补齐，Git 面板显示提交" /></div>
     </div>
   </div>
 </section>
@@ -156,16 +157,47 @@
       <div class="carousel" id="car">
         <div class="car-phone">
           <div class="car-track">
-            <img class="on" src="/assets/screenshots/07-keyboard-full.jpg" width="1220" height="2712" alt="「经典」键位：笔记本级全键盘，F1–F12、方向键与 sticky 修饰键" data-cap="<b>经典键位</b> · F1–F12、方向键、修饰键都在 —— 也可以换成更大的键" />
-            <img src="/assets/screenshots/08-keyboard-hints.jpg" width="1220" height="2712" loading="lazy" alt="智能命令提示条：按前缀联想，点一下补全" data-cap="<b>命令联想</b> · 按前缀提示，点一下补全" />
-            <img src="/assets/screenshots/10-markdown-preview.jpg" width="1220" height="2712" loading="lazy" alt="Markdown 渲染预览与文件树" data-cap="<b>Markdown 预览</b> · 文档直接渲染着看" />
-            <img src="/assets/screenshots/12-file-menu.jpg" width="1220" height="2712" loading="lazy" alt="文件操作菜单：重命名、上传下载、设为项目根" data-cap="<b>文件操作</b> · 重命名、上传下载、设项目根" />
-            <img src="/assets/screenshots/13-snippets.jpg" width="1220" height="2712" loading="lazy" alt="快捷指令：常用命令存下来，多设备同步" data-cap="<b>快捷指令</b> · 常用命令存下来，多设备同步" />
+            <img class="on" src="/assets/screenshots/07-keyboard-full-v2.webp" width="1224" height="2720" alt="「经典」键位：笔记本级全键盘，F1–F12、方向键与 sticky 修饰键" data-cap="<b>经典键位</b> · F1–F12、方向键、修饰键都在 —— 也可以换成更大的键" />
+            <img src="/assets/screenshots/08-keyboard-hints-v2.webp" width="1224" height="2720" loading="lazy" alt="智能命令提示条：按前缀联想，点一下补全" data-cap="<b>命令联想</b> · 按前缀提示，点一下补全" />
+            <img src="/assets/screenshots/10-markdown-preview-v2.webp" width="1224" height="2720" loading="lazy" alt="Markdown 渲染预览与文件树" data-cap="<b>Markdown 预览</b> · 文档直接渲染着看" />
+            <img src="/assets/screenshots/12-file-menu-v2.webp" width="1224" height="2720" loading="lazy" alt="文件操作菜单：重命名、上传下载、设为项目根" data-cap="<b>文件操作</b> · 重命名、上传下载、设项目根" />
+            <img src="/assets/screenshots/13-snippets-v2.webp" width="1224" height="2720" loading="lazy" alt="快捷指令：常用命令存下来，多设备同步" data-cap="<b>快捷指令</b> · 常用命令存下来，多设备同步" />
           </div>
         </div>
         <div class="car-cap" id="car-cap"></div>
         <div class="car-dots" id="car-dots" data-label="第 %n 张"></div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="video" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Watch it</div>
+      <h2>四十秒，<br />从派活到收答案</h2>
+      <p>一条连续录制：派完活收起手机，任务跑完它自己叫你回来。</p>
+    </div>
+    <div class="demo-video">
+      <div class="dv-frame">
+        <!-- preload="none"：这节在首屏之下，视频不点不取。poster 复用同一批截图，
+             不为它单独多一个文件；width/height 给浏览器算 CLS 预留位。 -->
+        <video class="dv-player" controls preload="none" playsinline
+               width="864" height="1920"
+               poster="/assets/screenshots/01-launch-task-v2.webp">
+          <source src="/assets/demo.mp4" type="video/mp4" />
+          你的浏览器放不了这个视频，<a href="/assets/demo.mp4">直接下载</a>。
+        </video>
+      </div>
+      <ol class="dv-beats">
+        <li>解锁手机，在桌面点开 PocketShell</li>
+        <li>新建一个 tmux 会话</li>
+        <li>从快捷指令启动 Claude Code</li>
+        <li>用系统输入法写完一整段中文需求，一次发出去</li>
+        <li>直接回桌面锁屏——没什么好守着的</li>
+        <li>锁屏亮起：任务跑完了</li>
+        <li>点通知回到那个会话，读 Claude 的回答</li>
+      </ol>
     </div>
   </div>
 </section>

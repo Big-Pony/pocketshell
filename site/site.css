@@ -196,8 +196,8 @@ section { padding: 96px 0; scroll-margin-top: 62px; }
   box-shadow: 0 24px 56px rgba(26,27,25,.2), 0 3px 10px rgba(26,27,25,.1);
   position: relative; flex: none;
 }
-/* 画框取截图原始比例 1220×2712，整屏完整显示、不裁任何一处 */
-.car-track { position: relative; border-radius: 28px; overflow: hidden; aspect-ratio: 1220/2712; background: #0a0a0a; }
+/* 画框取截图原始比例 1224×2720（= 精确 9:20），整屏完整显示、不裁任何一处 */
+.car-track { position: relative; border-radius: 28px; overflow: hidden; aspect-ratio: 9/20; background: #0a0a0a; }
 .car-track img {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: contain;
@@ -221,6 +221,29 @@ section { padding: 96px 0; scroll-margin-top: 62px; }
   .scenario.stack .s-text { text-align: left; }
   .scenario.stack .s-text ul { display: flex; }
 }
+
+/* 完整演示视频。
+   刻意不 autoplay：这节在首屏之下，一条 40 秒竖屏视频自动播会抢注意力、
+   吃流量，还要在手机上默认静音才允许播。controls + preload="none"，
+   点了才取字节。 */
+.demo-video { display: grid; grid-template-columns: auto 1fr; gap: 56px; align-items: center; }
+@media (max-width: 860px) { .demo-video { grid-template-columns: 1fr; gap: 30px; justify-items: center; } }
+.dv-frame {
+  width: 330px; border-radius: 42px; background: var(--ink); padding: 11px;
+  box-shadow: 0 24px 56px rgba(26,27,25,.2), 0 3px 10px rgba(26,27,25,.1);
+  flex: none;
+}
+@media (max-width: 860px) { .dv-frame { width: min(300px, 82vw); } }
+/* height:auto 同 .phone img 的道理：<video> 上有 width/height 属性给浏览器
+   算 CLS，不显式置 auto 的话高度会取 1920px，aspect-ratio 失效。
+   9/20 是成片比例（864×1920），与截图同一个画框。 */
+.dv-player {
+  display: block; width: 100%; height: auto; aspect-ratio: 9/20;
+  border-radius: 28px; background: #0a0a0a; object-fit: contain;
+}
+.dv-beats { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 9px; }
+.dv-beats li { font-size: 14.5px; color: var(--ink2); padding-left: 4px; }
+.dv-beats li::marker { color: var(--accent); font-weight: 700; font-family: var(--mono); font-size: 13px; }
 
 /* vs SSH 对比表 */
 .vs {
