@@ -21,6 +21,8 @@
   import SnippetPanel from "./components/SnippetPanel.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import UpdateDialog from "./components/UpdateDialog.svelte";
+  import KeyboardTutorial from "./components/KeyboardTutorial.svelte";
+  import { shouldShowTutorial, markTutorialSeen, tutorialFor, type TutorialId } from "./lib/term/kb-tutorial";
   import type { CheckResult } from "./lib/update";
   import { shouldReloadAfterUpdate } from "./lib/update";
   import { hardReset } from "./lib/cache-admin";
@@ -87,13 +89,24 @@
   let selecting = $derived(sel.mode !== "idle");
   let selMode = $derived(sel.mode);
 
+  // 切到 layered / flick 且没看过时弹一次教程。判定放在 applySettings 里
+  // 而不是 $effect：后者在 settings 对象每次重建时都会重放，教程会反复弹；
+  // 这里能拿到「改之前」的值，是真正的「切换发生了」这一刻。
+  let kbTutorial = $state<TutorialId | null>(null);
+  function closeKbTutorial() {
+    if (kbTutorial) markTutorialSeen(kbTutorial);
+    kbTutorial = null;
+  }
+
   // App owns settings so they actually apply: fontSize flows to every terminal
   // (reactive prop below), vibrate/layout flow to the keyboard.
   function applySettings(next: Settings) {
+    const kbChanged = next.kbLayout !== settings.kbLayout;
     settings = next;
     saveSettings(next);
     applyTheme(next.theme);
     applyLanguage(next.language);
+    if (kbChanged && shouldShowTutorial(next.kbLayout)) kbTutorial = tutorialFor(next.kbLayout);
   }
 
   function openPanel(p: BottomPanel) {
@@ -971,7 +984,8 @@
         }} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "kbd"}>
-      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate} layout={settings.layout} {hints} {onHint} />
+      <Keyboard onText={sendActive} onCommand={runCommand} vibrate={settings.vibrate}
+        layout={settings.layout} kbLayout={settings.kbLayout} {hints} {onHint} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "snip"}>
       <SnippetPanel {conn} onInsert={sendActive} />
@@ -1001,6 +1015,10 @@
       const r = (await conn.applyUpdate()) as { started: boolean; reason?: string };
       if (!r.started) { updPhase = "error"; updMsg = r.reason ?? "failed"; }
     }} />
+{/if}
+
+{#if kbTutorial}
+  <KeyboardTutorial tutorial={kbTutorial} onClose={closeKbTutorial} />
 {/if}
 
 <style>
