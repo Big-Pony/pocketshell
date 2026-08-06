@@ -9,30 +9,52 @@ A few mobile gestures and key combos aren't self-evident; they're collected here
 ## ⌨ Full keyboard (⌨ tab)
 
 <p align="center">
-  <img src="assets/screenshots/07-keyboard-full.jpg" width="30%" alt="Full keyboard — laptop layout">
+  <img src="assets/screenshots/07-keyboard-full.jpg" width="30%" alt="Full keyboard — Classic layout">
   <img src="assets/screenshots/08-keyboard-hints.jpg" width="30%" alt="Full keyboard — smart command-hint bar">
 </p>
 
-<p align="center"><em>Left: the full laptop layout, with sticky modifiers on the bottom row · Right: the smart command-hint bar on the function row — tap to complete</em></p>
+<p align="center"><em>Left: the Classic layout (the default), with sticky modifiers on the bottom row · Right: the smart command-hint bar on the function row — tap to complete</em></p>
+
+### Key layouts
+
+Settings offers three layouts, switchable at the very top. **Classic is the default and is unchanged** — if you never open that setting, nothing about your keyboard changes.
+
+| Layout | Letter key | How you reach digits and symbols |
+|---|---|---|
+| **Classic** | 24×34 px | A full laptop layout — they all have their own key |
+| **Layered** | 36×46 px | Tap `123` on the bottom row to switch layers, `abc` to come back |
+| **Flick** | 36×46 px | Flick **up** on a key for the character in its top-right corner, **down** for the bottom-left one |
+
+Layered and Flick double the letter-key touch area. To pay for it they put 10 keys on a row, give the arrow keys their own row, and keep `esc` / `tab` at a fixed width on the left of the function row.
+
+In Flick, a key's two symbols are always a shifted pair (`[` and `{`, `-` and `_`, `1` and `!`), so there is one rule to remember rather than 26 positions. Ten keys have no downward character — their shifted partner already lives on another key — and flicking down on those simply types the letter.
+
+> **Layered and Flick have no `Fn`, `Cmd` or `Caps` key.** Their bottom row is `ctrl` `alt` (`123`) `space` `⏎`, so every `Fn` and `Cmd` combination in the table below — the function row's `F1`–`F12`, tab switching, scrollback, fullscreen, rename — is reachable **only in Classic**. Switch back to Classic if you need them.
+
+Switching to Layered or Flick shows a one-time animated tutorial. Replay it any time from **Settings → Replay keyboard tutorial**.
+
+### Keys and combinations
 
 | Location | Icon / button | What it does |
 |---|---|---|
-| Bottom-row modifiers | `Shift` `Ctrl` `Alt` `Cmd` `Fn` `Caps` | Tap cycles three states: **1 tap = one-shot** (releases after the next key) → **tap again = locked** (stays lit, keeps applying) → **3rd tap = off** |
-| Any character key | Long-press | Auto-repeat while held |
+| Bottom-row modifiers | `Shift` `Ctrl` `Alt` `Cmd` `Fn` `Caps` | Tap cycles three states: **1 tap = one-shot** (releases after the next key) → **tap again = locked** (stays lit, keeps applying) → **3rd tap = off** (`Cmd` / `Fn` / `Caps` exist in Classic only) |
+| Any character key | Long-press | Auto-repeat while held. **Exception:** in Flick, letter keys commit on release, so they never auto-repeat — backspace, arrows and space still do |
 | Combo | `Ctrl` + letter | Send a control char: `Ctrl+C` interrupt, `Ctrl+D` EOF, `Ctrl+Z` suspend, `Ctrl+L` clear, etc. |
 | Combo | `Alt` + key | Send Meta (ESC prefix, i.e. `\x1b` + char) |
 | Combo | `Shift` / `Caps` + letter | Uppercase (XOR: either one uppercases; both together cancel out) |
-| Function row | after lighting `Fn` | The function row switches from the command-hint bar to `F1`–`F12` |
-| Combo | `Fn` + `F1`–`F12` | Send a function key |
-| Combo | `Fn` + `←` / `→` | Previous / next tab |
-| Combo | `Fn` + `↑` / `↓` | Scroll the terminal up / down |
-| Combo | `Fn` + `1`–`9` | Jump to the Nth tab |
-| Combo | `Fn` + `N` / `D` / `F` / `C` / `R` | New session / background / toggle fullscreen / copy visible output / rename session |
-| Combo | `Cmd` + `←` / `→` | Previous / next tab |
-| Combo | `Cmd` + `A` / `C` / `V` | Select-all-copy / smart copy (selection if any, else visible output) / paste |
-| Combo | `Cmd` + `F` / `N` / `R` / `K` | Page fullscreen / new session / rename session / clear screen |
+| Function row | after lighting `Fn` | *(Classic only)* The function row switches from the command-hint bar to `F1`–`F12` |
+| Combo | `Fn` + `F1`–`F12` | *(Classic only)* Send a function key |
+| Combo | `Fn` + `←` / `→` | *(Classic only)* Previous / next tab |
+| Combo | `Fn` + `↑` / `↓` | *(Classic only)* Scroll the terminal up / down |
+| Combo | `Fn` + `1`–`9` | *(Classic only)* Jump to the Nth tab |
+| Combo | `Fn` + `N` / `D` / `F` / `C` / `R` | *(Classic only)* New session / background / toggle fullscreen / copy visible output / rename session |
+| Combo | `Cmd` + `←` / `→` | *(Classic only)* Previous / next tab |
+| Combo | `Cmd` + `A` / `C` / `V` | *(Classic only)* Select-all-copy / smart copy (selection if any, else visible output) / paste |
+| Combo | `Cmd` + `F` / `N` / `R` / `K` | *(Classic only)* Page fullscreen / new session / rename session / clear screen |
 | Function row (`Fn` off) | command-hint chip | Smart command suggestions; tap to complete / insert into the input line |
-| Keycap top-right | small superscript | The character this key produces with `Shift` |
+| Bottom row | `123` / `abc` | *(Layered only)* Switch between the letter layer and the digit/symbol layer |
+| Keycap top-right | small superscript | In Classic and Layered, the character this key produces with `Shift` (holding `Shift` swaps it with the main character). In Flick, the character this key sends when you **flick up** — it never changes |
+| Keycap bottom-left | small subscript | *(Flick only)* The character this key sends when you **flick down** |
 
 ## ✎ IME buffer (✎ tab)
 

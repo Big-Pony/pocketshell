@@ -84,10 +84,11 @@ One binary = the whole product: the frontend is embedded and served on the same 
 
 ### ⌨ Phone input
 
-- **Custom full keyboard** — a full laptop layout with F1–F12, arrows, and three-state sticky modifiers
+- **Custom full keyboard** — the default Classic layout is a full laptop layout with F1–F12, arrows, and three-state sticky modifiers
+- **Three key layouts** — Classic (default, unchanged) / Layered / Flick, switchable at the top of Settings. The latter two double the letter-key touch area; Layered puts digits and symbols on a second layer, Flick prints them in the key corners (flick up or down to type them). Note that neither has an `Fn` or `Cmd` key, so the app-command layer below is Classic-only
 - **IME whole-segment input** — compose the entire prompt with the system IME and inject it in one shot; the buffer survives disconnects
 - **Smart command-hint bar** — prefix-based suggestions, tap to complete
-- **Fn app-command layer** — switch tabs, scroll, create sessions, go fullscreen and rename, all from key combos
+- **Fn app-command layer** *(Classic layout)* — switch tabs, scroll, create sessions, go fullscreen and rename, all from key combos
 - **Quick actions panel** — D-pad layout with `Esc`/`Tab`/`Del`/`Home`/`End` and copy/paste on one screen
 - **Snippets** — your own custom commands, tap to insert, broadcast-synced across devices
 
@@ -294,13 +295,13 @@ The Agent has built-in in-app auto-update backed by GitHub Releases: it silently
 
 ## 📦 Version
 
-Current release **v1.8.0** (2026-08-03) · full changelog in [Releases](https://github.com/Big-Pony/pocketshell/releases)
+Current release **v1.13.0** (2026-08-06) · full changelog in [Releases](https://github.com/Big-Pony/pocketshell/releases)
 
-**v1.8.0** — removed the web admin page (it was anonymously reachable from the internet); device management is now CLI-only; `devices remove` takes effect on a running Agent; in-app updates install only from the official repository.
+**v1.13.0** — three key layouts (Classic / Layered / Flick) with a one-time tutorial, switchable at the top of Settings; fixed a terminal that kept refreshing but could not be scrolled up; the Flick layout gained a downward flick, covering the 16 symbols it was missing.
 
-**v1.7.0** — AI context usage on the split bar (four tools); Kimi CLI push notifications; video preview with a working seek bar; a refresh button on the Git branch row.
+**v1.12.0** — quick-actions panel rearranged; the delete key now sends backspace instead of forward-delete; fixed terminal history collapsing into a narrow column after switching tabs, and misaligned tables after a history reload.
 
-**v1.6.0** — `install` / `uninstall` subcommands to set up a boot-start service in one command; one-line installer with SHA256 verification; fixed `pair` doing nothing for the first five minutes after service start.
+**v1.11.0** — five bundled monospace fonts (Maple Mono is the new default), applied across the terminal, previews and UI; Settings → Monospace font.
 
 ## ⚡ Performance
 

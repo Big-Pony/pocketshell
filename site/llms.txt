@@ -6,7 +6,7 @@ PocketShell is not a cloud service and not an IDE. It assumes you already have t
 
 ## Site
 
-- [Home (English)](https://pocketshell.net/): what it is, how resilient sessions and replay work, feature overview, comparison with a mobile SSH client, three-step install
+- [Home (English)](https://pocketshell.net/): what it is, how resilient sessions and replay work, feature overview including the three selectable key layouts, comparison with a mobile SSH client, three-step install
 - [首页（中文）](https://pocketshell.net/zh): the same page in Chinese
 - [Live demo](https://demo.pocketshell.net): the real frontend running against a simulated agent — no install, no host, no signup. Best on a phone; a desktop visit shows the app inside a phone frame. Includes a "try going offline" button that drops the connection for real and replays the missed output on reconnect
 
@@ -14,7 +14,7 @@ PocketShell is not a cloud service and not an IDE. It assumes you already have t
 
 - [README](https://github.com/Big-Pony/pocketshell/blob/main/README.md): full feature list, quick start, install options, good-fit / not-a-fit guidance
 - [README (中文)](https://github.com/Big-Pony/pocketshell/blob/main/README-CN.md): Chinese README
-- [Interaction cheat sheet](https://github.com/Big-Pony/pocketshell/blob/main/USAGE.md): mobile gestures, key combos, keyboard layers
+- [Interaction cheat sheet](https://github.com/Big-Pony/pocketshell/blob/main/USAGE.md): mobile gestures, key combos, the three key layouts (Classic / Layered / Flick) and the Fn app-command layer
 - [Deployment guide](https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT.md): reverse proxy, TLS, running as a systemd or launchd service
 
 ## Source and releases
