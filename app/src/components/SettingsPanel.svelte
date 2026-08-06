@@ -14,6 +14,8 @@
   import { listThemes, customThemeInfo, applyThemeAsync, type ThemeEntry } from "../lib/theme";
   import { customThemeName } from "../lib/theme-css";
   import { FONTS, applyFont } from "../lib/font";
+  import { KB_LAYOUTS } from "../lib/settings";
+  import { resetTutorial } from "../lib/term/kb-tutorial";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
     conn: Connection; settings: Settings; onChange: (s: Settings) => void;
@@ -130,6 +132,21 @@
   function pickFont(id: Settings["fontFamily"]) {
     update("fontFamily", id);
     applyFont(id);
+  }
+
+  // ---- 键盘键位 ----
+  function pickKbLayout(id: Settings["kbLayout"]) {
+    update("kbLayout", id);
+  }
+
+  // 清掉两套教程的「看过」标记，下次切到 layered / flick 会再弹。
+  // 不在这里直接弹：弹窗归 App 管（它才是 overlay 的挂载处），
+  // 而且用户点「重看」时多半正想切布局，下一次切换弹出来正好。
+  let replayed = $state(false);
+  function replayKbTutorial() {
+    resetTutorial("layered");
+    resetTutorial("flick");
+    replayed = true;   // 只用于按钮文案反馈，见下方模板
   }
 
   // 剪贴板读取必须在 click handler 的 user gesture 内发起 —— 这是浏览器允许
@@ -299,6 +316,39 @@
 
 <div class="stg-scroll">
 <div class="stg">
+  <!-- 键位布局。放最上面：它决定整个键盘长什么样，是这一屏里影响最大的设置。
+       与下面的「键帽标注」（Mac/Win）是两回事——那个只换 Cmd/Win 的字。
+       用一行一项而不是 .seg：三个名字加说明在 390px 下排不开一行。 -->
+  <div class="set col">
+    <div class="grow">
+      <div class="label">{$t('settings.kbLayout.label')}</div>
+      <div class="desc">{$t('settings.kbLayout.desc')}</div>
+    </div>
+    <div class="themes" role="radiogroup" aria-label={$t('settings.kbLayout.label')}>
+      {#each KB_LAYOUTS as id (id)}
+        <button class="theme" role="radio" aria-checked={settings.kbLayout === id}
+          class:on={settings.kbLayout === id} onclick={() => pickKbLayout(id)}>
+          <span class="tick" aria-hidden="true"></span>
+          <span class="tname">
+            {$t(`settings.kbLayout.${id}`)}
+            <s>{$t(`settings.kbLayout.${id}Desc`)}</s>
+          </span>
+        </button>
+      {/each}
+    </div>
+  </div>
+
+  <!-- 重看教程：教程只在首次切到新布局时弹，这里是唯一的重看入口 -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('settings.kbLayout.replay')}</div>
+      <div class="desc">{$t('settings.kbLayout.replayDesc')}</div>
+    </div>
+    <button class="btn" onclick={replayKbTutorial} disabled={replayed}>
+      {replayed ? $t('settings.kbLayout.replayDone') : $t('settings.kbLayout.replayBtn')}
+    </button>
+  </div>
+
   <!-- Theme. A row per palette rather than the usual .seg: seven segments do not
        fit at 390px (and overflow outright in English), and a colour scheme is
        the one setting worth previewing before you pick it. -->

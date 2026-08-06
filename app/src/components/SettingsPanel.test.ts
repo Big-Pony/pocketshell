@@ -172,3 +172,73 @@ test("expanding the notifications section shows tool toggles and the webhook add
   expect(getByText("Web Push")).toBeInTheDocument();
   expect(getByText("添加")).toBeInTheDocument();
 });
+
+// ── 键盘键位（kbLayout）──
+// 与「键盘布局」（settings.layout，Mac/Win 键帽标注）是两回事，两者的中文标签
+// 只差一个字，断言时要盯住「键盘键位」这四个字。
+
+test("键位选择器在设置面板最上面（排在主题之前）", () => {
+  const { container } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange: vi.fn(), currentVersion, onCheckUpdate },
+  });
+  const first = container.querySelector(".stg > .set");
+  expect(first?.textContent).toContain("键盘键位");
+});
+
+test("三套键位都列出来，各带一句说明", () => {
+  const { container } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange: vi.fn(), currentVersion, onCheckUpdate },
+  });
+  const box = container.querySelector('[aria-label="键盘键位"]') as HTMLElement;
+  expect(box.textContent).toContain("经典");
+  expect(box.textContent).toContain("分层");
+  expect(box.textContent).toContain("上滑");
+  expect(box.textContent).toContain("数字符号在第二层");
+});
+
+test("当前键位是选中态", () => {
+  const { container } = render(SettingsPanel, {
+    props: { conn, settings: { ...base, kbLayout: "flick" }, onChange: vi.fn(), currentVersion, onCheckUpdate },
+  });
+  const checked = container.querySelector('[aria-label="键盘键位"] [aria-checked="true"]');
+  expect(checked?.textContent).toContain("上滑");
+});
+
+test("点另一套键位会 onChange 出去", async () => {
+  const onChange = vi.fn();
+  const { container } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange, currentVersion, onCheckUpdate },
+  });
+  const btns = [...container.querySelectorAll('[aria-label="键盘键位"] [role="radio"]')];
+  const layered = btns.find((b) => b.textContent?.includes("分层")) as HTMLElement;
+  await fireEvent.click(layered);
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kbLayout: "layered" }));
+});
+
+test("有「重看键盘教程」入口，点完给出已重置反馈", async () => {
+  const { container } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange: vi.fn(), currentVersion, onCheckUpdate },
+  });
+  expect(container.textContent).toContain("重看键盘教程");
+  const btn = [...container.querySelectorAll("button")]
+    .find((b) => b.textContent?.trim() === "重看") as HTMLButtonElement;
+  expect(btn).toBeTruthy();
+  await fireEvent.click(btn);
+  // 这个动作没有立即可见的效果（教程要下次切布局才弹），必须给反馈，
+  // 否则用户以为没点上会反复点。
+  expect(btn.textContent?.trim()).toBe("已重置");
+  expect(btn.disabled).toBe(true);
+});
+
+test("重看会清掉两套教程的看过标记", async () => {
+  localStorage.setItem("ps.kbTutSeen.layered", "1");
+  localStorage.setItem("ps.kbTutSeen.flick", "1");
+  const { container } = render(SettingsPanel, {
+    props: { conn, settings: base, onChange: vi.fn(), currentVersion, onCheckUpdate },
+  });
+  const btn = [...container.querySelectorAll("button")]
+    .find((b) => b.textContent?.trim() === "重看") as HTMLButtonElement;
+  await fireEvent.click(btn);
+  expect(localStorage.getItem("ps.kbTutSeen.layered")).toBeNull();
+  expect(localStorage.getItem("ps.kbTutSeen.flick")).toBeNull();
+});
