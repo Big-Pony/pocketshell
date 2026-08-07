@@ -93,3 +93,49 @@ describe("FilePreview directory drawer", () => {
     expect(onNavigate).toHaveBeenCalledWith("/proj/b.ts");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 13 期需求 1b：底部留白，让用户能把文件末尾的内容往上拖。
+// .pv-content 是源码/Markdown/diff 共用的滚动容器，留白加一处即可。
+// ---------------------------------------------------------------------------
+describe("FilePreview 底部留白", () => {
+  it("源码视图挂 pad-bot", async () => {
+    const conn = connStub({
+      rpc: vi.fn(async (m: string) => {
+        if (m === "preview.mint") return { token: "TOK" };
+        if (m === "fs.read") return { content: "const a = 1", lang: "javascript", mtime: 1 };
+        return {};
+      }),
+    });
+    const { container } = render(FilePreview, {
+      props: { conn, path: "/p/a.js", mode: "code", active: true, base: "/p", onToast: () => {} },
+    });
+    await waitFor(() => {
+      expect(container.querySelector(".pv-content.pad-bot")).toBeTruthy();
+    });
+  });
+
+  it("图片视图不挂 pad-bot（图片下面挂半屏空白没有意义）", async () => {
+    const conn = connStub();
+    const { container } = render(FilePreview, {
+      props: { conn, path: "/p/a.png", mode: "code", active: true, base: "/p", onToast: () => {} },
+    });
+    await waitFor(() => expect(container.querySelector("img")).toBeTruthy());
+    expect(container.querySelector(".pv-content.pad-bot")).toBeNull();
+  });
+
+  it("代码文件的 diff 视图挂 pad-bot", async () => {
+    const conn = connStub({
+      rpc: vi.fn(async (m: string) => {
+        if (m === "fs.diff") return { hunks: [{ header: "@@ -1 +1 @@", lines: [] }] };
+        return {};
+      }),
+    });
+    const { container } = render(FilePreview, {
+      props: { conn, path: "/p/a.js", mode: "diff", active: true, base: "/p", onToast: () => {} },
+    });
+    await waitFor(() => {
+      expect(container.querySelector(".pv-content.pad-bot")).toBeTruthy();
+    });
+  });
+});

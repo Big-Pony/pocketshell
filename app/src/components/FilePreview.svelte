@@ -230,7 +230,13 @@
       </div>
     {/if}
 
-    <div class="pv-content" data-view={view}>
+    <!-- pad-bot：底部留白，让用户能把文件末尾的内容拖到屏幕中部（13 期需求 1b）。
+         两类排除——图片/视频挂空白无意义；HTML 渲染态是 height:100% 的 iframe、
+         内容在 iframe 内部滚动，外层留白只会拖出一片死空白。
+         判据只看 kind 不掺 mode：上面的模板本就是先按 kind 分派的，
+         kind 决定屏幕上真正渲染的是什么，条件与它对齐才不跑偏。 -->
+    <div class="pv-content" data-view={view}
+      class:pad-bot={kind !== "image" && kind !== "video" && !(kind === "html" && view === "render")}>
       {#if kind === "image"}
         <div class="img-wrap">{#if imgSrc}<img src={imgSrc} alt={path} />{/if}</div>
       {:else if kind === "video"}
@@ -289,6 +295,11 @@
   /* pan-y: let horizontal drags fall through to the top-area swipe (tab switch,
      req8) instead of being swallowed as horizontal scroll; vertical still pans. */
   .pv-content { flex: 1; min-height: 0; overflow: auto; touch-action: pan-y; }
+  /* 45vh ≈ 半屏：足以把最后一行拖到屏幕中部。用 vh 而非固定 px——
+     小屏够用、大屏不浪费。
+     .pv-content 既有的 touch-action: pan-y 保持不动：留白只增加可滚内容的
+     长度，与「横向拖动落到上区 tab 切换手势」这条路由无关。 */
+  .pv-content.pad-bot { padding-bottom: 45vh; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-md, 8px); overflow: hidden; }
   .seg button { height: 30px; padding: 0 12px; background: transparent; color: var(--dim); border: none; font-size: 0.72rem; }
   .seg button.on { background: var(--primary-bg); color: var(--primary-text); }

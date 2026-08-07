@@ -2,13 +2,14 @@
   import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { tr } from "../lib/i18n";
-  import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, type Panel } from "@codemirror/view";
+  import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, scrollPastEnd, type Panel } from "@codemirror/view";
   import { EditorState } from "@codemirror/state";
   import { indentOnInput, bracketMatching, syntaxHighlighting, HighlightStyle, indentUnit } from "@codemirror/language";
   import { defaultKeymap, history, historyKeymap, undo, redo } from "@codemirror/commands";
   import { search, openSearchPanel, closeSearchPanel, searchPanelOpen, SearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll } from "@codemirror/search";
   import { tags } from "@lezer/highlight";
   import { langExtension, saveFile, isConflictError } from "../lib/editor";
+  import { visibleHeightBelow } from "../lib/term/keyboard-inset";
   import type { Connection } from "../lib/net/connection";
 
   let { conn, path, lang, initialContent, mtime, onClose, onDirty, onToast }: {
@@ -106,12 +107,23 @@
     if (searchPanelOpen(view.state)) closeSearchPanel(view); else openSearchPanel(view);
   }
 
-  // Keyboard-aware height: the on-screen keyboard shrinks visualViewport but
-  // not the layout viewport — cap the editor to what is actually visible.
+  // 键盘感知高度。两平台的键盘对视口做的事不同，几何计算在
+  // lib/term/keyboard-inset.ts 的 visibleHeightBelow 里（有单测）：
+  //  - Android：Keyboard.svelte 设了 overlaysContent=true，键盘覆盖内容、
+  //    visualViewport 不收缩，必须读 virtualKeyboard.boundingRect.height。
+  //  - iOS：浏览器收缩 visual viewport，读 vv 即可。
+  // 读不到 virtualKeyboard 时 vkHeight 为 0，自然落到 iOS 分支。
   function fitViewport() {
+    if (!rootEl) return;
     const vv = window.visualViewport;
-    if (!vv || !rootEl) return;
-    rootEl.style.height = Math.max(160, vv.height - rootEl.getBoundingClientRect().top) + "px";
+    const vk = (navigator as any).virtualKeyboard;
+    rootEl.style.height = visibleHeightBelow({
+      top: rootEl.getBoundingClientRect().top,
+      innerHeight: window.innerHeight,
+      vvHeight: vv?.height ?? window.innerHeight,
+      vvOffsetTop: vv?.offsetTop ?? 0,
+      vkHeight: vk?.boundingRect?.height ?? 0,
+    }) + "px";
     if (view) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head) });
   }
 
@@ -144,6 +156,10 @@
         // 手机端不做横向滚动：长行软换行以适配屏宽。CM6 的 lineNumbers()
         // 原生处理软换行（一个逻辑行一个行号，续行留空），无需额外对齐处理。
         EditorView.lineWrapping,
+        // 底部留白（13 期需求 1b）：留出「视口高度减一行」的空白，最后一行
+        // 可以拖到编辑区顶部。用 CM 官方扩展而非手写 padding-bottom——CM 的
+        // 滚动测量与 scrollIntoView 原生认它，自己加 padding 会让行定位错位。
+        scrollPastEnd(),
         search({ top: true, createPanel: makeSearchPanel }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         syntaxHighlighting(hl), theme,
@@ -154,10 +170,15 @@
     view = new EditorView({ state, parent: host! });
     view.focus();
     window.visualViewport?.addEventListener("resize", fitViewport);
+    // Android（VirtualKeyboard API）：键盘弹起不改变 visualViewport，所以
+    // 上面那个 resize **不会触发**——必须另外听 geometrychange，否则这条
+    // 修复在 Android 上等于没做。
+    (navigator as any).virtualKeyboard?.addEventListener?.("geometrychange", fitViewport);
     fitViewport();
   });
   onDestroy(() => {
     window.visualViewport?.removeEventListener("resize", fitViewport);
+    (navigator as any).virtualKeyboard?.removeEventListener?.("geometrychange", fitViewport);
     view?.destroy();
     onDirty(false);
   });
