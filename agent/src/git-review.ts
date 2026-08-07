@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { runGit, isRepo } from "./git-service";
 import {
   parseNumstat, parsePorcelain, stagedMark, splitDiffByFile, synthAddedHunk,
-  planBudget, FILE_LINE_CAP, TOTAL_LINE_BUDGET, type DiffHunk,
+  planBudget, FILE_LINE_CAP, TOTAL_LINE_BUDGET, type DiffHunk, type DiffFileEntry,
 } from "./git-review-parse";
 
 export type ReviewScope =
@@ -172,7 +172,7 @@ export function gitReview(cwd: string, scope: ReviewScope): ReviewResult {
   for (const f of files) {
     if (f.isDir || f.binary || f.status === "D") continue;  // 这三类本就不传正文
     if (!keep.has(f.path)) { f.oversize = true; continue; }
-    f.hunks = hunkMap.get(f.path) ?? untrackedHunks(cwd, f);
+    f.hunks = hunkMap.get(f.path)?.hunks ?? untrackedHunks(cwd, f);
   }
 
   return {
@@ -196,7 +196,7 @@ function withStaged(x: string, y: string) {
   return m ? { staged: m } : {};
 }
 
-function statusOf(path: string, p: { x: string; y: string } | undefined, hunks: Map<string, DiffHunk[]>): ReviewFile["status"] {
+function statusOf(path: string, p: { x: string; y: string } | undefined, diff: Map<string, DiffFileEntry>): ReviewFile["status"] {
   if (p) {
     for (const ch of [p.x, p.y]) {
       if (ch === "D") return "D";
@@ -206,8 +206,9 @@ function statusOf(path: string, p: { x: string; y: string } | undefined, hunks: 
       if (ch === "?") return "?";
     }
   }
-  // commit / range 范围没有 porcelain，从 diff 正文的存在性推断
-  return hunks.has(path) ? "M" : "M";
+  // commit / range 范围没有 porcelain，用 diff 文件头里的
+  // new file mode / deleted file mode / rename from 来定状态。
+  return diff.get(path)?.status ?? "M";
 }
 
 function readUntracked(abs: string): { add: number; binary: boolean } {

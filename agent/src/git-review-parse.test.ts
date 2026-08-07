@@ -73,8 +73,8 @@ test("splitDiffByFile 按 diff --git 头拆分，路径取 b/ 侧", () => {
   ].join("\n");
   const m = splitDiffByFile(out);
   expect([...m.keys()]).toEqual(["src/auth.ts", "b.ts"]);
-  expect(m.get("src/auth.ts")![0].header).toBe("@@ -12,3 +12,4 @@ fn()");
-  expect(m.get("src/auth.ts")![0].lines).toEqual([
+  expect(m.get("src/auth.ts")!.hunks[0].header).toBe("@@ -12,3 +12,4 @@ fn()");
+  expect(m.get("src/auth.ts")!.hunks[0].lines).toEqual([
     { kind: "ctx", text: "ctx line" },
     { kind: "del", text: "old line" },
     { kind: "add", text: "new line" },
@@ -91,7 +91,7 @@ test("splitDiffByFile 丢弃 hunk 之前的文件头行（不混进正文）", (
     "@@ -0,0 +1 @@",
     "+hello",
   ].join("\n");
-  const hunks = splitDiffByFile(out).get("a.ts")!;
+  const hunks = splitDiffByFile(out).get("a.ts")!.hunks;
   expect(hunks).toHaveLength(1);
   expect(hunks[0].lines).toEqual([{ kind: "add", text: "hello" }]);
 });
@@ -103,6 +103,88 @@ test("splitDiffByFile 处理含空格的路径", () => {
 
 test("splitDiffByFile 对空输入回空 Map", () => {
   expect(splitDiffByFile("").size).toBe(0);
+});
+
+test("splitDiffByFile 从文件头认出 A/D/R/M 四种状态", () => {
+  const added = [
+    "diff --git a/a.ts b/a.ts",
+    "new file mode 100644",
+    "index 000..111",
+    "--- /dev/null",
+    "+++ b/a.ts",
+    "@@ -0,0 +1 @@",
+    "+hello",
+  ].join("\n");
+  expect(splitDiffByFile(added).get("a.ts")!.status).toBe("A");
+
+  const deleted = [
+    "diff --git a/gone.ts b/gone.ts",
+    "deleted file mode 100644",
+    "index 111..000",
+    "--- a/gone.ts",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-bye",
+  ].join("\n");
+  expect(splitDiffByFile(deleted).get("gone.ts")!.status).toBe("D");
+
+  const renamed = [
+    "diff --git a/old.ts b/new.ts",
+    "similarity index 92%",
+    "rename from old.ts",
+    "rename to new.ts",
+    "index 111..222 100644",
+    "--- a/old.ts",
+    "+++ b/new.ts",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+  expect(splitDiffByFile(renamed).get("new.ts")!.status).toBe("R");
+
+  const modified = [
+    "diff --git a/m.ts b/m.ts",
+    "index 111..222 100644",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+  expect(splitDiffByFile(modified).get("m.ts")!.status).toBe("M");
+});
+
+test("splitDiffByFile 不把正文里长得像文件头的行当状态", () => {
+  // hunk 内的 ctx/add 行即使文本是 "new file mode 100644" 也不能改写状态
+  const out = [
+    "diff --git a/m.ts b/m.ts",
+    "index 111..222 100644",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -1,2 +1,2 @@",
+    " new file mode 100644",
+    "-deleted file mode 100644",
+    "+rename from x",
+  ].join("\n");
+  const e = splitDiffByFile(out).get("m.ts")!;
+  expect(e.status).toBe("M");
+  expect(e.hunks[0].lines).toEqual([
+    { kind: "ctx", text: "new file mode 100644" },
+    { kind: "del", text: "deleted file mode 100644" },
+    { kind: "add", text: "rename from x" },
+  ]);
+});
+
+test("splitDiffByFile 纯重命名（无内容改动、无 hunk）也认出 R", () => {
+  const out = [
+    "diff --git a/old.ts b/new.ts",
+    "similarity index 100%",
+    "rename from old.ts",
+    "rename to new.ts",
+  ].join("\n");
+  const e = splitDiffByFile(out).get("new.ts")!;
+  expect(e.status).toBe("R");
+  expect(e.hunks).toEqual([]);
 });
 
 test("synthAddedHunk 把文件内容合成单个全 + 的 hunk", () => {

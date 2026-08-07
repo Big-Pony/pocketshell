@@ -176,6 +176,42 @@ test("gitReview range 只含本分支改动，不含基线后续推进", () => {
   rmSync(d, { recursive: true, force: true });
 });
 
+test("gitReview commit 范围从 diff 正文认出新增/删除文件的状态", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "init");
+  // 一次提交里同时新增 born.ts 与删除 a.txt
+  writeFileSync(join(d, "born.ts"), "hello\n");
+  rmSync(join(d, "a.txt"));
+  runGit(d, ["add", "-A"]);
+  runGit(d, ["commit", "-q", "-m", "add and remove"]);
+  const hash = runGit(d, ["rev-parse", "HEAD"]).stdout.trim();
+  const r = gitReview(d, { kind: "commit", hash });
+  expect(r.files.find((f) => f.path === "born.ts")!.status).toBe("A");
+  expect(r.files.find((f) => f.path === "a.txt")!.status).toBe("D");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("gitReview commit 范围下普通修改仍是 M", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "first");
+  commit(d, "a.txt", "one\ntwo\n", "second");
+  const hash = runGit(d, ["rev-parse", "HEAD"]).stdout.trim();
+  const r = gitReview(d, { kind: "commit", hash });
+  expect(r.files.find((f) => f.path === "a.txt")!.status).toBe("M");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("gitReview range 范围同样认出新增文件为 A", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "init");
+  runGit(d, ["branch", "-M", "main"]);
+  runGit(d, ["checkout", "-q", "-b", "feat"]);
+  commit(d, "feat.ts", "mine\n", "my work");
+  const r = gitReview(d, { kind: "range", base: "main" });
+  expect(r.files.find((f) => f.path === "feat.ts")!.status).toBe("A");
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("gitReview 超 cap 的文件降级为 oversize 且不含正文", () => {
   const d = repo();
   commit(d, "a.txt", "x\n", "init");

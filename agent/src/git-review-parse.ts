@@ -70,15 +70,24 @@ export function stagedMark(x: string, y: string): "full" | "partial" | undefined
 
 export interface DiffHunk { header: string; lines: { kind: "add" | "del" | "ctx"; text: string }[] }
 
+export interface DiffFileEntry { status: "M" | "A" | "D" | "R"; hunks: DiffHunk[] }
+
 /**
- * 把一整份多文件 diff 按 "diff --git a/X b/Y" 头拆成 per-file hunks。
+ * 把一整份多文件 diff 按 "diff --git a/X b/Y" 头拆成 per-file 条目
+ * （状态 + hunks）。
  *
  * 路径取 b/ 侧（新路径）：重命名时 a/ 是旧名，面板要显示文件现在在哪。
  * 用 " b/" 定位而不是空格分割——路径可以含空格。
+ *
+ * 状态从**文件头**（`diff --git` 与第一个 `@@` 之间那几行）解析：
+ * commit / range 范围没有 porcelain 可查，这里是唯一的状态来源，否则
+ * 新增与删除的文件在 UI 上全被涂成「修改」。只在 `cur === null`
+ * （尚未进入任何 hunk）时判断——正文里完全可能出现一行内容恰好是
+ * "new file mode 100644"，那是被 diff 的数据而不是 diff 的元信息。
  */
-export function splitDiffByFile(stdout: string): Map<string, DiffHunk[]> {
-  const out = new Map<string, DiffHunk[]>();
-  let hunks: DiffHunk[] | null = null;
+export function splitDiffByFile(stdout: string): Map<string, DiffFileEntry> {
+  const out = new Map<string, DiffFileEntry>();
+  let entry: DiffFileEntry | null = null;
   let cur: DiffHunk | null = null;
 
   for (const line of stdout.split("\n")) {
@@ -86,14 +95,20 @@ export function splitDiffByFile(stdout: string): Map<string, DiffHunk[]> {
       const rest = line.slice("diff --git ".length);
       const at = rest.indexOf(" b/");
       const path = at >= 0 ? rest.slice(at + 3) : rest;
-      hunks = [];
+      entry = { status: "M", hunks: [] };
       cur = null;
-      out.set(path, hunks);
+      out.set(path, entry);
       continue;
     }
-    if (!hunks) continue;                       // diff --git 之前的噪声
-    if (line.startsWith("@@")) { cur = { header: line, lines: [] }; hunks.push(cur); continue; }
-    if (!cur) continue;                          // 文件头（index/---/+++/new file mode）
+    if (!entry) continue;                       // diff --git 之前的噪声
+    if (line.startsWith("@@")) { cur = { header: line, lines: [] }; entry.hunks.push(cur); continue; }
+    if (!cur) {
+      // 文件头（index/---/+++/new file mode/rename from ...）
+      if (line.startsWith("new file mode ")) entry.status = "A";
+      else if (line.startsWith("deleted file mode ")) entry.status = "D";
+      else if (line.startsWith("rename from ") || line.startsWith("rename to ")) entry.status = "R";
+      continue;
+    }
     if (line.startsWith("+")) cur.lines.push({ kind: "add", text: line.slice(1) });
     else if (line.startsWith("-")) cur.lines.push({ kind: "del", text: line.slice(1) });
     else if (line.startsWith("\\")) continue;    // "\ No newline at end of file"
