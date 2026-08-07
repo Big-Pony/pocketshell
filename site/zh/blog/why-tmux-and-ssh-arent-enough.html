@@ -82,7 +82,7 @@
     <tr><td>带自定义按键行的 SSH 客户端</td><td>修饰键和方向键的触屏输入——是终端上面的一层 UI 补丁，不是协议层面的改动</td></tr>
     <tr><td>Termux（仅 Android）</td><td>把整套工具链跑在手机本地——完全是另一个类别，因为根本不存在要连的另一台机器</td></tr>
   </table>
-  <p>这几样各自把差距缩小了一点，但都没补全。mosh 让连接更结实，可它仍然是个没有推送通知概念的终端会话，键盘问题它一点没碰。自定义按键行能让你打出 Ctrl-C，但断线重连之后怎么办、Claude Code 什么时候跑完不看屏幕怎么知道，它都不管。Termux 本身只有 Android 版，但 iOS 上其实有自己的本地 shell 类 App：iSH 在本地跑一套完整的 Alpine Linux 用户态、自带包管理器；a-Shell 是原生终端，内置 Python、Lua、vim、git，两款目前都在 App Store 上架。<span class="src">（<a href="https://apps.apple.com/us/app/ish-shell/id1436902243">来源</a>，App Store）</span><span class="src">（<a href="https://apps.apple.com/us/app/a-shell/id1473805438">来源</a>，App Store）</span> 但它们都是手机本地的沙盒环境，没有一款能连到你开发机上跑着的项目——而这才是这篇文章真正要解决的问题。</p>
+  <p>这几样各自把差距缩小了一点，但都没补全。mosh 让连接更结实，可它仍然是个没有推送通知概念的终端会话，键盘问题它一点没碰。自定义按键行能让你打出 Ctrl-C，但断线重连之后怎么办、Claude Code 什么时候跑完不看屏幕怎么知道，它都不管。Termux 本身只有 Android 版，但 iOS 上其实有自己的本地 shell 类 App：<a href="https://apps.apple.com/us/app/ish-shell/id1436902243">iSH</a> 在本地跑一套完整的 Alpine Linux 用户态、自带包管理器；<a href="https://apps.apple.com/us/app/a-shell/id1473805438">a-Shell</a> 是原生终端，内置 Python、Lua、vim，还有一个 git 客户端（lg2）。但它们都是手机本地的沙盒环境，没有一款能连到你开发机上跑着的项目——而这才是这篇文章真正要解决的问题。</p>
 
   <h2>PocketShell 的不同之处</h2>
   <p>PocketShell 从客户端这一侧、而不是从连接层去补同样这三个差距。它通过加密 WebSocket（Noise IK）直接和自己的 agent 通信，不依赖另外一个 SSH 客户端 App；而且不像 mosh 那样在传输层做丢包恢复，它在应用层做重放：每个会话维护一个连接级的序号和最近输出的环形缓冲区，不管什么原因断线重连——WiFi 切到蜂窝网络也算——都会精确补发你在上次确认位置之后错过的那部分，含缺口检测。输入这一侧有一套独立的触屏键盘，三种可切换布局（经典、分层、Flick），把手机键盘没有的 Ctrl/Alt/Esc/方向键/功能键全补齐，外加一个独立的输入法缓冲区标签页，可以先用系统输入法拼好一整句再一次性发送。因为它直接接入了 Claude Code、Codex、opencode、Kimi CLI 的会话完成钩子，任务跑完或者需要你输入的那一刻就能推送——走 Web Push 或者外发 Webhook，前台后台分别处理——不用自己去轮询屏幕。</p>
