@@ -212,6 +212,37 @@ test("gitReview range 范围同样认出新增文件为 A", () => {
   rmSync(d, { recursive: true, force: true });
 });
 
+test("gitReview range 不传 base 时自动推断基线并标 inferred", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "init");
+  runGit(d, ["branch", "-M", "main"]);
+  runGit(d, ["checkout", "-q", "-b", "feat"]);
+  commit(d, "feat.ts", "mine\n", "my work");
+  const r = gitReview(d, { kind: "range" });
+  expect(r.baseline).toEqual({ base: "main", inferred: true });
+  expect(r.files.map((f) => f.path)).toContain("feat.ts");
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("gitReview range 显式传 base 时 inferred 为 false", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "init");
+  runGit(d, ["branch", "-M", "main"]);
+  runGit(d, ["checkout", "-q", "-b", "feat"]);
+  commit(d, "feat.ts", "mine\n", "my work");
+  const r = gitReview(d, { kind: "range", base: "main" });
+  expect(r.baseline).toEqual({ base: "main", inferred: false });
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("gitReview range 无 base 且无主干候选时 throw no_baseline", () => {
+  const d = repo();
+  commit(d, "a.txt", "one\n", "init");
+  runGit(d, ["branch", "-M", "weird-trunk"]);
+  expect(() => gitReview(d, { kind: "range" })).toThrow(/no_baseline/);
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("gitReview 超 cap 的文件降级为 oversize 且不含正文", () => {
   const d = repo();
   commit(d, "a.txt", "x\n", "init");

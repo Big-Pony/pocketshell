@@ -11,7 +11,15 @@ import {
   planBudget, FILE_LINE_CAP, TOTAL_LINE_BUDGET, type DiffHunk, type DiffFileEntry,
 } from "./git-review-parse";
 
+// range 的 base 可缺省——缺省即"请后端推断主干"（见 inferBaseline）。
+// 调用方（rpc-router）不得用 String(undefined) 补一个 "undefined" 进来。
 export type ReviewScope =
+  | { kind: "worktree"; stage: "all" | "staged" | "unstaged" }
+  | { kind: "commit"; hash: string }
+  | { kind: "range"; base?: string };
+
+/** base 已定下来的 scope。gitReview 内部在跑 git 之前先收窄到这个类型。 */
+export type ResolvedScope =
   | { kind: "worktree"; stage: "all" | "staged" | "unstaged" }
   | { kind: "commit"; hash: string }
   | { kind: "range"; base: string };
@@ -40,7 +48,7 @@ export function hasHead(cwd: string): boolean {
  * 真的去调那个命令。
  */
 export function diffArgs(
-  scope: ReviewScope, hasHeadRef: boolean,
+  scope: ResolvedScope, hasHeadRef: boolean,
 ): { numstat: string[]; body: string[] } | null {
   const R = "--find-renames";
   const pair = (base: string[]) => ({ numstat: [...base, "--numstat", R], body: [...base, R] });
@@ -113,8 +121,15 @@ const UNTRACKED_READ_BYTES = 512 * 1024;
  *   isRepo + hasHead + numstat + body + status（未跟踪补录）
  * 未跟踪文件的正文走 readFileSync 而非 git（见 synthAddedHunk 的注释）。
  */
-export function gitReview(cwd: string, scope: ReviewScope): ReviewResult {
+export function gitReview(cwd: string, rawScope: ReviewScope): ReviewResult {
   if (!isRepo(cwd)) throw new Error("not_a_repo");
+
+  // range 缺 base 就现推一个（inferBaseline 推不出会 throw no_baseline，
+  // 这比让 `git diff undefined...HEAD` 报 bad_revision 有用得多）。
+  const inferred = rawScope.kind === "range" && !rawScope.base;
+  const scope: ResolvedScope = inferred
+    ? { kind: "range", base: inferBaseline(cwd) }
+    : (rawScope as ResolvedScope);
 
   const headExists = scope.kind === "worktree" ? hasHead(cwd) : true;
   const args = diffArgs(scope, headExists);
@@ -187,7 +202,7 @@ export function gitReview(cwd: string, scope: ReviewScope): ReviewResult {
     },
     ...(truncated ? { truncated: true as const } : {}),
     ...(wantStatus ? { counts: countsOf(porcelain) } : {}),
-    ...(scope.kind === "range" ? { baseline: { base: scope.base, inferred: true } } : {}),
+    ...(scope.kind === "range" ? { baseline: { base: scope.base, inferred } } : {}),
   };
 }
 
@@ -239,13 +254,13 @@ function countsOf(rows: { x: string; y: string; isDir: boolean }[]) {
   return { all: rows.length, staged, unstaged };
 }
 
-function revisionError(scope: ReviewScope, stderr: string): string {
+function revisionError(scope: ResolvedScope, stderr: string): string {
   if (scope.kind === "commit") return "bad_revision";
   if (scope.kind === "range") return "bad_revision";
   return stderr.trim().split("\n")[0] || "git_failed";
 }
 
-function titleOf(cwd: string, scope: ReviewScope): string {
+function titleOf(cwd: string, scope: ResolvedScope): string {
   if (scope.kind === "commit") {
     const s = runGit(cwd, ["show", "-s", "--format=%h %s", scope.hash]);
     return s.ok ? s.stdout.trim() : scope.hash;
@@ -257,7 +272,7 @@ function titleOf(cwd: string, scope: ReviewScope): string {
   return "";   // 工作区标题由前端 i18n 给（「全部改动」），后端不塞中文
 }
 
-function subtitleOf(cwd: string, scope: ReviewScope): string {
+function subtitleOf(cwd: string, scope: ResolvedScope): string {
   if (scope.kind === "commit") {
     const s = runGit(cwd, ["show", "-s", "--format=%an · %ad", "--date=relative", scope.hash]);
     return s.ok ? s.stdout.trim() : "";

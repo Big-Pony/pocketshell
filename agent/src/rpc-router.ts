@@ -125,7 +125,13 @@ export const parse = {
     const kind = raw.kind;
     let scope: ReviewScope;
     if (kind === "commit") scope = { kind: "commit", hash: String(raw.hash) };
-    else if (kind === "range") scope = { kind: "range", base: String(raw.base) };
+    // base 缺省是合法请求（让后端推断主干）。这里绝不能 String(undefined)
+    // ——那会变成一个叫 "undefined" 的 revision，报 bad_revision 而不是推断。
+    else if (kind === "range") {
+      scope = typeof raw.base === "string" && raw.base
+        ? { kind: "range", base: raw.base }
+        : { kind: "range" };
+    }
     else {
       const s = raw.stage;
       const stage = s === "staged" || s === "unstaged" ? s : "all";

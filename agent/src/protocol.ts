@@ -149,10 +149,13 @@ export interface TermCaptureResult {
 // 共用同一个结构——它们在 git 层面本就是同一条 diff 换参数。
 //
 // 真相在 agent/src/git-review.ts；这里只是线协议声明，前端逐字镜像。
+// base 可缺省：缺省时后端推断主干（origin/HEAD -> main -> master -> develop），
+// 推断结果连同 inferred:true 一起回在 ReviewResult.baseline 里。都推不出就
+// throw no_baseline，由 UI 弹分支列表请用户手选。
 export type ReviewScope =
   | { kind: "worktree"; stage: "all" | "staged" | "unstaged" }
   | { kind: "commit"; hash: string }
-  | { kind: "range"; base: string };
+  | { kind: "range"; base?: string };
 
 export interface ReviewFile {
   path: string;
