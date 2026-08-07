@@ -260,6 +260,20 @@ test("gitReview 超 cap 的文件降级为 oversize 且不含正文", () => {
   rmSync(d, { recursive: true, force: true });
 });
 
+test("gitReview 超 512KB 的未跟踪文件标 oversize、不整个读进内存", () => {
+  const d = repo();
+  commit(d, "a.txt", "x\n", "init");
+  // 每行 63 字符 + 换行 = 64B，10000 行 = 640KB > UNTRACKED_READ_BYTES
+  const line = "z".repeat(63) + "\n";
+  writeFileSync(join(d, "big.log"), line.repeat(10000));
+  const r = gitReview(d, { kind: "worktree", stage: "all" });
+  const f = r.files.find((x) => x.path === "big.log")!;
+  expect(f.status).toBe("?");
+  expect(f.oversize).toBe(true);
+  expect(f.hunks).toBeUndefined();   // 不能"显示成空内容"，更不能整份读进来
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("gitReview 二进制文件标 binary、不读正文", () => {
   const d = repo();
   commit(d, "a.txt", "x\n", "init");
@@ -291,6 +305,23 @@ test("gitReview 回三档计数供 UI 显示", () => {
   const r = gitReview(d, { kind: "worktree", stage: "all" });
   expect(r.counts!.staged).toBe(1);
   expect(r.counts!.all).toBe(2);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("gitReview 三档计数：已暂存 / 未暂存 / 未跟踪 各归各档", () => {
+  const d = repo();
+  commit(d, "a.txt", "x\n", "init");
+  commit(d, "c.txt", "x\n", "init2");
+  writeFileSync(join(d, "a.txt"), "staged\n");
+  runGit(d, ["add", "a.txt"]);              // 已暂存，工作区干净
+  writeFileSync(join(d, "c.txt"), "dirty\n"); // 只在工作区改，未暂存
+  writeFileSync(join(d, "b.txt"), "new\n");   // 未跟踪
+  const r = gitReview(d, { kind: "worktree", stage: "all" });
+  expect(r.counts!.all).toBe(3);
+  expect(r.counts!.staged).toBe(1);
+  // 未跟踪文件计入 unstaged——与「未暂存」档实际列出的条目一致
+  // （gitReview 在 stage !== "staged" 时会补录未跟踪条目）。
+  expect(r.counts!.unstaged).toBe(2);
   rmSync(d, { recursive: true, force: true });
 });
 

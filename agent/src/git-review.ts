@@ -178,6 +178,9 @@ export function gitReview(cwd: string, rawScope: ReviewScope): ReviewResult {
       files.push({
         path: p.path, status: "?", add: read.add, del: 0,
         ...(read.binary ? { binary: true as const } : {}),
+        // 超读取上限的：add 记不出来（0），planBudget 会当零体量放行，
+        // 所以这里就把 oversize 定死，第 3 步只需别把它擦掉。
+        ...(read.oversize ? { oversize: true as const } : {}),
       });
     }
   }
@@ -186,6 +189,7 @@ export function gitReview(cwd: string, rawScope: ReviewScope): ReviewResult {
   const { keep, truncated } = planBudget(files, TOTAL_LINE_BUDGET, FILE_LINE_CAP);
   for (const f of files) {
     if (f.isDir || f.binary || f.status === "D") continue;  // 这三类本就不传正文
+    if (f.oversize) continue;                                // 第 2 步已判定超读取上限
     if (!keep.has(f.path)) { f.oversize = true; continue; }
     f.hunks = hunkMap.get(f.path)?.hunks ?? untrackedHunks(cwd, f);
   }
@@ -226,20 +230,34 @@ function statusOf(path: string, p: { x: string; y: string } | undefined, diff: M
   return diff.get(path)?.status ?? "M";
 }
 
-function readUntracked(abs: string): { add: number; binary: boolean } {
+/**
+ * 未跟踪文件是否大到不该读。
+ *
+ * **两个读取点（清点用的 readUntracked 与取正文用的 untrackedHunks）
+ * 必须走同一个判据**：只在前者拦、后者不拦的话，超限文件会被记成
+ * add=0，planBudget 认定它体量为零必定保留，随后 untrackedHunks 把
+ * 整个 50MB 读进内存——上限形同虚设。
+ */
+function tooBigUntracked(abs: string): boolean {
+  try { return statSync(abs).size > UNTRACKED_READ_BYTES; } catch { return false; }
+}
+
+function readUntracked(abs: string): { add: number; binary: boolean; oversize: boolean } {
   try {
-    if (statSync(abs).size > UNTRACKED_READ_BYTES) return { add: 0, binary: false };
+    if (tooBigUntracked(abs)) return { add: 0, binary: false, oversize: true };
     const buf = readFileSync(abs);
-    if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) return { add: 0, binary: true };
+    if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) return { add: 0, binary: true, oversize: false };
     const s = synthAddedHunk(buf.toString("utf8"), FILE_LINE_CAP);
-    return { add: s.add, binary: false };
-  } catch { return { add: 0, binary: false }; }
+    return { add: s.add, binary: false, oversize: false };
+  } catch { return { add: 0, binary: false, oversize: false }; }
 }
 
 function untrackedHunks(cwd: string, f: ReviewFile): DiffHunk[] | undefined {
   if (f.status !== "?") return undefined;
+  const abs = join(cwd, f.path);
+  if (tooBigUntracked(abs)) return undefined;
   try {
-    const buf = readFileSync(join(cwd, f.path));
+    const buf = readFileSync(abs);
     if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) return undefined;
     return synthAddedHunk(buf.toString("utf8"), FILE_LINE_CAP).hunks;
   } catch { return undefined; }
