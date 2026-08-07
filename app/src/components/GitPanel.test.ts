@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 import GitPanel from "./GitPanel.svelte";
 
 // 项目根书签存在 localStorage；不设即为 "/"，组件会走 noRoot 分支不渲染面板。
@@ -113,5 +113,107 @@ describe("GitPanel 分支折叠", () => {
     // 和 chip 同处一个 .brs 容器里，才能跟着一起换行
     expect(btn.closest(".brs"), "应与 chip 同排").toBeTruthy();
     expect(container.querySelectorAll("span.br").length, "按钮不该被算成分支").toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Git 审查增强：三个入口（工作区 / 分支相对基线 / 单个 commit）。
+// 入口只负责把 scope 交给 GitReview，range 一档**不传 base**——基线由后端
+// inferBaseline 推断，入口条上的名字只是显示文案。
+// ---------------------------------------------------------------------------
+const BRANCHES = { current: "feat/x", branches: ["feat/x", "main"] };
+const LOG = { commits: [{ hash: "a3f91c2aaa", msg: "refactor: x", author: "Claude", when: "12 分钟前", files: [] }] };
+const STATUS = { files: [{ path: "src/auth.ts", status: "M" }, { path: "b.ts", status: "?" }] };
+const REVIEW = {
+  scope: { kind: "worktree", stage: "all" }, title: "", subtitle: "",
+  files: [{ path: "src/auth.ts", status: "M", add: 4, del: 2, hunks: [] }],
+  totals: { files: 2, add: 142, del: 37 }, counts: { all: 2, staged: 0, unstaged: 2 },
+};
+
+function connStub(extra: Record<string, any> = {}) {
+  return {
+    rpc: vi.fn(async (m: string) => {
+      if (m === "git.branches") return BRANCHES;
+      if (m === "git.log") return LOG;
+      if (m === "git.status") return STATUS;
+      if (m === "git.review") return REVIEW;
+      return {};
+    }),
+    ...extra,
+  } as any;
+}
+
+describe("GitPanel 审查入口", () => {
+  beforeEach(() => {
+    localStorage.setItem("pocketshell.projectRoot", "/proj");
+  });
+
+  it("变更区顶部有「审查全部改动」入口，带文件数", async () => {
+    const { getByText } = render(GitPanel, { props: { conn: connStub(), onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText(/审查全部改动/)).toBeTruthy());
+    await waitFor(() => expect(getByText(/2 个文件/)).toBeTruthy());
+  });
+
+  it("点入口打开全屏审查页，发出 worktree/all 的 rpc", async () => {
+    const conn = connStub();
+    const { getByText, container } = render(GitPanel, { props: { conn, onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText(/审查全部改动/)).toBeTruthy());
+    await fireEvent.click(getByText(/审查全部改动/));
+    await waitFor(() => expect(container.querySelector(".rv")).toBeTruthy());
+    const call = conn.rpc.mock.calls.find((c: any[]) => c[0] === "git.review");
+    expect(call[1].scope).toEqual({ kind: "worktree", stage: "all" });
+  });
+
+  it("分支区有「本分支相对 main」入口，点开发 range scope 且不带 base", async () => {
+    const conn = connStub();
+    const { getByText } = render(GitPanel, { props: { conn, onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText(/本分支相对/)).toBeTruthy());
+    await fireEvent.click(getByText(/本分支相对/));
+    await waitFor(() => {
+      const call = conn.rpc.mock.calls.find((c: any[]) => c[0] === "git.review");
+      expect(call[1].scope).toEqual({ kind: "range" });
+    });
+  });
+
+  it("入口条上的基线名取本地猜测，仅作显示", async () => {
+    const { getByText } = render(GitPanel, { props: { conn: connStub(), onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText("本分支相对 main")).toBeTruthy());
+  });
+
+  it("点历史里的 commit 打开该提交的审查页", async () => {
+    const conn = connStub();
+    const { getByText } = render(GitPanel, { props: { conn, onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText(/refactor: x/)).toBeTruthy());
+    await fireEvent.click(getByText(/refactor: x/));
+    await waitFor(() => {
+      const call = conn.rpc.mock.calls.find((c: any[]) => c[0] === "git.review");
+      expect(call[1].scope).toEqual({ kind: "commit", hash: "a3f91c2aaa" });
+    });
+  });
+
+  it("单文件点击仍走 onOpenDiff（旧习惯不打断）", async () => {
+    const onOpenDiff = vi.fn();
+    const { getByText } = render(GitPanel, { props: { conn: connStub(), onOpenDiff } });
+    await waitFor(() => expect(getByText("src/auth.ts")).toBeTruthy());
+    await fireEvent.click(getByText("src/auth.ts"));
+    expect(onOpenDiff).toHaveBeenCalledWith("/proj/src/auth.ts");
+  });
+
+  it("审查页返回后回到面板", async () => {
+    const { getByText, container } = render(GitPanel, { props: { conn: connStub(), onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText(/审查全部改动/)).toBeTruthy());
+    await fireEvent.click(getByText(/审查全部改动/));
+    await waitFor(() => expect(container.querySelector(".rv")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".rv-back")!);
+    await waitFor(() => expect(container.querySelector(".rv")).toBeNull());
+  });
+
+  it("进过一次审查页后，入口条回填 +X −Y", async () => {
+    const { getByText, container } = render(GitPanel, { props: { conn: connStub(), onOpenDiff: () => {} } });
+    await waitFor(() => expect(getByText(/审查全部改动/)).toBeTruthy());
+    await fireEvent.click(getByText(/审查全部改动/));
+    await waitFor(() => expect(container.querySelector(".rv")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".rv-back")!);
+    await waitFor(() => expect(getByText(/\+142/)).toBeTruthy());
   });
 });

@@ -4,6 +4,8 @@
   import { Connection } from "../lib/net/connection";
   import { loadProjectRoot } from "../lib/ui/file-tree";
   import { orderBranches, visibleBranches, BRANCH_LIMIT } from "../lib/ui/branch-list";
+  import GitReview from "./GitReview.svelte";
+  import type { ReviewScope } from "../lib/net/protocol";
 
   let { conn, onOpenDiff }: { conn: Connection; onOpenDiff: (path: string) => void } = $props();
 
@@ -14,8 +16,33 @@
   let changes = $state<{ path: string; status: string }[]>([]);
   let limit = $state(30);
   let notice = $state("");
-  let expanded = $state<string | null>(null);
   let refreshing = $state(false);
+
+  // 全屏审查页。null = 未打开。GitReview 自带 position:fixed，
+  // 所以在这里内联渲染即可盖满视口，不用改 App.svelte 的挂载结构。
+  let reviewScope = $state<ReviewScope | null>(null);
+
+  // 入口条上的 +X −Y：现有 RPC 拿不到，**不为它新增请求**。
+  // 用户进过一次审查页后用手上的 totals 回填——为一个装饰性数字
+  // 多打一次 git 不划算，而"进过一次就有了"没有欺骗性。
+  let wtTotals = $state<{ files: number; add: number; del: number } | null>(null);
+  let rangeTotals = $state<{ files: number; add: number; del: number } | null>(null);
+
+  // 基线名：分支列表里按 main > master > develop 优先取，都没有就退到列表
+  // 第一个非当前分支。**只用于入口条的显示文案**——真正的基线由后端
+  // inferBaseline 推断（scope 里不传 base），审查页里显示的是响应回来的
+  // baseline.base。前端猜错也只是入口条上的一个词，不会导致拉错 diff。
+  const baseGuess = $derived(
+    ["main", "master", "develop"].find((b) => branches.branches.includes(b))
+      ?? branches.branches.find((b) => b !== branches.current)
+      ?? "main",
+  );
+
+  function openReview(s: ReviewScope) { reviewScope = s; }
+  function closeReview() { reviewScope = null; }
+  function onReviewTotals(t: { files: number; add: number; del: number }) {
+    if (reviewScope?.kind === "range") rangeTotals = t; else wtTotals = t;
+  }
 
   // 折叠态**不持久化**：折叠是视觉降噪而非用户偏好，且 refresh() 后分支集合
   // 可能已变，记住「展开过」没有意义。
@@ -82,9 +109,23 @@
         {/if}
       </div>
       <div class="tip">{$t('git.branchTip')}</div>
+      <!-- range 一档不传 base：由后端 inferBaseline 推断，baseGuess 只是文案。 -->
+      <button class="rv-entry rv-entry2" onclick={() => openReview({ kind: "range" })}>
+        <span class="ic">⇄</span> {$t('git.review.entryRange', { values: { base: baseGuess } })}
+        {#if rangeTotals}<span class="sub mono">{$t('git.review.entryFiles', { values: { n: rangeTotals.files } })}</span>{/if}
+      </button>
     </div>
     <div class="sec">
       <div class="st">{$t('git.changes')}</div>
+      {#if changes.length}
+        <button class="rv-entry" onclick={() => openReview({ kind: "worktree", stage: "all" })}>
+          <span class="ic">◈</span> {$t('git.review.entryAll')}
+          <span class="sub mono">
+            {$t('git.review.entryFiles', { values: { n: changes.length } })}
+            {#if wtTotals}<span class="p">+{wtTotals.add}</span> <span class="d">−{wtTotals.del}</span>{/if}
+          </span>
+        </button>
+      {/if}
       {#each changes as c}
         <button class="chg" onclick={() => onOpenDiff((root === "/" ? "" : root) + "/" + c.path)}>
           <span class="g g-{c.status}" title={c.status} aria-label={c.status} role="img"></span><span class="cp mono">{c.path}</span>
@@ -95,18 +136,20 @@
     <div class="sec">
       <div class="st">{$t('git.history')}</div>
       {#each commits as c}
-        <button class="cm" onclick={() => (expanded = expanded === c.hash ? null : c.hash)}>
+        <button class="cm" onclick={() => openReview({ kind: "commit", hash: c.hash })}>
           <span class="h mono">{c.hash.slice(0, 7)}</span><span class="m">{c.msg}</span>
+          <span class="arrow">›</span>
           <span class="meta">{c.author} · {c.when}</span>
         </button>
-        {#if expanded === c.hash}
-          <div class="files">{#each c.files as f}<div class="cf mono">{f.path} <em>+{f.add} -{f.del}</em></div>{/each}</div>
-        {/if}
       {/each}
       <button class="more" onclick={loadMore}>{$t('git.loadMore')}</button>
     </div>
   {/if}
 </div>
+
+{#if reviewScope}
+  <GitReview {conn} cwd={root} scope={reviewScope} onClose={closeReview} onTotals={onReviewTotals} />
+{/if}
 
 <style>
   .git { height: 100%; overflow-y: auto; padding: 8px 10px; font-size: 0.72rem; }
@@ -144,8 +187,22 @@
   .cm { flex-wrap: wrap; border-bottom: 1px solid var(--line); }
   .h { color: var(--accent); } .m { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { color: var(--dimmer); font-size: 0.62rem; width: 100%; }
-  .files { padding: 2px 0 6px 14px; } .cf em { color: var(--dim); font-style: normal; }
   .more { color: var(--accent); justify-content: center; }
+
+  /* 审查入口条：worktree 那条用主色底强调（这是最常用的入口），
+     range 那条走普通边框，避免两条都在喊 */
+  .rv-entry {
+    display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 10px;
+    background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: var(--radius-md); color: var(--text); font-size: 0.74rem; margin: 8px 0 4px;
+  }
+  .rv-entry2 { background: transparent; border-color: var(--line); }
+  .rv-entry .ic { color: var(--accent); }
+  .rv-entry .sub { margin-left: auto; color: var(--dim); font-size: 0.66rem; }
+  .rv-entry .sub .p { color: var(--ok); }
+  .rv-entry .sub .d { color: var(--red); }
+  .mono { font-family: var(--font-mono); }
+  .cm .arrow { color: var(--dimmer); }
   /* 展开/收起：与分支 chip 同款（.br 已给出边框、圆角、内边距），只把文字
      换成亮色以区分「操作」与「分支名」。button 的 UA 默认样式要显式抹平，
      否则和同排的 span 对不齐。 */
