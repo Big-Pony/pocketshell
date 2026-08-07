@@ -5,10 +5,15 @@
   import type { ReviewScope, ReviewResult, ReviewFile } from "../lib/net/protocol";
   import { shouldFold, reviewCacheKey, bodyState } from "../lib/ui/git-review";
 
-  let { conn, cwd, scope, onClose, onTotals }: {
+  /** 超过这个时长仍未返回就提示"正在读取较大的改动…"。不是进度，只是告诉
+      用户没卡死——rpcDeadlineMs 下大 diff 的死线可达数分钟。 */
+  const SLOW_MS = 5000;
+
+  let { conn, cwd, scope, onClose, onTotals, onPickBaseline = () => {} }: {
     conn: Connection; cwd: string; scope: ReviewScope;
     onClose: () => void;
     onTotals?: (t: { files: number; add: number; del: number }) => void;
+    onPickBaseline?: () => void;
   } = $props();
 
   let data = $state<ReviewResult | null>(null);
@@ -21,20 +26,40 @@
 
   const cache = new Map<string, ReviewResult>();
 
-  async function load(s: ReviewScope) {
+  // 当前生效的 scope（切档改这个，props.scope 只作初值）。
+  let cur = $state<ReviewScope>(scope);
+  let refreshing = $state(false);
+  let slow = $state(false);
+  let slowTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const isWorktree = $derived(cur.kind === "worktree");
+  const curStage = $derived(cur.kind === "worktree" ? cur.stage : "all");
+
+  function clearSlow() {
+    slow = false;
+    if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; }
+  }
+
+  async function load(s: ReviewScope, opts: { refresh?: boolean } = {}) {
     const key = reviewCacheKey(s);
-    const hit = cache.get(key);
+    const hit = opts.refresh ? undefined : cache.get(key);
     if (hit) { apply(hit); return; }          // 命中缓存：不进 loading 态
-    loading = true; error = "";
+
+    // 刷新保留旧内容（旧数据仍有参考价值），首次/切档进骨架屏。
+    if (opts.refresh) refreshing = true; else loading = true;
+    error = "";
+    clearSlow();
+    slowTimer = setTimeout(() => (slow = true), SLOW_MS);
     try {
       const r = (await conn.rpc("git.review", { cwd, scope: s })) as ReviewResult;
       cache.set(key, r);
       apply(r);
     } catch (e: any) {
       error = errText(e);
-      data = null;
+      if (!opts.refresh) data = null;   // 刷新失败时旧内容留着
     } finally {
-      loading = false;
+      loading = false; refreshing = false;
+      clearSlow();
     }
   }
 
@@ -58,7 +83,19 @@
     opened = { ...opened, [f.path]: !opened[f.path] };
   }
 
-  $effect(() => { void load(scope); });
+  function pick(stage: "all" | "staged" | "unstaged") {
+    cur = { kind: "worktree", stage };   // $effect 会跟着重拉
+  }
+
+  function refresh() {
+    if (refreshing) return;
+    cache.clear();                        // ⟳ 的语义就是"我怀疑全都旧了"
+    void load(cur, { refresh: true });
+  }
+
+  function retry() { void load(cur); }
+
+  $effect(() => { void load(cur); });
 </script>
 
 <div class="rv">
@@ -69,6 +106,7 @@
         <span class="tt">{data?.title || $t('git.review.titleWorktree')}</span>
         <div class="kind">{data?.subtitle || $t('git.review.subtitleWorktree')}</div>
       </div>
+      <button class="rv-rf" aria-label={$t('git.refresh')} disabled={refreshing} class:spin={refreshing} onclick={refresh}>⟳</button>
     </div>
     {#if data}
       <div class="rv-sum mono">
@@ -77,13 +115,37 @@
         <span class="minus">−{data.totals.del}</span>
       </div>
     {/if}
+    {#if isWorktree}
+      <div class="segs">
+        {#each (["all", "staged", "unstaged"] as const) as s}
+          <button class="seg" class:on={curStage === s} onclick={() => pick(s)}>
+            {s === "all" ? $t('git.review.segAll') : s === "staged" ? $t('git.review.segStaged') : $t('git.review.segUnstaged')}
+            {#if data?.counts}<span class="n mono">{data.counts[s]}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+    <!-- 基线名一律取自响应体：前端不猜基线（scope 里不带 base），
+         由后端 inferBaseline 决定并回在 baseline 里。 -->
+    {#if cur.kind === "range" && data?.baseline}
+      <div class="baseline">
+        {$t('git.review.baselineLabel')}
+        <button class="bl mono" onclick={onPickBaseline}>{data.baseline.base}</button>
+        {#if data.baseline.inferred}<span class="bi">（{$t('git.review.baselineInferred')}）</span>{/if}
+      </div>
+    {/if}
   </div>
 
   <div class="rv-body">
     {#if error}
-      <div class="err">{error}</div>
-    {:else if loading}
-      <div class="sk">loading</div>
+      <div class="err">{error}<button class="retry" onclick={retry}>{$t('git.review.retry')}</button></div>
+    {/if}
+    {#if loading && !error}
+      {#each [0, 1, 2, 3] as _i}
+        <div class="sk-file"></div>
+        {#each [0, 1] as _j}<div class="sk-line"></div>{/each}
+      {/each}
+      {#if slow}<div class="note center">{$t('git.review.loadingSlow')}</div>{/if}
     {:else if data && data.files.length === 0}
       <div class="empty">{$t('git.review.noChanges')}</div>
     {:else if data}
@@ -175,4 +237,34 @@
   .err, .empty { padding: 16px 12px; color: var(--dim); font-size: 0.7rem; text-align: center; }
   .err { color: var(--amber); }
   .end { padding: 16px 12px 8px; text-align: center; color: var(--dimmer); font-size: 0.64rem; }
+
+  .rv-rf {
+    background: transparent; border: 1px solid var(--line); border-radius: var(--radius-md);
+    color: var(--text); min-width: 28px; height: 24px; font-size: 0.72rem; line-height: 1; flex: 0 0 auto;
+  }
+  .rv-rf:disabled { opacity: 0.45; }
+  .rv-rf.spin { animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .segs { display: flex; margin: 0 10px 8px; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+  .seg { flex: 1; background: transparent; border: 0; border-right: 1px solid var(--line); color: var(--dim); padding: 6px 0; font-size: 0.68rem; }
+  .seg:last-child { border-right: 0; }
+  .seg.on { background: var(--accent-soft); color: var(--accent); }
+  .seg .n { font-size: 0.6rem; opacity: 0.75; }
+
+  .baseline { display: flex; align-items: center; gap: 6px; margin: 0 10px 8px; font-size: 0.66rem; color: var(--dim); }
+  .bl { background: transparent; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); font-size: 0.66rem; padding: 2px 7px; }
+  .bi { color: var(--dimmer); }
+
+  /* 骨架屏：比转圈更能传达"这里将是一列文件"，也避免高度塌陷导致的跳动 */
+  .sk-file { height: 30px; margin-bottom: 2px; background: var(--panel); opacity: 0.6; animation: breathe 1.4s ease-in-out infinite alternate; }
+  .sk-line { height: 14px; margin: 3px 10px; background: var(--line); border-radius: 3px; animation: breathe 1.4s ease-in-out infinite alternate; }
+  @keyframes breathe { from { opacity: 0.35; } to { opacity: 0.75; } }
+
+  /* 前庭障碍用户把动画全关掉，只留静态灰块 */
+  @media (prefers-reduced-motion: reduce) {
+    .sk-file, .sk-line, .rv-rf.spin { animation: none; }
+  }
+
+  .retry { display: block; margin: 10px auto 0; background: transparent; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--accent); font-size: 0.68rem; padding: 5px 14px; }
 </style>

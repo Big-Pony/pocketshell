@@ -116,3 +116,118 @@ describe("GitReview 长流渲染", () => {
     await waitFor(() => expect(onTotals).toHaveBeenCalledWith({ files: 5, add: 3424, del: 42 }));
   });
 });
+
+describe("GitReview 三档与加载态", () => {
+  it("工作区范围显示三档并带计数", async () => {
+    const { container, getByText } = render(GitReview, { props: props() });
+    await waitFor(() => {
+      expect(container.querySelectorAll(".seg").length).toBe(3);
+      expect(getByText(/已暂存/).textContent).toContain("1");
+    });
+  });
+
+  it("commit 范围不显示三档", async () => {
+    const r: ReviewResult = { ...RESULT, scope: { kind: "commit", hash: "a1" }, counts: undefined };
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(r), scope: { kind: "commit", hash: "a1" } }),
+    });
+    await waitFor(() => expect(container.querySelector(".rv-body")).toBeTruthy());
+    expect(container.querySelectorAll(".seg").length).toBe(0);
+  });
+
+  // scope 不带 base（前端不猜基线，交给后端 inferBaseline），基线行显示的
+  // 名字必须来自响应体的 baseline.base，而不是请求里的任何东西。
+  it("range 范围显示基线行且标注自动推断（基线名取自响应）", async () => {
+    const r: ReviewResult = {
+      ...RESULT, scope: { kind: "range" },
+      counts: undefined, baseline: { base: "main", inferred: true },
+    };
+    const { getByText } = render(GitReview, {
+      props: props({ conn: connStub(r), scope: { kind: "range" } }),
+    });
+    await waitFor(() => {
+      expect(getByText("main")).toBeTruthy();
+      expect(getByText(/自动推断/)).toBeTruthy();
+    });
+  });
+
+  it("切档发出带新 stage 的 rpc", async () => {
+    const conn = connStub();
+    const { container } = render(GitReview, { props: props({ conn }) });
+    await waitFor(() => expect(container.querySelectorAll(".seg").length).toBe(3));
+    await fireEvent.click(container.querySelectorAll(".seg")[1]);
+    await waitFor(() => {
+      const last = conn.rpc.mock.calls.at(-1);
+      expect(last[1].scope).toEqual({ kind: "worktree", stage: "staged" });
+    });
+  });
+
+  it("P4: 切回已拉过的档不再发 rpc", async () => {
+    const conn = connStub();
+    const { container } = render(GitReview, { props: props({ conn }) });
+    await waitFor(() => expect(container.querySelectorAll(".seg").length).toBe(3));
+    await fireEvent.click(container.querySelectorAll(".seg")[1]);   // -> staged
+    await waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(2));
+    await fireEvent.click(container.querySelectorAll(".seg")[0]);   // -> all（已缓存）
+    await new Promise((r) => setTimeout(r, 30));
+    expect(conn.rpc).toHaveBeenCalledTimes(2);                      // 没有第三次
+  });
+
+  it("首次加载显示骨架屏，顶栏同时已渲染", async () => {
+    const { container } = render(GitReview, { props: props({ conn: connStub(RESULT, 50) }) });
+    expect(container.querySelector(".rv-back")).toBeTruthy();       // 顶栏立刻在
+    expect(container.querySelectorAll(".sk-file").length).toBeGreaterThan(0);
+    await waitFor(() => expect(container.querySelectorAll(".sk-file").length).toBe(0));
+  });
+
+  it("切档未命中缓存时三档栏不被卸载，被点档位立即高亮", async () => {
+    const { container } = render(GitReview, { props: props({ conn: connStub(RESULT, 50) }) });
+    await waitFor(() => expect(container.querySelectorAll(".seg").length).toBe(3));
+    await fireEvent.click(container.querySelectorAll(".seg")[2]);   // -> unstaged
+    expect(container.querySelectorAll(".seg").length).toBe(3);      // 还在
+    expect(container.querySelectorAll(".seg")[2].className).toContain("on");
+    expect(container.querySelectorAll(".sk-file").length).toBeGreaterThan(0);
+  });
+
+  it("刷新时保留旧内容、按钮 disabled", async () => {
+    const { container } = render(GitReview, { props: props({ conn: connStub(RESULT, 50) }) });
+    await waitFor(() => expect(container.querySelector('[data-head="src/auth.ts"]')).toBeTruthy());
+    await fireEvent.click(container.querySelector(".rv-rf")!);
+    expect(container.querySelector('[data-head="src/auth.ts"]')).toBeTruthy();  // 旧内容还在
+    expect(container.querySelector(".rv-rf")!.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("失败时显示错误 + 重试，顶栏返回仍可用", async () => {
+    const conn = { rpc: vi.fn(async () => { throw new Error("rpc_error: boom"); }) } as any;
+    const onClose = vi.fn();
+    const { container, getByText } = render(GitReview, { props: props({ conn, onClose }) });
+    await waitFor(() => expect(getByText("重试")).toBeTruthy());
+    expect(container.querySelectorAll(".sk-file").length).toBe(0);   // 骨架屏被替换而非叠加
+    await fireEvent.click(container.querySelector(".rv-back")!);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("重试重新发起 rpc", async () => {
+    let fail = true;
+    const conn = { rpc: vi.fn(async () => { if (fail) throw new Error("boom"); return RESULT; }) } as any;
+    const { getByText, container } = render(GitReview, { props: props({ conn }) });
+    await waitFor(() => expect(getByText("重试")).toBeTruthy());
+    fail = false;
+    await fireEvent.click(getByText("重试"));
+    await waitFor(() => expect(container.querySelector('[data-head="src/auth.ts"]')).toBeTruthy());
+  });
+
+  it("超过 5 秒显示慢链路提示", async () => {
+    vi.useFakeTimers();
+    try {
+      const conn = { rpc: vi.fn(() => new Promise(() => {})) } as any;  // 永不 resolve
+      const { queryByText, getByText } = render(GitReview, { props: props({ conn }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queryByText("正在读取较大的改动…")).toBeNull();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(getByText("正在读取较大的改动…")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
