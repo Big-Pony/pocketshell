@@ -70,7 +70,7 @@
   <h2>Three paths</h2>
 
   <h3>1. The official Claude app</h3>
-  <p>On an iPad, you install the same iOS app you'd put on an iPhone. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span> From there you're using either Cloud sessions or Remote Control, same as on a phone. It's the lowest-friction option if you already have an Anthropic account at the right plan tier — no separate SSH setup, no server address to remember.</p>
+  <p>On an iPad, you install the same iOS app you'd put on an iPhone. <span class="src">(<a href="https://code.claude.com/docs/en/mobile">Source</a>: official docs)</span> From there you're using either Cloud sessions or Remote Control, same as on a phone. It's the lowest-friction option if you already have an Anthropic account at the right plan tier — no separate SSH setup, no server address to remember.</p>
 
   <h3>2. An SSH client + tmux</h3>
   <p>iPad SSH clients like Blink or Termius connect straight to a dev machine you already have running <code>claude</code> inside <code>tmux</code>. This gets you the real terminal experience — actual keybindings, actual scrollback, nothing translated through a mobile UI layer.</p>
@@ -81,7 +81,7 @@
   <h2>Where each one runs into a wall</h2>
   <table>
     <tr><th>Path</th><th>Where it falls short</th></tr>
-    <tr><td>Official app</td><td>Runs the same layout as the iPhone version; Remote Control still requires your own computer to stay powered on and running Claude Code or Claude Desktop — if the machine's off, you need Cloud sessions instead <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></td></tr>
+    <tr><td>Official app</td><td>Runs the same layout as the iPhone version; Remote Control still requires your own computer to stay powered on and running Claude Code or Claude Desktop — if the machine's off, you need Cloud sessions instead <span class="src">(<a href="https://code.claude.com/docs/en/mobile">Source</a>: official docs)</span></td></tr>
     <tr><td>SSH client</td><td>You manage session persistence yourself (see our <a href="/blog/keep-claude-code-running-after-ssh-disconnect">piece on surviving SSH disconnects</a>), there's no built-in push notification, and pure keyboard-driven workflows — especially modifier keys like Ctrl and Esc — aren't naturally comfortable on a touchscreen without an external keyboard or a client that adds its own function row</td></tr>
     <tr><td>VNC / remote desktop</td><td>Higher latency, higher data usage, and you're operating an entire computer's interface rather than something purpose-built for a touch display</td></tr>
   </table>

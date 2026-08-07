@@ -65,8 +65,8 @@
   <p class="lede">Remote Control shows a gray icon, or your phone just spins with no output. It's usually not a bug — it's one of three specific things that killed the local process. Here's how to tell which, and what to do about each.</p>
 
   <h2>The quick answer</h2>
-  <p>If Remote Control worked yesterday and today it just hangs, the single most likely cause is: your laptop lost network for roughly ten minutes or more, and the Remote Control session timed out and exited. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span> That's documented, expected behavior — not a bug. The fix is to go back to the machine and run <code>claude remote-control</code> again.</p>
-  <p>Remote Control is currently a research preview available on Pro, Max, Team, and Enterprise plans (Team and Enterprise have it off by default until an org owner enables it). <span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span> If that timeout isn't your situation, the table below covers the other two common causes.</p>
+  <p>If Remote Control worked yesterday and today it just hangs, the single most likely cause is: your laptop lost network for roughly ten minutes or more, and the Remote Control session timed out and exited. <span class="src">(<a href="https://code.claude.com/docs/en/remote-control#limitations">Source</a>: official docs)</span> That's documented, expected behavior — not a bug. The fix is to go back to the machine and run <code>claude remote-control</code> again.</p>
+  <p>Remote Control is currently a research preview available on Pro, Max, Team, and Enterprise plans (Team and Enterprise have it off by default until an org owner enables it). <span class="src">(<a href="https://code.claude.com/docs/en/remote-control">Source</a>: official docs)</span> If that timeout isn't your situation, the table below covers the other two common causes.</p>
 
   <h2>Three things that kill a Remote Control session</h2>
   <table>
@@ -74,31 +74,31 @@
     <tr>
       <td>Network timeout</td>
       <td>Icon goes from green to gray; no new output at all, indefinitely</td>
-      <td>After roughly 10 minutes without network, the session times out and the local <code>claude</code> process exits <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></td>
+      <td>After roughly 10 minutes without network, the session times out and the local <code>claude</code> process exits <span class="src">(<a href="https://code.claude.com/docs/en/remote-control#limitations">Source</a>: official docs)</span></td>
     </tr>
     <tr>
       <td>Process killed</td>
       <td>Same symptom, but it happened right after you closed a terminal window, quit VS Code, or your laptop went to sleep</td>
-      <td>Remote Control is a local process. Close the terminal or editor it's attached to and the process dies with it — there's nothing left for your phone to talk to <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></td>
+      <td>Remote Control is a local process. Close the terminal or editor it's attached to and the process dies with it — there's nothing left for your phone to talk to <span class="src">(<a href="https://code.claude.com/docs/en/remote-control#limitations">Source</a>: official docs)</span></td>
     </tr>
     <tr>
       <td>Machine still waking up</td>
-      <td>Spins for 10–30 seconds right after you open the laptop, then recovers on its own</td>
-      <td>The laptop just woke from sleep; reconnect is still catching up</td>
+      <td>Spins right after you open the laptop, then reconnects on its own once your machine is back online</td>
+      <td>The laptop just woke from sleep — Remote Control reconnects automatically when your machine comes back online <span class="src">(<a href="https://code.claude.com/docs/en/remote-control#limitations">Source</a>: official docs)</span></td>
     </tr>
   </table>
 
   <h2>Fixes that don't need anything extra</h2>
   <ul>
     <li><strong>Just restart it.</strong> Go back to the terminal and run <code>claude remote-control</code> again — this covers both the timeout and the process-killed case.</li>
-    <li><strong>Run it inside <code>tmux</code> or <code>screen</code>.</strong> Anthropic's own docs recommend starting Remote Control inside a terminal multiplexer specifically so closing your terminal window doesn't kill the underlying process. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></li>
+    <li><strong>Run it inside <code>tmux</code> or <code>screen</code>.</strong> Anthropic's own docs recommend starting Remote Control inside a terminal multiplexer specifically so closing your terminal window doesn't kill the underlying process. <span class="src">(<a href="https://code.claude.com/docs/en/remote-control#limitations">Source</a>: official docs)</span></li>
     <li><strong>Keep the machine from sleeping.</strong> <code>caffeinate</code> on macOS before you leave, or disable sleep in power settings.</li>
     <li><strong>Fall back to a phone hotspot</strong> if your home or office WiFi drops often — it won't remove the 10-minute timeout, but it cuts how often you actually hit it.</li>
   </ul>
 
   <h2>Where these fixes fall short</h2>
   <p>Wrapping the process in <code>tmux</code> keeps it <em>alive</em>, but your phone doesn't automatically reattach to it — you may still need to run <code>claude remote-control --continue</code> by hand once you're back. Keeping a laptop from sleeping is easy at a desk and awkward on a plane, and closing the lid on most laptops forces sleep regardless of what your power settings say. A hotspot helps with flaky WiFi but does nothing once you're somewhere with no signal at all for more than ten minutes.</p>
-  <p>If the real goal is "the machine can be off entirely," Remote Control isn't built for that — Anthropic's own docs point you to Cloud sessions instead, which execute on Anthropic's infrastructure rather than your laptop. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span> None of the fixes above change that; they all still assume your machine is on.</p>
+  <p>If the real goal is "the machine can be off entirely," Remote Control isn't built for that — Anthropic's own docs point you to Cloud sessions instead, which execute on Anthropic's infrastructure rather than your laptop. <span class="src">(<a href="https://code.claude.com/docs/en/mobile">Source</a>: official docs)</span> None of the fixes above change that; they all still assume your machine is on.</p>
 
   <h2>If what you want is no timeout and no manual restart</h2>
   <p>Every fix above manages a process that can still die — it just makes that less likely, or makes you the one who has to notice when it happened. If you want a session that survives an arbitrary amount of offline time and reconnects itself without a manual step, that calls for a different architecture, not a longer timeout.</p>

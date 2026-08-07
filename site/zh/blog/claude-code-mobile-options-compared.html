@@ -71,7 +71,7 @@
     <tr><td>想把任务丢给 Desktop，过会儿再回来看结果</td><td>下文 Dispatch</td></tr>
     <tr><td>想要一个专门为 Claude Code 做的自托管 Web 界面</td><td>下文 CloudCLI（自托管或云端版）</td></tr>
     <tr><td>已经有 SSH 能用，只想要个纯终端</td><td>下文 SSH 客户端 + tmux</td></tr>
-    <tr><td>想要手机原生触屏键盘、断线重放、推送通知，且要自托管</td><td>下文 PocketShell</td></tr>
+    <tr><td>想要手机原生触屏键盘、断线重放、推送通知，且要自托管</td><td>一款自托管、手机原生的终端客户端（下文）</td></tr>
   </table>
   <p>如果上面几条都不太对，接着往下看——对比表后面那三条，讲的是"什么都别自建"更合适的场景。</p>
 
@@ -90,7 +90,7 @@
   <h2>CloudCLI（claudecodeui）：专门做的自托管 Web 界面</h2>
   <p><a href="https://github.com/siteboon/claudecodeui" target="_blank" rel="noopener">CloudCLI</a> 是一个开源 Web 界面，接到你自己的机器上，AGPL-3.0-or-later 协议，截至今天 13.2k star、1.8k fork。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库，2026-08-07 复查）</span> 它是本文所在这个自托管 Web 层思路最直接的同类项，而且覆盖范围比单一工具更广——同一个界面下还能驱动 Codex CLI、Cursor CLI 等其他编码 agent。</p>
   <p>自托管需要 Node.js v22+，如果想从局域网外访问，还得自己配反向代理做 HTTPS。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> 现在也有托管版本：商用的 CloudCLI Cloud 已经上线——README 的 Quick Start 里排在第一位，标着"(Recommended)"，起价 €7/月，FAQ 里写得很直白：合上笔记本，agent 照样继续跑。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> 这是任何自托管方案——包括 PocketShell——在定义上都做不到的事：自托管就需要有台机器跑它的 agent。</p>
-  <p>项目目前有 103 个 open issue，其中两个明确和手机端有关：一个是 iOS Safari 上聊天的流式响应容易丢（#554）；另一个是 v1.35.1 版本下，iOS 切到后台之后 shell 终端会静默冻结，而聊天区还在照常更新（#953）。<span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/554">来源</a>，他人报告，我们未复现）</span> <span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/953">来源</a>，他人报告，我们未复现）</span> 这些是一个活跃项目里正在跟进的 issue，不是给这个工具下"能不能用"的结论——一个年轻且还在积极维护的项目有公开的手机端 bug 报告，是正常状态，不是否决理由。</p>
+  <p>项目目前有 103 个 open issue，其中两个正是本文接下来要讨论的：一个是 iOS Safari 上聊天的流式响应容易丢（#554）；另一个是 v1.35.1 版本下，iOS 切到后台之后 shell 终端会静默冻结，而聊天区还在照常更新（#953）。<span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/554">来源</a>，他人报告，我们未复现）</span> <span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/953">来源</a>，他人报告，我们未复现）</span> 这些是一个活跃项目里正在跟进的 issue，不是给这个工具下"能不能用"的结论——一个年轻且还在积极维护的项目有公开的手机端 bug 报告，是正常状态，不是否决理由。</p>
 
   <h2>裸 SSH 客户端 + tmux</h2>
   <p>如果你已经有一台能 SSH 上去的机器，依赖最少的路径就是用手机 SSH 客户端（Termius、Blink、JuiceSSH）直接连进一个已经跑着 <code>claude</code> 的 <code>tmux</code> 会话。这是这份清单里最灵活的选项——服务器端不用额外装任何东西——但也是最靠手动的：任务跑完不会推送通知，没有为触屏优化过的 Ctrl/Alt/Esc 按键行，会话名字得自己记、断线了得自己重连。</p>

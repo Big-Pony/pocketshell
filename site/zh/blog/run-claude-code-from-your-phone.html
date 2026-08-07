@@ -70,24 +70,24 @@
   <h2>官方 Claude App</h2>
   <p>如果你已经有对应订阅层级的 Anthropic 账号，这是门槛最低的起点。它包含两种不同模式：Cloud sessions 把任务跑在 Anthropic 自己的基础设施上，所以你的笔记本可以完全关机；Remote Control 则是驱动一个已经在你自己机器上跑着的 Claude Code 会话，这意味着它多依赖了一层——你机器的在线状态和网络。<span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></p>
   <p>Remote Control 目前是研究预览版，而且因为绑定的是一个正在跑的本地进程，它有实实在在的限制：断网大约十分钟以上会话就超时；关掉它所在的终端或编辑器窗口，进程也跟着没了。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></p>
-  <p>详见 → <a href="/blog/claude-code-remote-control-not-working">具体是哪三件事会弄死一个 Remote Control 会话，以及各自怎么修</a>，以及 <a href="/blog/claude-code-notification-when-done">怎么在官方 App 上不用死盯着终端就能收到通知</a>。</p>
+  <p>详见 → <a href="/zh/blog/claude-code-remote-control-not-working">具体是哪三件事会弄死一个 Remote Control 会话，以及各自怎么修</a>，以及 <a href="/zh/blog/claude-code-notification-when-done">怎么在官方 App 上不用死盯着终端就能收到通知</a>。</p>
 
   <h2>CloudCLI（claudecodeui）：专门做的自托管 Web 界面</h2>
   <p>如果你完全不想依赖 Anthropic 的账号订阅层级，CloudCLI 是一个接到你自己机器上的开源 Web 界面——是这个方向上最成熟的自托管替代品，还在积极维护，而且同一个仪表盘还能驱动 Claude Code 之外的其他编码 agent。现在也有托管版本了，所以"机器必须一直开着"并不是整个 CloudCLI 项目的硬性要求，只是它自托管模式的要求。</p>
-  <p>详见 → <a href="/blog/claude-code-ui-mobile-session-freeze">CloudCLI 两个已知的手机端问题，各自的触发条件，以及一个不同架构如何避开同样的失败模式</a>。</p>
+  <p>详见 → <a href="/zh/blog/claude-code-ui-mobile-session-freeze">CloudCLI 两个已知的手机端问题，各自的触发条件，以及一个不同架构如何避开同样的失败模式</a>。</p>
 
   <h2>纯 SSH 客户端 + tmux</h2>
   <p>如果你已经有一台能 SSH 上去的机器，这是活动部件最少的方案：手机上一个 SSH App，连进一个已经跑着 <code>claude</code> 的 <code>tmux</code> 会话。这条路是真的能用——进程能扛过断线——但手机该有的那些体验得自己想办法：任务跑完不会推送通知，没有为触屏优化过的 Ctrl/Esc/方向键，网络一有风吹草动就得自己手动重连、重新 attach。</p>
-  <p>详见 → <a href="/blog/keep-claude-code-running-after-ssh-disconnect">进程为什么能扛过 SSH 断线（以及为什么光靠 <code>nohup</code> 不行）</a>，以及 <a href="/blog/why-tmux-and-ssh-arent-enough">这套组合在触屏上到底还差什么，大家接下来通常会试什么</a>。</p>
+  <p>详见 → <a href="/zh/blog/keep-claude-code-running-after-ssh-disconnect">进程为什么能扛过 SSH 断线（以及为什么光靠 <code>nohup</code> 不行）</a>，以及 <a href="/zh/blog/why-tmux-and-ssh-arent-enough">这套组合在触屏上到底还差什么，大家接下来通常会试什么</a>。</p>
 
   <h2>iPad 上的情况</h2>
   <p>上面这些在 iPad 上同样适用，另外还多一个值得知道的选项：远程桌面 / VNC 连一整台电脑，用更高的延迟和更小的可用空间换来不用做上面任何搭建。这笔交易值不值，完全看你的使用习惯。</p>
-  <p>详见 → <a href="/blog/claude-code-on-ipad">三条 iPad 专属路径各自的细节，以及各自会在哪撞墙</a>。</p>
+  <p>详见 → <a href="/zh/blog/claude-code-on-ipad">三条 iPad 专属路径各自的细节，以及各自会在哪撞墙</a>。</p>
 
   <h2>PocketShell 在这张地图上的位置</h2>
   <p>PocketShell 是一个自托管的单文件程序，专门为了做一个手机原生的终端客户端——不绑定 Anthropic 账号或订阅层级，也不局限于 Claude Code：终端本身是通用的 <code>tmux</code>/PTY 托管，任何你平时用 SSH 跑的命令行工具在这里都能跑，只不过只有四个工具（Claude Code、Codex、opencode、Kimi CLI）能拿到开箱即用的自动完成通知。它内置专门的触屏键盘、基于序号的断线重连重放（不用手动重新 attach），以及 Web Push 加外发 Webhook 的通知。</p>
   <p>它不是什么：没有云端执行模式，所以和上面的 SSH 方案一样，你自己的机器仍然得开着；它的界面专门针对手机大小的屏幕，不是为更大的平板或桌面布局做的。</p>
-  <p>详见 → <a href="/blog/claude-code-mobile-options-compared">这一页所有方案的完整逐项对比，包括费用、搭建难度，以及三种自托管方案——包括本站——都不该选的场景</a>。</p>
+  <p>详见 → <a href="/zh/blog/claude-code-mobile-options-compared">这一页所有方案的完整逐项对比，包括费用、搭建难度，以及三种自托管方案——包括本站——都不该选的场景</a>。</p>
 
   <div class="article-nav">
     <a href="/zh/blog">← 所有文章</a>
