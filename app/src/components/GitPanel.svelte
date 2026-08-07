@@ -71,12 +71,16 @@
         <button class="rf" aria-label={$t('git.refresh')} disabled={refreshing} onclick={refresh}>⟳</button>
       </div>
       <div class="cur mono">● {branches.current}</div>
-      <div class="brs">{#each brShown as b}<span class="br mono" class:on={b === branches.current}>{b}</span>{/each}</div>
-      {#if brHidden > 0}
-        <button class="more br-more" onclick={() => (brExpanded = !brExpanded)}>
-          {brExpanded ? $t('git.branchCollapse') : $t('git.branchExpand', { values: { n: brHidden } })}
-        </button>
-      {/if}
+      <!-- 展开按钮长得和分支 chip 一样（同一排、同边框圆角），只是文字用亮色
+           区分「这是个操作而不是一个分支」。放进 .brs 里跟着 chip 自然换行。 -->
+      <div class="brs">
+        {#each brShown as b}<span class="br mono" class:on={b === branches.current}>{b}</span>{/each}
+        {#if brHidden > 0}
+          <button class="br br-more mono" onclick={() => (brExpanded = !brExpanded)}>
+            {brExpanded ? $t('git.branchCollapse') : $t('git.branchExpand', { values: { n: brHidden } })}
+          </button>
+        {/if}
+      </div>
       <div class="tip">{$t('git.branchTip')}</div>
     </div>
     <div class="sec">
@@ -142,7 +146,14 @@
   .meta { color: var(--dimmer); font-size: 0.62rem; width: 100%; }
   .files { padding: 2px 0 6px 14px; } .cf em { color: var(--dim); font-style: normal; }
   .more { color: var(--accent); justify-content: center; }
-  /* 复用 .more 的视觉（同面板里「加载更多」也是它）——同一个「展开更多」
-     语义的控件长得一样是对的。这里只补一点上边距，让它和 chip 群脱开。 */
-  .br-more { margin-top: 2px; padding-top: 2px; padding-bottom: 2px; }
+  /* 展开/收起：与分支 chip 同款（.br 已给出边框、圆角、内边距），只把文字
+     换成亮色以区分「操作」与「分支名」。button 的 UA 默认样式要显式抹平，
+     否则和同排的 span 对不齐。 */
+  .br-more {
+    background: transparent;
+    color: var(--accent);
+    font-size: inherit;
+    line-height: inherit;
+    cursor: pointer;
+  }
 </style>

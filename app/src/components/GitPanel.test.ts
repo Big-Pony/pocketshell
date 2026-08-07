@@ -52,7 +52,7 @@ describe("GitPanel 分支折叠", () => {
       },
     });
     await vi.waitFor(() => {
-      expect(container.querySelectorAll(".br").length).toBe(5);
+      expect(container.querySelectorAll("span.br").length).toBe(5);
     });
     expect(screen.getByText("展开 2 个")).toBeTruthy();
   });
@@ -65,7 +65,7 @@ describe("GitPanel 分支折叠", () => {
       },
     });
     await vi.waitFor(() => {
-      expect(container.querySelectorAll(".br").length).toBe(5);
+      expect(container.querySelectorAll("span.br").length).toBe(5);
     });
     expect(container.querySelector(".br")!.textContent!.trim()).toBe("dev");
   });
@@ -80,7 +80,7 @@ describe("GitPanel 分支折叠", () => {
     const btn = await screen.findByText("展开 2 个");
     btn.click();
     await vi.waitFor(() => {
-      expect(container.querySelectorAll(".br").length).toBe(7);
+      expect(container.querySelectorAll("span.br").length).toBe(7);
     });
     expect(screen.getByText("收起")).toBeTruthy();
   });
@@ -95,5 +95,23 @@ describe("GitPanel 分支折叠", () => {
     await vi.waitFor(() => expect(screen.getByText("main")).toBeTruthy());
     expect(screen.queryByText(/展开/)).toBeNull();
     expect(screen.queryByText("收起")).toBeNull();
+  });
+
+  // 展开按钮与分支 chip 同款（同一排、同边框圆角），只靠文字颜色区分。
+  // 它带 .br 但必须是 <button> 而非 <span>——数分支的地方一律用 span.br，
+  // 否则按钮会被当成一个分支混进去。
+  it("展开按钮与分支 chip 同款，但不算作一个分支", async () => {
+    const { container } = render(GitPanel, {
+      props: {
+        conn: branchConn("main", ["main", "a", "b", "c", "d", "e", "f"]),
+        onOpenDiff: () => {},
+      },
+    });
+    const btn = await screen.findByText("展开 2 个");
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.classList.contains("br"), "应复用分支 chip 的外观").toBe(true);
+    // 和 chip 同处一个 .brs 容器里，才能跟着一起换行
+    expect(btn.closest(".brs"), "应与 chip 同排").toBeTruthy();
+    expect(container.querySelectorAll("span.br").length, "按钮不该被算成分支").toBe(5);
   });
 });
