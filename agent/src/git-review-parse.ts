@@ -129,3 +129,40 @@ export function synthAddedHunk(content: string, cap: number): { hunks: DiffHunk[
     truncated: add > cap,
   };
 }
+
+/** 单文件 diff 行数上限（含 ctx）。超出即降级为 oversize，不传正文。 */
+export const FILE_LINE_CAP = 1500;
+/** 一次响应的总行数预算。保证响应体积有硬上界，rpcChunk 不会被撑爆。 */
+export const TOTAL_LINE_BUDGET = 8000;
+
+export interface Sized { path: string; add: number; del: number }
+
+/**
+ * 决定哪些文件带正文、哪些降级为 oversize。
+ *
+ * **按体量从小到大装填**是有意的：小文件通常是真正要审的逻辑改动，
+ * lock 文件、生成物之类天然排在后面被挤掉。按输入顺序装的话，一个
+ * 排在前面的 3000 行 lock 会把后面所有小文件的预算吃光。
+ *
+ * 同体量时按路径排序，保证同一份改动每次得到相同结果（可复现，
+ * 也让测试不依赖 Map/对象的枚举顺序）。
+ */
+export function planBudget<T extends Sized>(
+  rows: T[], budget: number, cap: number,
+): { keep: Set<string>; truncated: boolean } {
+  const sorted = [...rows].sort((a, b) => {
+    const sa = a.add + a.del, sb = b.add + b.del;
+    return sa !== sb ? sa - sb : a.path.localeCompare(b.path);
+  });
+
+  const keep = new Set<string>();
+  let truncated = false;
+  let spent = 0;
+  for (const r of sorted) {
+    const size = r.add + r.del;
+    if (size > cap || spent + size > budget) { truncated = true; continue; }
+    keep.add(r.path);
+    spent += size;
+  }
+  return { keep, truncated };
+}

@@ -130,3 +130,71 @@ test("synthAddedHunk 对空文件回空 hunks", () => {
   expect(synthAddedHunk("", 1500).hunks).toEqual([]);
   expect(synthAddedHunk("\n", 1500).add).toBe(1);
 });
+
+import { planBudget, FILE_LINE_CAP, TOTAL_LINE_BUDGET } from "./git-review-parse";
+
+test("planBudget 在预算内全部保留", () => {
+  const rows = [
+    { path: "a.ts", add: 10, del: 5 },
+    { path: "b.ts", add: 20, del: 0 },
+  ];
+  const r = planBudget(rows, 8000, 1500);
+  expect(r.keep).toEqual(new Set(["a.ts", "b.ts"]));
+  expect(r.truncated).toBe(false);
+});
+
+test("planBudget 单文件超 cap 直接降级，不占总预算", () => {
+  const rows = [
+    { path: "huge.lock", add: 3000, del: 2000 },
+    { path: "small.ts", add: 10, del: 2 },
+  ];
+  const r = planBudget(rows, 8000, 1500);
+  expect(r.keep.has("huge.lock")).toBe(false);
+  expect(r.keep.has("small.ts")).toBe(true);
+  expect(r.truncated).toBe(true);
+});
+
+test("planBudget 按体量从小到大装填——小文件优先保住", () => {
+  // 总预算 100：若按输入顺序装，big 先吃掉 90，只剩 10 给后面三个；
+  // 按体量升序则三个小的（共 30）全保住，big 被挤掉。
+  const rows = [
+    { path: "big.ts", add: 90, del: 0 },
+    { path: "s1.ts", add: 10, del: 0 },
+    { path: "s2.ts", add: 10, del: 0 },
+    { path: "s3.ts", add: 10, del: 0 },
+  ];
+  const r = planBudget(rows, 100, 1500);
+  expect(r.keep).toEqual(new Set(["s1.ts", "s2.ts", "s3.ts"]));
+  expect(r.truncated).toBe(true);
+});
+
+test("planBudget 装满即停，后续更大的都降级", () => {
+  const rows = [
+    { path: "a.ts", add: 40, del: 0 },
+    { path: "b.ts", add: 40, del: 0 },
+    { path: "c.ts", add: 40, del: 0 },
+  ];
+  const r = planBudget(rows, 100, 1500);
+  expect(r.keep.size).toBe(2);
+  expect(r.truncated).toBe(true);
+});
+
+test("planBudget 同体量时按路径排序，结果稳定可复现", () => {
+  const rows = [
+    { path: "z.ts", add: 10, del: 0 },
+    { path: "a.ts", add: 10, del: 0 },
+  ];
+  const r1 = planBudget(rows, 15, 1500);
+  const r2 = planBudget([...rows].reverse(), 15, 1500);
+  expect(r1.keep).toEqual(new Set(["a.ts"]));
+  expect(r2.keep).toEqual(r1.keep); // 输入顺序不影响结果
+});
+
+test("planBudget 空清单不报 truncated", () => {
+  expect(planBudget([], 8000, 1500)).toEqual({ keep: new Set(), truncated: false });
+});
+
+test("阈值常量取 spec 规定的值", () => {
+  expect(FILE_LINE_CAP).toBe(1500);
+  expect(TOTAL_LINE_BUDGET).toBe(8000);
+});
