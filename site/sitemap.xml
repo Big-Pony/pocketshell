@@ -19,4 +19,22 @@
     <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/"/>
   </url>
+  <url>
+    <loc>https://pocketshell.net/blog</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog"/>
+  </url>
+  <url>
+    <loc>https://pocketshell.net/zh/blog</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog"/>
+  </url>
 </urlset>

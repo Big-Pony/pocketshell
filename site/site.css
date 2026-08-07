@@ -287,3 +287,49 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 48px; font-size: 13.
 .foot { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
 .foot .sp { margin-left: auto; }
 .foot a:hover { color: var(--ink); }
+
+/* ---------- 文章页（/blog/*） ---------- */
+.article { max-width: 720px; margin: 0 auto; padding: 56px 28px 80px; }
+.article-meta { font-size: 13.5px; color: var(--dim); margin-bottom: 10px; }
+.article h1 { font-size: 34px; line-height: 1.25; letter-spacing: -.01em; margin: 0 0 18px; }
+.article .lede { font-size: 18px; color: var(--ink2); margin: 0 0 36px; }
+.article h2 { font-size: 23px; margin: 44px 0 14px; letter-spacing: -.005em; }
+.article h3 { font-size: 18px; margin: 30px 0 10px; }
+.article p, .article li { font-size: 16.5px; color: var(--ink2); }
+.article li { margin: 6px 0; }
+.article a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.article code {
+  font-family: var(--mono); font-size: .88em; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 5px; padding: 1.5px 5px;
+}
+.article pre {
+  background: var(--ink); color: #f3f2ee; border-radius: var(--radius);
+  padding: 16px 18px; overflow-x: auto; font-family: var(--mono);
+  font-size: 13.5px; line-height: 1.6;
+}
+.article pre code { background: none; border: 0; padding: 0; color: inherit; font-size: inherit; }
+.article table { width: 100%; border-collapse: collapse; margin: 22px 0; font-size: 15px; }
+.article th, .article td {
+  border: 1px solid var(--line); padding: 9px 12px; text-align: left; vertical-align: top;
+}
+.article th { background: var(--paper); font-weight: 600; color: var(--ink); }
+.article blockquote {
+  margin: 22px 0; padding: 12px 18px; border-left: 3px solid var(--line2);
+  background: var(--paper); color: var(--ink2);
+}
+/* 第三方断言的出处标注（设计 6.3 三档制） */
+.article .src { font-size: 14px; color: var(--dim); }
+.article-nav { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 15px; }
+/* 列表页 */
+.post-list { max-width: 760px; margin: 0 auto; padding: 56px 28px 80px; list-style: none; }
+.post-list li { border-bottom: 1px solid var(--line); padding: 22px 0; }
+.post-list a { font-size: 19px; font-weight: 600; color: var(--ink); }
+.post-list a:hover { color: var(--accent); }
+.post-list .desc { font-size: 15px; color: var(--ink2); margin: 6px 0 0; }
+
+@media (max-width: 640px) {
+  .article { padding: 36px 20px 60px; }
+  .article h1 { font-size: 27px; }
+  .article h2 { font-size: 20px; }
+  .article table { font-size: 14px; }
+}
