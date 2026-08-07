@@ -1,5 +1,7 @@
 import { render, waitFor, fireEvent } from "@testing-library/svelte";
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import GitReview from "./GitReview.svelte";
 import type { ReviewResult } from "../lib/net/protocol";
 
@@ -39,6 +41,22 @@ const props = (over: Record<string, any> = {}) => ({
   conn: connStub(), cwd: "/proj",
   scope: { kind: "worktree", stage: "all" } as const,
   onClose: () => {}, ...over,
+});
+
+describe("GitReview 文件头路径的 bidi", () => {
+  // 真机走查发现的 bug：`.fp` 只写 `direction: rtl` 时，浏览器会把行尾的
+  // 中性字符按 RTL 规则甩到视觉行首，未跟踪目录 `brandnew/` 显示成
+  // `/brandnew`。修法是补 `unicode-bidi: plaintext`。
+  //
+  // jsdom 不实现 bidi 重排，渲染断言测不出这件事，所以这里退而扫描组件
+  // 源码——它锁住的是「这条声明不能被顺手删掉」，这正是回潮的实际形态。
+  it("`.fp` 同时声明 direction:rtl 与 unicode-bidi:plaintext", () => {
+    const src = readFileSync(resolve(__dirname, "./GitReview.svelte"), "utf8");
+    const rule = src.match(/\.fp\s*\{[^}]*\}/s);
+    expect(rule, "找不到 .fp 规则").toBeTruthy();
+    expect(rule![0]).toContain("direction: rtl");
+    expect(rule![0]).toContain("unicode-bidi: plaintext");
+  });
 });
 
 describe("GitReview 长流渲染", () => {

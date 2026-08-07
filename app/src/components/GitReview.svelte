@@ -247,7 +247,17 @@
        一个加载/错误态。把这些塞进 ContextMenu 等于把它改成两个组件——
        正是「别为了复用把 ContextMenu 改复杂」要避免的。 -->
   {#if picking}
-    <div class="bp-mask" onclick={closePicker} role="button" tabindex="-1" aria-label={$t('common.close')}></div>
+    <!-- 遮罩要能用键盘关掉。Esc 是这里唯一有意义的键（Enter/Space 属于
+         「激活」语义，对一块用来退出的空白区域说不通），所以监听 keydown
+         而不是套 onclick 的键盘等价物。 -->
+    <div
+      class="bp-mask"
+      role="button"
+      tabindex="-1"
+      aria-label={$t('common.close')}
+      onclick={closePicker}
+      onkeydown={(e) => { if (e.key === "Escape") closePicker(); }}
+    ></div>
     <div class="bpick">
       <div class="bp-title">{$t('git.review.baselinePick')}</div>
       {#if pickError}
@@ -291,8 +301,16 @@
     border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
   }
   .tw { color: var(--dimmer); width: 9px; flex: 0 0 auto; font-size: 0.6rem; }
-  /* 长路径截左侧保右侧（文件名比目录更有辨识度） */
-  .fp { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  /* 长路径截左侧保右侧（文件名比目录更有辨识度）。
+     `unicode-bidi: plaintext` 是必需的，不是装饰：光有 `direction: rtl` 时
+     浏览器会把行尾的中性字符（路径分隔符 `/`）按 RTL 规则甩到视觉行首，
+     未跟踪目录 `brandnew/` 于是显示成 `/brandnew`。plaintext 让每段文本
+     按自身首字符定方向（ASCII 路径 → LTR），字序恢复正常，而 rtl 带来的
+     「溢出时省略号落在左边」效果不受影响（实测 scrollWidth 一致）。 */
+  .fp {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    direction: rtl; unicode-bidi: plaintext; text-align: left;
+  }
   .fn { font-size: 0.62rem; color: var(--dim); flex: 0 0 auto; }
   .fn .p { color: var(--ok); } .fn .d { color: var(--red); }
   .badge { font-size: 0.56rem; padding: 1px 5px; border-radius: 3px; flex: 0 0 auto; background: var(--ok-soft); color: var(--ok); }
