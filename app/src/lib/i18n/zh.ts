@@ -544,6 +544,48 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     clean: "工作区干净",
     history: "历史",
     loadMore: "加载更多",
+    review: {
+      // 入口
+      entryAll: "审查全部改动",
+      entryRange: "本分支相对 {base}",
+      entryFiles: "{n} 个文件",
+      // 顶栏
+      back: "返回",
+      titleWorktree: "全部改动",
+      subtitleWorktree: "工作区",
+      subtitleRange: "分支对比",
+      // 汇总与档位
+      summaryFiles: "{n} 个文件",
+      segAll: "全部",
+      segStaged: "已暂存",
+      segUnstaged: "未暂存",
+      // 基线
+      baselineLabel: "基线",
+      baselineInferred: "自动推断",
+      baselinePick: "选择基线分支",
+      // 文件状态
+      badgeStaged: "已暂存",
+      badgePartial: "部分暂存",
+      // 文件体
+      oversize: "内容过大，无法预览",
+      oversizeHint: "{n} 行改动，请在终端查看",
+      binary: "二进制文件",
+      deleted: "整个文件已删除",
+      newdir: "新建目录",
+      newdirHint: "未展开，请在终端或文件面板查看",
+      folded: "改动较大，已折叠",
+      foldedHint: "点上方文件名展开",
+      emptyBody: "无文本改动",
+      // 结尾与空态
+      end: "到底了，共 {n} 个文件",
+      noChanges: "没有改动",
+      truncatedNote: "部分文件因改动过大未加载",
+      // 加载与错误
+      loadingSlow: "正在读取较大的改动…",
+      retry: "重试",
+      badRevision: "找不到该提交",
+      noBaseline: "无法确定对比基线，请手动选择",
+    },
   },
   preview: {
     noChanges: "无改动",
