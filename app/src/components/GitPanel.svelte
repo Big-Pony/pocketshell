@@ -3,6 +3,7 @@
   import { tr } from "../lib/i18n";
   import { Connection } from "../lib/net/connection";
   import { loadProjectRoot } from "../lib/ui/file-tree";
+  import { orderBranches, visibleBranches, BRANCH_LIMIT } from "../lib/ui/branch-list";
 
   let { conn, onOpenDiff }: { conn: Connection; onOpenDiff: (path: string) => void } = $props();
 
@@ -15,6 +16,13 @@
   let notice = $state("");
   let expanded = $state<string | null>(null);
   let refreshing = $state(false);
+
+  // 折叠态**不持久化**：折叠是视觉降噪而非用户偏好，且 refresh() 后分支集合
+  // 可能已变，记住「展开过」没有意义。
+  let brExpanded = $state(false);
+  const brOrdered = $derived(orderBranches(branches.current, branches.branches));
+  const brShown = $derived(visibleBranches(brOrdered, brExpanded));
+  const brHidden = $derived(brOrdered.length - BRANCH_LIMIT);
 
   async function loadAll() {
     if (noRoot) return;
@@ -63,7 +71,12 @@
         <button class="rf" aria-label={$t('git.refresh')} disabled={refreshing} onclick={refresh}>⟳</button>
       </div>
       <div class="cur mono">● {branches.current}</div>
-      <div class="brs">{#each branches.branches as b}<span class="br mono" class:on={b === branches.current}>{b}</span>{/each}</div>
+      <div class="brs">{#each brShown as b}<span class="br mono" class:on={b === branches.current}>{b}</span>{/each}</div>
+      {#if brHidden > 0}
+        <button class="more br-more" onclick={() => (brExpanded = !brExpanded)}>
+          {brExpanded ? $t('git.branchCollapse') : $t('git.branchExpand', { values: { n: brHidden } })}
+        </button>
+      {/if}
       <div class="tip">{$t('git.branchTip')}</div>
     </div>
     <div class="sec">
@@ -129,4 +142,7 @@
   .meta { color: var(--dimmer); font-size: 0.62rem; width: 100%; }
   .files { padding: 2px 0 6px 14px; } .cf em { color: var(--dim); font-style: normal; }
   .more { color: var(--accent); justify-content: center; }
+  /* 复用 .more 的视觉（同面板里「加载更多」也是它）——同一个「展开更多」
+     语义的控件长得一样是对的。这里只补一点上边距，让它和 chip 群脱开。 */
+  .br-more { margin-top: 2px; padding-top: 2px; padding-bottom: 2px; }
 </style>

@@ -543,6 +543,8 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     branches: "Branches (read-only)",
     refresh: "Refresh",
     branchTip: "Switch branches from the terminal or Claude",
+    branchExpand: "Show {n} more",
+    branchCollapse: "Collapse",
     changes: "Working tree changes",
     clean: "Working tree clean",
     history: "History",

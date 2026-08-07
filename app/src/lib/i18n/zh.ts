@@ -538,6 +538,8 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     branches: "分支（只读）",
     refresh: "刷新",
     branchTip: "切换分支请在终端 / Claude 里操作",
+    branchExpand: "展开 {n} 个",
+    branchCollapse: "收起",
     changes: "工作区改动",
     clean: "工作区干净",
     history: "历史",
