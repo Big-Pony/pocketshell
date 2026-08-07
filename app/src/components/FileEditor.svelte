@@ -9,7 +9,7 @@
   import { search, openSearchPanel, closeSearchPanel, searchPanelOpen, SearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll } from "@codemirror/search";
   import { tags } from "@lezer/highlight";
   import { langExtension, saveFile, isConflictError } from "../lib/editor";
-  import { visibleHeightBelow } from "../lib/term/keyboard-inset";
+  import { visibleHeightBelow, shouldRecenterCursor } from "../lib/term/keyboard-inset";
   import type { Connection } from "../lib/net/connection";
 
   let { conn, path, lang, initialContent, mtime, onClose, onDirty, onToast }: {
@@ -113,18 +113,27 @@
   //    visualViewport 不收缩，必须读 virtualKeyboard.boundingRect.height。
   //  - iOS：浏览器收缩 visual viewport，读 vv 即可。
   // 读不到 virtualKeyboard 时 vkHeight 为 0，自然落到 iOS 分支。
+  // 上一次算出的编辑区高度，用来判断这次是变矮还是变高（见 shouldRecenterCursor）。
+  let lastFitHeight: number | undefined;
+
   function fitViewport() {
     if (!rootEl) return;
     const vv = window.visualViewport;
     const vk = (navigator as any).virtualKeyboard;
-    rootEl.style.height = visibleHeightBelow({
+    const h = visibleHeightBelow({
       top: rootEl.getBoundingClientRect().top,
       innerHeight: window.innerHeight,
       vvHeight: vv?.height ?? window.innerHeight,
       vvOffsetTop: vv?.offsetTop ?? 0,
       vkHeight: vk?.boundingRect?.height ?? 0,
-    }) + "px";
-    if (view) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head) });
+    });
+    rootEl.style.height = h + "px";
+    // 只在编辑区**变矮**时把光标滚回视野（键盘弹起、可能正压着光标）。
+    // 无条件滚会劫持用户的滚动：光标在没点过正文时停在文件开头，而 Android
+    // 上滚到底部会触发 URL 栏收放 → resize → 这里 → 弹回顶部。
+    const recenter = shouldRecenterCursor(lastFitHeight, h);
+    lastFitHeight = h;
+    if (recenter && view) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head) });
   }
 
   async function doSave(force = false) {

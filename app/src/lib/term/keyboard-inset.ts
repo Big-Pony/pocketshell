@@ -43,3 +43,23 @@ export function visibleHeightBelow(m: VisibleHeightInput): number {
     : m.vvOffsetTop + m.vvHeight - m.top;
   return Math.max(m.minHeight ?? 160, raw);
 }
+
+// 重新测量高度后，要不要把光标滚回视野？
+//
+// **只在编辑区变矮时要**——那意味着键盘刚弹起、可能正压在光标上。
+// 变高（键盘收起）或没变时，用户多半正滚着读代码，抢滚动就是劫持。
+//
+// 这条判断是十三期的回归修复。原先 fitViewport() 无条件 scrollIntoView(光标)，
+// 真机症状是「编辑态滑到文件最底部会自己弹回顶部，读态没有」：光标在没点过
+// 正文时停在位置 0（文件开头），而 Android Chrome 里嵌套滚动条滚到边界会把
+// 滚动链交给页面，URL 栏一收一放就改变 innerHeight → 触发 resize →
+// fitViewport → 滚回光标 = 弹回顶部。加上 scrollPastEnd() 之后底部空白变多、
+// 更容易滚到边界，于是这条既有隐患才浮出水面。
+const RECENTER_TOLERANCE_PX = 8;
+
+export function shouldRecenterCursor(prevHeight: number | undefined, nextHeight: number): boolean {
+  // 首次布局：CM 挂载时自己会把光标放好，这里再抢一次没有意义。
+  if (prevHeight === undefined) return false;
+  // 容差防抖：移动端浏览器 UI 的像素级抖动不该被当成键盘弹起。
+  return prevHeight - nextHeight > RECENTER_TOLERANCE_PX;
+}
