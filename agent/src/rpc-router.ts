@@ -22,6 +22,7 @@ import type { NotifyConfig } from "./notify-config";
 import type { WireResult } from "./notify-wire";
 import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, fsWrite } from "./fs-service";
 import { gitLog, gitBranches, gitStatus } from "./git-service";
+import { gitReview, type ReviewScope } from "./git-review";
 import { formatDiagReport } from "./diag-report";
 import { chainPathOf, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { checkLatest } from "./update-check";
@@ -114,6 +115,24 @@ export const parse = {
   }),
   fsDownloadChunk: (p: RpcParams) => ({ path: str(p, "path"), offset: num(p, "offset"), len: num(p, "len") }),
   gitLog: (p: RpcParams) => ({ cwd: str(p, "cwd"), limit: Number(p.limit ?? 30), query: optStr(p, "query") }),
+  /**
+   * scope 是联合类型，不能用 str()/num() 那套逐字段读。这里做判别式收窄：
+   * 认不出的 kind 一律回落到 worktree/all 而不是 throw——老客户端或手工
+   * 构造的请求不该让 agent 报错，回落到最安全的只读范围即可。
+   */
+  gitReview: (p: RpcParams) => {
+    const raw = (p.scope ?? {}) as Record<string, unknown>;
+    const kind = raw.kind;
+    let scope: ReviewScope;
+    if (kind === "commit") scope = { kind: "commit", hash: String(raw.hash) };
+    else if (kind === "range") scope = { kind: "range", base: String(raw.base) };
+    else {
+      const s = raw.stage;
+      const stage = s === "staged" || s === "unstaged" ? s : "all";
+      scope = { kind: "worktree", stage };
+    }
+    return { cwd: str(p, "cwd"), scope };
+  },
   termCapture: (p: RpcParams) => ({
     session: str(p, "session"),
     opts: { colors: flag(p, "colors"), back: optNum(p, "back"), endBack: optNum(p, "endBack") },
@@ -164,6 +183,7 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   "git.log": (_ctx, p) => { const a = parse.gitLog(p); return ok(gitLog(a.cwd, a.limit, a.query)); },
   "git.branches": (_ctx, p) => ok(gitBranches(parse.cwd(p).cwd)),
   "git.status": (_ctx, p) => ok(gitStatus(parse.cwd(p).cwd)),
+  "git.review": (_ctx, p) => { const a = parse.gitReview(p); return ok(gitReview(a.cwd, a.scope)); },
 
   // 先取号、后快照：capture 期间新到的输出必然拿到 > seq 的序号，
   // 前端 attach(seq) 会把它们补上。顺序反过来会丢字节。

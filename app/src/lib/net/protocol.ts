@@ -61,7 +61,7 @@ export type ClientMsg =
   | { type: "removeHint"; id: string }
   | { type: "clearHints" }
   | { type: "revokeDevice"; pubKey: string }
-  // rpc methods mirror agent/src/protocol.ts: fs.* / git.* / term.* / terminal.pwd / preview.mint / update.check / update.apply / hints.list
+  // rpc methods mirror agent/src/protocol.ts: fs.* / git.* (log/branches/status/review) / term.* / terminal.pwd / preview.mint / update.check / update.apply / hints.list
   | { type: "rpc"; id: string; method: string; params?: unknown };
 
 export type ServerMsg =
@@ -130,4 +130,41 @@ export interface TermCaptureResult {
   // 最老那一行**（hist=379 时 -S -900 与 -S -379 返回同一行），前端照着翻会
   // 无限追加重复内容。后端用 `#{history_size}` 定位最老一行来判定。
   atTop: boolean;
+}
+
+// git.review 的 rpc 响应体。三种审查范围（工作区 / 单个 commit / 分支相对基线）
+// 共用同一个结构——它们在 git 层面本就是同一条 diff 换参数。
+//
+// 真相在 agent/src/git-review.ts；这里只是线协议声明，前端逐字镜像。
+export type ReviewScope =
+  | { kind: "worktree"; stage: "all" | "staged" | "unstaged" }
+  | { kind: "commit"; hash: string }
+  | { kind: "range"; base: string };
+
+export interface ReviewFile {
+  path: string;
+  status: "M" | "A" | "D" | "R" | "?";
+  add: number;
+  del: number;
+  // 仅工作区范围有值。"full" = 已 add 且工作区无更多改动；"partial" = add 之后又改了。
+  staged?: "full" | "partial";
+  // 超单文件行数上限或总预算，服务端未传正文。UI 显示「内容过大，无法预览」。
+  oversize?: true;
+  binary?: true;
+  // 未跟踪目录：只出一个条目，不展开（一个新建的 node_modules/ 会打爆预算）。
+  isDir?: true;
+  hunks?: { header: string; lines: { kind: "add" | "del" | "ctx"; text: string }[] }[];
+}
+
+export interface ReviewResult {
+  scope: ReviewScope;
+  // commit 范围下是 git 自己的 "%h %s"；工作区与分支范围为空串，
+  // 由前端用 i18n 组装（后端塞中文会绕过 i18n 约束）。
+  title: string;
+  subtitle: string;
+  files: ReviewFile[];
+  totals: { files: number; add: number; del: number };
+  truncated?: true;
+  counts?: { all: number; staged: number; unstaged: number };
+  baseline?: { base: string; inferred: boolean };
 }
