@@ -564,6 +564,8 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       baselineLabel: "Base",
       baselineInferred: "auto-detected",
       baselinePick: "Pick a base branch",
+      baselineLoading: "Loading branches…",
+      baselineEmpty: "No other branch to compare against",
       badgeStaged: "staged",
       badgePartial: "partially staged",
       oversize: "Too large to preview",

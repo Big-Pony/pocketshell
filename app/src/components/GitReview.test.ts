@@ -24,8 +24,11 @@ const RESULT: ReviewResult = {
   counts: { all: 5, staged: 1, unstaged: 4 },
 };
 
+const BRANCHES = { current: "feat/x", branches: ["feat/x", "main", "dev"] };
+
 function connStub(result: ReviewResult = RESULT, delayMs = 0) {
-  const rpc = vi.fn(async () => {
+  const rpc = vi.fn(async (m: string) => {
+    if (m === "git.branches") return BRANCHES;
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
     return result;
   });
@@ -229,5 +232,125 @@ describe("GitReview 三档与加载态", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 基线手选：spec 要求「自动推断 + 允许从分支列表手选」。推断结果不一定合心意
+// （比如 main 与 master 并存），推断失败时更是只能手选。
+// ---------------------------------------------------------------------------
+const RANGE_RESULT: ReviewResult = {
+  ...RESULT,
+  scope: { kind: "range" },
+  counts: undefined,
+  baseline: { base: "main", inferred: true },
+};
+
+const rangeProps = (over: Record<string, any> = {}) => ({
+  conn: connStub(RANGE_RESULT), cwd: "/proj",
+  scope: { kind: "range" } as const,
+  onClose: () => {}, ...over,
+});
+
+describe("GitReview 基线手选", () => {
+  it("懒加载：不点基线按钮就不拉分支列表", async () => {
+    const conn = connStub(RANGE_RESULT);
+    const { getByText } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("main")).toBeTruthy());
+    expect(conn.rpc.mock.calls.some((c: any[]) => c[0] === "git.branches")).toBe(false);
+  });
+
+  it("点基线按钮弹出列表，此时才发出 git.branches", async () => {
+    const conn = connStub(RANGE_RESULT);
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("main")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+    expect(conn.rpc.mock.calls.some((c: any[]) => c[0] === "git.branches")).toBe(true);
+  });
+
+  it("列表排除当前分支，其余全列（不套 5 个折叠）", async () => {
+    const conn = connStub(RANGE_RESULT);
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("main")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelectorAll(".bp-item").length).toBe(2));
+    const labels = [...container.querySelectorAll(".bp-item")].map((e) => e.textContent!.trim());
+    expect(labels).toEqual(["main", "dev"]);
+    expect(labels).not.toContain("feat/x");
+  });
+
+  it("当前生效的基线在列表里高亮", async () => {
+    const conn = connStub(RANGE_RESULT);
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("main")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelectorAll(".bp-item").length).toBe(2));
+    const on = [...container.querySelectorAll(".bp-item.on")].map((e) => e.textContent!.trim());
+    expect(on).toEqual(["main"]);
+  });
+
+  it("选一个分支后发出带该 base 的 git.review，弹层关闭", async () => {
+    const conn = connStub(RANGE_RESULT);
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("main")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelectorAll(".bp-item").length).toBe(2));
+    await fireEvent.click([...container.querySelectorAll(".bp-item")][1]);  // dev
+    await waitFor(() => {
+      const last = conn.rpc.mock.calls.filter((c: any[]) => c[0] === "git.review").at(-1);
+      expect(last[1].scope).toEqual({ kind: "range", base: "dev" });
+    });
+    expect(container.querySelector(".bpick")).toBeNull();
+  });
+
+  it("关闭弹层不触发额外请求", async () => {
+    const conn = connStub(RANGE_RESULT);
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("main")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelectorAll(".bp-item").length).toBe(2));
+    const before = conn.rpc.mock.calls.length;
+    await fireEvent.click(container.querySelector(".bp-cancel")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    await new Promise((r) => setTimeout(r, 30));
+    expect(conn.rpc.mock.calls.length).toBe(before);
+  });
+
+  it("no_baseline 错误态给出手选入口，点了弹同一个列表", async () => {
+    const conn = {
+      rpc: vi.fn(async (m: string) => {
+        if (m === "git.branches") return BRANCHES;
+        throw new Error("rpc_error: no_baseline");
+      }),
+    } as any;
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("无法确定对比基线，请手动选择")).toBeTruthy());
+    await fireEvent.click(getByText("选择基线分支"));
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+    expect(container.querySelectorAll(".bp-item").length).toBe(2);
+  });
+
+  it("从 no_baseline 里选中分支后重新拉取成功", async () => {
+    let firstReview = true;
+    const conn = {
+      rpc: vi.fn(async (m: string) => {
+        if (m === "git.branches") return BRANCHES;
+        if (firstReview) { firstReview = false; throw new Error("rpc_error: no_baseline"); }
+        return RANGE_RESULT;
+      }),
+    } as any;
+    const { getByText, container } = render(GitReview, { props: rangeProps({ conn }) });
+    await waitFor(() => expect(getByText("选择基线分支")).toBeTruthy());
+    await fireEvent.click(getByText("选择基线分支"));
+    await waitFor(() => expect(container.querySelectorAll(".bp-item").length).toBe(2));
+    await fireEvent.click([...container.querySelectorAll(".bp-item")][0]);  // main
+    await waitFor(() => expect(container.querySelector('[data-head="src/auth.ts"]')).toBeTruthy());
+  });
+
+  it("工作区范围没有基线按钮（三档才是它的维度）", async () => {
+    const { container } = render(GitReview, { props: props() });
+    await waitFor(() => expect(container.querySelectorAll(".seg").length).toBe(3));
+    expect(container.querySelector(".bl")).toBeNull();
   });
 });

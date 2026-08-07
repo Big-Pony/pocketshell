@@ -4,16 +4,16 @@
   import { Connection } from "../lib/net/connection";
   import type { ReviewScope, ReviewResult, ReviewFile } from "../lib/net/protocol";
   import { shouldFold, reviewCacheKey, bodyState } from "../lib/ui/git-review";
+  import { orderBranches } from "../lib/ui/branch-list";
 
   /** 超过这个时长仍未返回就提示"正在读取较大的改动…"。不是进度，只是告诉
       用户没卡死——rpcDeadlineMs 下大 diff 的死线可达数分钟。 */
   const SLOW_MS = 5000;
 
-  let { conn, cwd, scope, onClose, onTotals, onPickBaseline = () => {} }: {
+  let { conn, cwd, scope, onClose, onTotals }: {
     conn: Connection; cwd: string; scope: ReviewScope;
     onClose: () => void;
     onTotals?: (t: { files: number; add: number; del: number }) => void;
-    onPickBaseline?: () => void;
   } = $props();
 
   let data = $state<ReviewResult | null>(null);
@@ -34,6 +34,45 @@
 
   const isWorktree = $derived(cur.kind === "worktree");
   const curStage = $derived(cur.kind === "worktree" ? cur.stage : "all");
+
+  // ---- 基线手选 -----------------------------------------------------------
+  // 分支列表**懒加载**：大多数人吃自动推断就够了，不该为这个少数路径在每次
+  // 打开审查页时多打一次 git。点了才拉，拉过就留着（同一次会话里分支集合
+  // 不会自己变，真变了用户会去 ⟳）。
+  let picking = $state(false);
+  let branches = $state<{ current: string; branches: string[] } | null>(null);
+  let pickError = $state("");
+
+  // 列表里排除当前分支——拿自己跟自己比恒为空 diff。
+  // 复用 orderBranches 保持与 Git 面板同一套顺序，但**不套 visibleBranches**：
+  // 那是给平铺 chip 降噪用的，选择器要全列出来才找得到。
+  const pickable = $derived(
+    branches ? orderBranches(branches.current, branches.branches).filter((b) => b !== branches!.current) : [],
+  );
+
+  // 当前生效的基线：显式选过就是选的那个，否则是后端推断回来的。
+  const activeBase = $derived(
+    cur.kind === "range" ? (cur.base ?? data?.baseline?.base ?? "") : "",
+  );
+
+  async function openPicker() {
+    picking = true;
+    if (branches) return;               // 拉过就不重拉
+    pickError = "";
+    try {
+      branches = (await conn.rpc("git.branches", { cwd })) as { current: string; branches: string[] };
+    } catch (e: any) {
+      pickError = errText(e);
+    }
+  }
+
+  function closePicker() { picking = false; }
+
+  function chooseBase(b: string) {
+    picking = false;
+    // base 进了 reviewCacheKey，所以换基线一定重新请求而不会命中旧缓存。
+    cur = { kind: "range", base: b };   // $effect 跟着重拉
+  }
 
   function clearSlow() {
     slow = false;
@@ -125,20 +164,30 @@
         {/each}
       </div>
     {/if}
-    <!-- 基线名一律取自响应体：前端不猜基线（scope 里不带 base），
-         由后端 inferBaseline 决定并回在 baseline 里。 -->
-    {#if cur.kind === "range" && data?.baseline}
+    <!-- 基线名默认取自响应体：前端不猜基线（scope 里不带 base），由后端
+         inferBaseline 决定并回在 baseline 里。用户手选过就以选中的为准——
+         这样切换瞬间就能看到新名字，不会先闪一下上一个基线。 -->
+    {#if cur.kind === "range" && activeBase}
       <div class="baseline">
         {$t('git.review.baselineLabel')}
-        <button class="bl mono" onclick={onPickBaseline}>{data.baseline.base}</button>
-        {#if data.baseline.inferred}<span class="bi">（{$t('git.review.baselineInferred')}）</span>{/if}
+        <button class="bl mono" onclick={openPicker}>{activeBase}</button>
+        {#if data?.baseline?.inferred && !cur.base}<span class="bi">（{$t('git.review.baselineInferred')}）</span>{/if}
       </div>
     {/if}
   </div>
 
   <div class="rv-body">
     {#if error}
-      <div class="err">{error}<button class="retry" onclick={retry}>{$t('git.review.retry')}</button></div>
+      <div class="err">
+        {error}
+        <!-- 分支范围下把手选入口放进错误态：no_baseline 那句「请手动选择」
+             得有地方可点才不是空话；base 选错导致 bad_revision 时同样是
+             改基线才救得回来，重试多少次都一样。 -->
+        {#if cur.kind === "range"}
+          <button class="retry bp-open" onclick={openPicker}>{$t('git.review.baselinePick')}</button>
+        {/if}
+        <button class="retry" onclick={retry}>{$t('git.review.retry')}</button>
+      </div>
     {/if}
     {#if loading && !error}
       {#each [0, 1, 2, 3] as _i}
@@ -191,6 +240,32 @@
       <div class="end">— {$t('git.review.end', { values: { n: data.totals.files } })} —</div>
     {/if}
   </div>
+
+  <!-- 基线选择层。**没有复用 ContextMenu**：那个组件按锚点定位、菜单项是
+       固定的 {label, onSelect} 清单、还自带一条分隔线与取消项；这里要的是
+       底部弹出、条目数不定（分支可能几十个）、要滚动、要高亮当前项、还要
+       一个加载/错误态。把这些塞进 ContextMenu 等于把它改成两个组件——
+       正是「别为了复用把 ContextMenu 改复杂」要避免的。 -->
+  {#if picking}
+    <div class="bp-mask" onclick={closePicker} role="button" tabindex="-1" aria-label={$t('common.close')}></div>
+    <div class="bpick">
+      <div class="bp-title">{$t('git.review.baselinePick')}</div>
+      {#if pickError}
+        <div class="bp-err">{pickError}</div>
+      {:else if !branches}
+        <div class="bp-loading">{$t('git.review.baselineLoading')}</div>
+      {:else if pickable.length === 0}
+        <div class="bp-loading">{$t('git.review.baselineEmpty')}</div>
+      {:else}
+        <div class="bp-list">
+          {#each pickable as b (b)}
+            <button class="bp-item mono" class:on={b === activeBase} onclick={() => chooseBase(b)}>{b}</button>
+          {/each}
+        </div>
+      {/if}
+      <button class="bp-cancel" onclick={closePicker}>{$t('common.cancel')}</button>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -264,6 +339,42 @@
   /* 前庭障碍用户把动画全关掉，只留静态灰块 */
   @media (prefers-reduced-motion: reduce) {
     .sk-file, .sk-line, .rv-rf.spin { animation: none; }
+    .bpick { animation: none; }
+  }
+
+  /* 基线选择层：底部弹出。分支可能几十个，列表限高可滚，
+     取消条固定在最下面不跟着滚走。 */
+  .bp-mask { position: fixed; inset: 0; z-index: 41; background: var(--overlay-bg); border: 0; }
+  .bpick {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 42;
+    display: flex; flex-direction: column;
+    background: var(--menu-bg);
+    border-top: 1px solid var(--line-strong);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    box-shadow: var(--pop-shadow);
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+    max-height: 62vh;
+    animation: bp-up 0.16s ease-out;
+  }
+  @keyframes bp-up { from { transform: translateY(12px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+  .bp-title {
+    font-family: var(--font-mono);
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--dimmer); font-weight: 600; padding: 4px 14px 8px;
+  }
+  .bp-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .bp-item {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: 0; padding: 9px 14px;
+    font-size: 0.72rem; color: var(--text);
+  }
+  .bp-item:active { background: var(--keyhi); }
+  .bp-item.on { color: var(--accent); }
+  .bp-loading, .bp-err { padding: 12px 14px; font-size: 0.68rem; color: var(--dim); }
+  .bp-err { color: var(--amber); }
+  .bp-cancel {
+    margin-top: 4px; border: 0; border-top: 1px solid var(--line);
+    background: transparent; color: var(--dim); font-size: 0.72rem; padding: 10px 14px;
   }
 
   .retry { display: block; margin: 10px auto 0; background: transparent; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--accent); font-size: 0.68rem; padding: 5px 14px; }

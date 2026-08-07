@@ -563,6 +563,8 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       baselineLabel: "基线",
       baselineInferred: "自动推断",
       baselinePick: "选择基线分支",
+      baselineLoading: "正在读取分支…",
+      baselineEmpty: "没有其他分支可对比",
       // 文件状态
       badgeStaged: "已暂存",
       badgePartial: "部分暂存",
