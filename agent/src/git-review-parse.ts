@@ -67,3 +67,65 @@ export function stagedMark(x: string, y: string): "full" | "partial" | undefined
   const dirtyWorktree = y !== " " && y !== "";
   return dirtyWorktree ? "partial" : "full";
 }
+
+export interface DiffHunk { header: string; lines: { kind: "add" | "del" | "ctx"; text: string }[] }
+
+/**
+ * 把一整份多文件 diff 按 "diff --git a/X b/Y" 头拆成 per-file hunks。
+ *
+ * 路径取 b/ 侧（新路径）：重命名时 a/ 是旧名，面板要显示文件现在在哪。
+ * 用 " b/" 定位而不是空格分割——路径可以含空格。
+ */
+export function splitDiffByFile(stdout: string): Map<string, DiffHunk[]> {
+  const out = new Map<string, DiffHunk[]>();
+  let hunks: DiffHunk[] | null = null;
+  let cur: DiffHunk | null = null;
+
+  for (const line of stdout.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      const rest = line.slice("diff --git ".length);
+      const at = rest.indexOf(" b/");
+      const path = at >= 0 ? rest.slice(at + 3) : rest;
+      hunks = [];
+      cur = null;
+      out.set(path, hunks);
+      continue;
+    }
+    if (!hunks) continue;                       // diff --git 之前的噪声
+    if (line.startsWith("@@")) { cur = { header: line, lines: [] }; hunks.push(cur); continue; }
+    if (!cur) continue;                          // 文件头（index/---/+++/new file mode）
+    if (line.startsWith("+")) cur.lines.push({ kind: "add", text: line.slice(1) });
+    else if (line.startsWith("-")) cur.lines.push({ kind: "del", text: line.slice(1) });
+    else if (line.startsWith("\\")) continue;    // "\ No newline at end of file"
+    else cur.lines.push({ kind: "ctx", text: line.startsWith(" ") ? line.slice(1) : line });
+  }
+  return out;
+}
+
+/**
+ * 未跟踪文件的 diff 天然就是"每一行都是新增"，直接合成而不 spawn git。
+ *
+ * 不走 `git diff --no-index` 的三个理由（spec §3.1）：
+ *   a) 那样 N 个新文件就是 N 次 spawn，破坏「spawn 次数与规模无关」；
+ *   b) --no-index 有差异时**退出码为 1**，与 runGit 的 ok 判据冲突，
+ *      后来者极易把它"修"回 ok 判断从而静默丢掉所有新文件；
+ *   c) 合成是纯函数，能脱离 git 单测。
+ *
+ * `add` 回的是**真实总行数**而非截断后的行数——UI 上的 "+55" 要说实话。
+ */
+export function synthAddedHunk(content: string, cap: number): { hunks: DiffHunk[]; add: number; truncated: boolean } {
+  if (content === "") return { hunks: [], add: 0, truncated: false };
+  const all = content.split("\n");
+  // 末尾换行会切出一个空串尾元素，它不是一行内容。
+  if (all.length > 1 && all[all.length - 1] === "") all.pop();
+  const add = all.length;
+  const shown = all.slice(0, cap);
+  return {
+    hunks: [{
+      header: `@@ -0,0 +1,${add} @@`,
+      lines: shown.map((text) => ({ kind: "add" as const, text })),
+    }],
+    add,
+    truncated: add > cap,
+  };
+}
