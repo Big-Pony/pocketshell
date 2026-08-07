@@ -11,6 +11,7 @@
   import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/term/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/term/key-repeat";
   import { imeSendText } from "../lib/term/ime-send";
+  import { isTap } from "../lib/term/tap-or-scroll";
   import type { VibrateLevel } from "../lib/settings";
   import { keyboardHeight, isKeyboardOpen, type ViewportMetrics } from "../lib/term/keyboard-inset";
 
@@ -297,9 +298,26 @@
     repeaters.clear();
   });
 
-  function tapHint(cmd: string) {
-    buzz();
-    onHint(cmd);
+  // 联想条「抬手才结算」（13 期需求 2）。
+  //
+  // 原先是按下即补全 + CSS touch-action:none，两条叠加的后果是这条提示区
+  // 既滚不动也躲不开：手指一碰就选中，根本不给滚动的机会。
+  // 现在按下只记坐标，抬手时才判——位移超阈说明用户在滚，什么都不发。
+  // 这和带滑动的键是同一套心智：按下那一刻分不清点击还是滑动，只有抬手时
+  // 手指走过多远才成定局。
+  let hintDown: { cmd: string; x: number; y: number } | undefined;
+
+  function hintPointerDown(e: PointerEvent, cmd: string) {
+    hintDown = { cmd, x: coord(e.clientX), y: coord(e.clientY) };
+  }
+
+  function hintPointerUp(e: PointerEvent) {
+    const d = hintDown;
+    hintDown = undefined;
+    if (!d) return;   // 已被 leave/cancel 清掉：手指离开了原目标，不替用户选词条
+    if (!isTap({ x: d.x, y: d.y }, { x: coord(e.clientX), y: coord(e.clientY) })) return;
+    buzz();           // 震动挪到这里：滚动时不该震，否则每次滑都在嗡嗡响
+    onHint(d.cmd);
   }
 
   function sendIme() {
@@ -354,11 +372,9 @@
 
   {#if sub === "keys"}
     <div class="funcrow" class:big={isBig}>
-      <button class="key esc" data-key-id="Esc"
-        onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
-        onpointerup={() => keyUp("Esc")}
-        onpointercancel={() => keyUp("Esc")}
-        onpointerleave={() => keyUp("Esc")}>{ESC_KEY.cap}</button>
+      <!-- Tab 在 Esc 左边（13 期需求 4）：终端里 Tab 补全比 Esc 高频，
+           最左的位置该给更常按的那个。只有大布局的功能行有 Tab——
+           classic 的 Tab 在主键区 Q 行最左，照抄笔记本键盘，不动。 -->
       {#if isBig}
         <button class="key fnk" data-key-id="Tab"
           onpointerdown={(e) => { e.preventDefault(); keyDown("Tab"); }}
@@ -366,6 +382,11 @@
           onpointercancel={() => keyUp("Tab")}
           onpointerleave={() => keyUp("Tab")}>Tab</button>
       {/if}
+      <button class="key esc" data-key-id="Esc"
+        onpointerdown={(e) => { e.preventDefault(); keyDown("Esc"); }}
+        onpointerup={() => keyUp("Esc")}
+        onpointercancel={() => keyUp("Esc")}
+        onpointerleave={() => keyUp("Esc")}>{ESC_KEY.cap}</button>
       {#if isModOn("Fn")}
         <div class="fkeys">
           {#each FKEYS as k (k.id)}
@@ -379,7 +400,11 @@
       {:else}
         <div class="hints">
           {#each hints as h (h)}
-            <button class="hint-chip" onpointerdown={(e) => { e.preventDefault(); tapHint(h); }}>{h}</button>
+            <button class="hint-chip"
+              onpointerdown={(e) => hintPointerDown(e, h)}
+              onpointerup={hintPointerUp}
+              onpointercancel={() => (hintDown = undefined)}
+              onpointerleave={() => (hintDown = undefined)}>{h}</button>
           {/each}
         </div>
       {/if}
@@ -603,7 +628,9 @@
     border-radius: 999px;
     padding: 5px 11px;
     font-size: 0.7rem;
-    touch-action: none;
+    /* pan-x：把横向滚动交还给浏览器（含惯性），我们不自己实现滚动。
+       原先是 none，直接禁掉了原生滚动——这是「联想区滚不动」的另一半原因。 */
+    touch-action: pan-x;
     user-select: none;
     min-height: 2.3em;
   }

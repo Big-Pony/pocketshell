@@ -90,6 +90,9 @@ test("ops sub-tab: Home button sends escape sequence via onText", async () => {
   expect(onText).toHaveBeenCalledWith("\x1b[H");
 });
 
+// 13 期需求 2：联想条改「抬手才结算」，且交还原生横向滚动。
+// 按下即选中 + touch-action:none 两条叠加，导致这条提示区既滚不动
+// 也躲不开——手指一碰就选中，根本不给滚动的机会。
 test("normal state shows hint chips and tapping one calls onHint", async () => {
   const onHint = vi.fn();
   render(Keyboard, {
@@ -97,7 +100,32 @@ test("normal state shows hint chips and tapping one calls onHint", async () => {
   });
   const chip = screen.getByText("git status");
   await fireEvent.pointerDown(chip);
+  expect(onHint, "按下不应触发——要等抬手").not.toHaveBeenCalled();
+  await fireEvent.pointerUp(chip);
   expect(onHint).toHaveBeenCalledWith("git status");
+});
+
+test("联想条：按下后横向拖过阈值再抬手，判为滚动、不补全", async () => {
+  const onHint = vi.fn();
+  render(Keyboard, {
+    props: { onText: () => {}, onCommand: () => {}, hints: ["git status"], onHint },
+  });
+  const chip = screen.getByText("git status");
+  await fireEvent(chip, pointerEventAt("pointerdown", 100));
+  await fireEvent(chip, pointerEventAt("pointerup", 140));
+  expect(onHint).not.toHaveBeenCalled();
+});
+
+test("联想条：手指滑出 chip 后抬手不补全（pointerleave 清状态）", async () => {
+  const onHint = vi.fn();
+  render(Keyboard, {
+    props: { onText: () => {}, onCommand: () => {}, hints: ["git status"], onHint },
+  });
+  const chip = screen.getByText("git status");
+  await fireEvent.pointerDown(chip);
+  await fireEvent.pointerLeave(chip);
+  await fireEvent.pointerUp(chip);
+  expect(onHint).not.toHaveBeenCalled();
 });
 
 test("Fn state shows F1–F12 in the function row", async () => {
@@ -697,4 +725,42 @@ test("layered 符号层：Shift 让主副字符互换，与角标位置无关", 
   await fireEvent.pointerDown(shift);
   await fireEvent.pointerUp(shift);
   expect(cap(), "Shift 按下后应互换").toEqual({ main: "#", up: "3" });
+});
+
+// 13 期需求 4：大布局功能行 Tab 放最左（它比 Esc 更高频）。
+// 只动 layered / flick 两套大布局——classic 的功能行本来就没有 Tab
+//（它的 Tab 在主键区 Q 行最左，照抄笔记本键盘），且 classic 一字不变。
+test("layered / flick：功能行第一个键是 Tab，第二个才是 Esc", () => {
+  for (const kbLayout of ["layered", "flick"] as const) {
+    const { container } = render(Keyboard, {
+      props: { onText: vi.fn(), onCommand: vi.fn(), kbLayout },
+    });
+    const keys = Array.from(container.querySelectorAll(".funcrow > [data-key-id]"))
+      .map((b) => b.getAttribute("data-key-id"));
+    expect(keys, `${kbLayout} 功能行顺序不对`).toEqual(["Tab", "Esc"]);
+  }
+});
+
+test("classic：功能行只有 Esc，没有 Tab（既有布局零改动）", () => {
+  const { container } = render(Keyboard, {
+    props: { onText: vi.fn(), onCommand: vi.fn() },
+  });
+  const keys = Array.from(container.querySelectorAll(".funcrow > [data-key-id]"))
+    .map((b) => b.getAttribute("data-key-id"));
+  expect(keys).toEqual(["Esc"]);
+});
+
+test("换位后 Tab 仍发 \\x09、Esc 仍发 \\x1b", async () => {
+  const onText = vi.fn();
+  const { container } = render(Keyboard, {
+    props: { onText, onCommand: vi.fn(), kbLayout: "layered" },
+  });
+  const tab = container.querySelector('.funcrow [data-key-id="Tab"]') as HTMLElement;
+  await fireEvent.pointerDown(tab);
+  await fireEvent.pointerUp(tab);
+  expect(onText).toHaveBeenCalledWith("\x09");
+  const esc = container.querySelector('.funcrow [data-key-id="Esc"]') as HTMLElement;
+  await fireEvent.pointerDown(esc);
+  await fireEvent.pointerUp(esc);
+  expect(onText).toHaveBeenCalledWith("\x1b");
 });
