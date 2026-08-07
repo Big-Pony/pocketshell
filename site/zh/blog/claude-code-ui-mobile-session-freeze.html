@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CloudCLI（claudecodeui）手机上聊天卡在"处理中"、切后台回来终端冻住？ — PocketShell</title>
+<meta name="description" content="CloudCLI（claudecodeui）两个已知的手机端问题：流式回复中途断线后再也不回来，和切到后台再回来 Shell 面板不再更新。附对应 GitHub issue、根因分析和眼下能做的事。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/claude-code-ui-mobile-session-freeze" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-ui-mobile-session-freeze" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/claude-code-ui-mobile-session-freeze" />
+<meta property="og:title" content="CloudCLI（claudecodeui）手机上聊天卡在“处理中”、切后台回来终端冻住？" />
+<meta property="og:description" content="CloudCLI（claudecodeui）两个已知的手机端问题：流式回复中途断线后再也不回来，和切到后台再回来 Shell 面板不再更新。附对应 GitHub issue、根因分析和眼下能做的事。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CloudCLI（claudecodeui）手机上聊天卡在“处理中”、切后台回来终端冻住？" />
+<meta name="twitter:description" content="CloudCLI（claudecodeui）两个已知的手机端问题：流式回复中途断线后再也不回来，和切到后台再回来 Shell 面板不再更新。附对应 GitHub issue、根因分析和眼下能做的事。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "CloudCLI（claudecodeui）手机上聊天卡在“处理中”、切后台回来终端冻住？",
+  "description": "CloudCLI（claudecodeui）两个已知的手机端问题：流式回复中途断线后再也不回来，和切到后台再回来 Shell 面板不再更新。附对应 GitHub issue、根因分析和眼下能做的事。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/claude-code-ui-mobile-session-freeze" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/claude-code-ui-mobile-session-freeze" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>CloudCLI（claudecodeui）手机上聊天卡在"处理中"、切后台回来终端冻住？</h1>
+  <p class="lede">如果你自建了 CloudCLI（仓库名叫 claudecodeui），在手机 Safari 上遇到过流式回复中途断掉再也不回来、或者切到后台再切回来 Shell 面板不再刷新——这是个已经被公开记录的情况，不是你环境的问题。GitHub 上有两个对应的 issue。眼下能做的是手动点 Restart 或 Disconnect，下面说说背后具体发生了什么。</p>
+
+  <h2>两个独立的症状</h2>
+  <ul>
+    <li><strong>聊天回复中途卡死。</strong> 在 iOS Safari 上，流式回复走到一半连接断掉，界面就停在"处理中"——没有报错、没有重试，什么都不会再回来。</li>
+    <li><strong>切后台回来 Shell 面板不再更新。</strong> 把 App 切到后台或者锁屏，回来后 Shell 标签页停止显示新输出——但底层的 agent 进程其实还在跑，因为同时打开的 Chat 面板还在正常推进。</li>
+  </ul>
+
+  <h2>眼下能做的事</h2>
+  <p>这两个症状目前公开确认有效的做法都是同一个：手动在卡住的会话上点 Restart 或 Disconnect。这是个绕过办法，不是根治，但确实是目前唯一有记录、能把状态拉回来的路径。</p>
+
+  <h2>两个 issue，各自的根因</h2>
+  <p><strong>Issue <a href="https://github.com/siteboon/claudecodeui/issues/554">#554</a></strong>（2026-03-17 提交，撰写本文时仍是 open 状态）对应聊天卡死这个症状。报告者的原话是 iOS Safari 在这种情况下"currently unusable for interactive chat"（无法用于交互式聊天），他们提出的诉求是：</p>
+  <blockquote>Responses should be buffered server-side and replayed on reconnect.（响应应该在服务端缓冲，重连时重放。）</blockquote>
+  <p><span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/554">来源</a>，他人报告，我们未复现）</span></p>
+  <p><strong>Issue <a href="https://github.com/siteboon/claudecodeui/issues/953">#953</a></strong>（2026-07-02 提交，撰写本文时仍是 open 状态，对应版本 v1.35.1）对应 Shell 冻住这个症状。报告者给出的代码层面分析指出：服务端每 30 秒 ping 一次，但从不监听对应的 pong，也不追踪连接是否存活，更不会对半开连接调用 <code>terminate()</code>；再叠加 iOS 把标签页切到后台之后，原本的 socket 实际已经失效但不会发送 FIN 包——两者加在一起，数据最终被写进了一个服务端看起来"还开着"、实际上早已断掉的连接里。<span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/953">来源</a>，他人报告，我们未复现）</span></p>
+
+  <h2>手动绕过办法的局限</h2>
+  <p>Restart/Disconnect 是被动的——先发现出问题了，再去修，如果发生在任务执行到一半，那部分任务就中断了。完全不切后台可以规避，但手机会自己定时锁屏，这条路不现实。而且截至撰写本文时，两个 issue 都还没有 assignee，没有明确的修复时间表。</p>
+
+  <h2>CloudCLI 做得更好的地方</h2>
+  <p>先把这件事说清楚：CloudCLI 截至 2026-08-07 有 <strong>13,158 star、1,804 fork</strong>，跟 PocketShell 目前的体量完全不是一个量级——这个差距是真实的，它同时也说明了一件事：给编码 agent 做一个能自建的手机端入口，是个真实存在、已经被验证过的需求。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> 具体来说，CloudCLI 领先的地方包括：</p>
+  <ul>
+    <li><strong>生态与体量。</strong> 庞大且活跃的用户群和 issue 追踪记录，支持范围也已经从 Claude Code 扩展到 OpenCode、Cursor CLI、Codex——一个界面接多个编码 agent，不是只接一个。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span></li>
+    <li><strong>聊天式的交互方式。</strong> 对不熟悉裸终端的人来说，一个带聊天界面、附带一个 shell 的产品形态确实更友好——这是设计取舍的不同，不是谁更差。</li>
+    <li><strong>托管版本。</strong> 商用的 CloudCLI Cloud 正在做，目标是做到自己的电脑关机也能跑——这是任何自建方案（包括 PocketShell）在定义上都做不到的事。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span></li>
+  </ul>
+
+  <h2>PocketShell 架构上的不同之处</h2>
+  <p>这里说的是设计上的差异，不是说 PocketShell 对上面这些问题免疫——我们没有在 CloudCLI 那个体量上跑过，也没有独立审计过的记录能证明或反证任何一边。能确定说的是：PocketShell 判断连接是否存活，用的是心跳 ping/pong <em>加上</em>一个独立的过期超时，而不是只依赖 socket 自身的 <code>onclose</code>/<code>onerror</code> 事件——双信号判活正是为了抓住那种"看起来还开着、实际已经不响应"的连接。重连时按服务端环形缓冲区里记录的序号补齐所有错过的内容，而不是假设原来那个 socket 对象还有效。顶部状态栏会实时显示连接状态点和断线提示条，断了是看得见的，不是悄无声息的。</p>
+  <p>还有一处结构上的差异值得说清楚：CloudCLI 把 Chat 和 Shell 拆成两条独立通道（一条是 <code>/ws</code> 连接加文件监听，另一条是独立的 <code>/shell</code> WebSocket）——这也是为什么 Chat 面板能继续推进、Shell 面板却冻住的原因，两者根本不是同一条连接。PocketShell 走的是单一 tmux/PTY 会话模型。这不是同一种系统形态，谈不上严格的"谁更好"，只是对同一个问题给出了不同的答案。</p>
+
+  <h2>该选哪个</h2>
+  <table>
+    <tr><th>你想要</th><th>选</th></tr>
+    <tr><td>图形化、聊天式的 IDE 体验，支持多种 agent，插件生态活跃</td><td>CloudCLI</td></tr>
+    <tr><td>任务在断网之后还能继续跑，跑完或卡住时能收到通知</td><td>PocketShell</td></tr>
+  </table>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/claude-code-ui-mobile-session-freeze" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

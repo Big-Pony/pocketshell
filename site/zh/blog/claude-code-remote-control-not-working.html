@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude Code Remote Control 连不上/卡住不动？3 个原因和对应解法 — PocketShell</title>
+<meta name="description" content="Remote Control 图标变灰、手机端一直转圈没反应？最常见的三个死因——断网超时、进程被杀、电脑刚睡醒——分别怎么判断、怎么解。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/claude-code-remote-control-not-working" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-remote-control-not-working" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-remote-control-not-working" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-remote-control-not-working" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/claude-code-remote-control-not-working" />
+<meta property="og:title" content="Claude Code Remote Control 连不上/卡住不动？3 个原因和对应解法" />
+<meta property="og:description" content="Remote Control 图标变灰、手机端一直转圈没反应？最常见的三个死因——断网超时、进程被杀、电脑刚睡醒——分别怎么判断、怎么解。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Claude Code Remote Control 连不上/卡住不动？3 个原因和对应解法" />
+<meta name="twitter:description" content="Remote Control 图标变灰、手机端一直转圈没反应？最常见的三个死因——断网超时、进程被杀、电脑刚睡醒——分别怎么判断、怎么解。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Claude Code Remote Control 连不上/卡住不动？3 个原因和对应解法",
+  "description": "Remote Control 图标变灰、手机端一直转圈没反应？最常见的三个死因——断网超时、进程被杀、电脑刚睡醒——分别怎么判断、怎么解。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/claude-code-remote-control-not-working" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/claude-code-remote-control-not-working" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Claude Code Remote Control 连不上/卡住不动？3 个原因和对应解法</h1>
+  <p class="lede">图标从绿点变灰，或者手机端一直转圈没有任何输出。这多半不是 bug，而是本地进程被下面三件事之一杀掉了。先判断是哪种，再对症下药。</p>
+
+  <h2>先给结论</h2>
+  <p>如果昨天还好好的，今天突然卡住不动，最大概率的原因是：<strong>电脑断网持续了大约 10 分钟以上，Remote Control 会话判定超时，本地进程直接退出了。</strong><span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span>这是文档里写明的设计行为，不是缺陷。解法很简单：回到电脑前重新执行一遍 <code>claude remote-control</code>。</p>
+  <p>Remote Control 目前是 research preview（预览特性），Pro/Max/Team/Enterprise 都能用，但 Team/Enterprise 账号默认是关的，要管理员手动打开。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span>如果超时不是你遇到的情况，下面表格里还有另外两个常见死因。</p>
+
+  <h2>能杀死 Remote Control 会话的三件事</h2>
+  <table>
+    <tr><th>原因</th><th>你会看到什么</th><th>为什么会这样</th></tr>
+    <tr>
+      <td>断网超时</td>
+      <td>图标从绿变灰，之后一直没有任何新输出，怎么等都没用</td>
+      <td>断网持续约 10 分钟以上，会话判超时，本地 <code>claude</code> 进程直接退出<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></td>
+    </tr>
+    <tr>
+      <td>进程被杀</td>
+      <td>症状一样，但发生在你关掉终端窗口、退出 VS Code，或电脑刚合盖睡眠之后</td>
+      <td>Remote Control 本身就是挂在那个终端/编辑器会话上的本地进程，进程一死，手机那头就没人可对话了<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></td>
+    </tr>
+    <tr>
+      <td>电脑还在唤醒中</td>
+      <td>打开电脑的头 10~30 秒转圈，之后自己好了</td>
+      <td>电脑刚从睡眠唤醒，重连还在追赶进度</td>
+    </tr>
+  </table>
+
+  <h2>不需要额外东西的解法</h2>
+  <ul>
+    <li><strong>重新起一次。</strong>回到终端再执行一遍 <code>claude remote-control</code>——超时和进程被杀这两种情况都靠这一招。</li>
+    <li><strong>把它包进 <code>tmux</code> 或 <code>screen</code> 里跑。</strong>官方文档本身就建议在终端复用器里启动 Remote Control，这样关掉终端窗口不会连带杀死底层进程。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></li>
+    <li><strong>不让电脑睡眠。</strong>macOS 出门前跑一下 <code>caffeinate</code>，或者直接在电源设置里关掉自动睡眠。</li>
+    <li><strong>信号不稳时用手机热点兜底。</strong>家里/公司 WiFi 经常掉线的话，这治不了那个 10 分钟的超时线，但能减少你撞上它的次数。</li>
+  </ul>
+
+  <h2>这些解法解决不了的部分</h2>
+  <p><code>tmux</code> 保住的是"进程还活着"，不代表手机端会自动重新接上那个会话——回来后你可能还是要手动执行一遍 <code>claude remote-control --continue</code>。不让电脑睡眠这件事，坐在桌前很容易，出差在飞机上就很难顾上；而且大多数笔记本合上盖子会强制睡眠，跟电源设置怎么调都没关系。热点能缓解 WiFi 不稳，但只要你所在的地方彻底没信号超过十分钟，它就无能为力了。</p>
+  <p>如果你真正想要的是"电脑可以直接关机"，Remote Control 从设计上就不是干这个的——官方文档给的方案是改用 Cloud sessions，任务跑在 Anthropic 自己的基础设施上，而不是你的笔记本上。<span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span>上面几条解法都改变不了这一点：它们都还是假设你的电脑是开着的。</p>
+
+  <h2>如果你要的是"不设超时、不用手动重启"</h2>
+  <p>上面每一条解法管理的都是一个仍然可能死掉的进程——只是让它更不容易死，或者把"发现它死了"这件事甩给你自己去做。如果你要的是一个能扛住任意时长离线、回来自动接上而不用你动手的会话，那需要的是不同的架构，不是把超时线拉长。</p>
+  <p>PocketShell 是围着这个思路做的自托管方案：你机器上的 <code>tmux</code> 会话才是真身，手机跟它的连接只是一条可以断的线。离线期间输出照常写进服务端的环形缓冲，重连时按序号把你错过的部分补发回来，不依赖同一个浏览器标签页或同一次 App 会话一直开着——这不是一个可以调的超时策略，是记录"你不在的时候发生了什么"的另一种方式。</p>
+  <p>说清楚它解决不了什么：PocketShell 同样不是云端托管。跑它的那台机器一断电，任务照样停，这点和任何自托管方案一样，也和上面官方的 Cloud sessions 不同。它去掉的只是"手机这头网络不稳"这件事本身会杀死会话。</p>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/claude-code-remote-control-not-working" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude Code on iPad: What Actually Works — PocketShell</title>
+<meta name="description" content="Yes, you can run Claude Code from an iPad — but which path you take changes the experience a lot. Official app, SSH client, VNC, and a browser-based option compared." />
+<link rel="canonical" href="https://pocketshell.net/blog/claude-code-on-ipad" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-on-ipad" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-on-ipad" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-on-ipad" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/claude-code-on-ipad" />
+<meta property="og:title" content="Claude Code on iPad: What Actually Works" />
+<meta property="og:description" content="Yes, you can run Claude Code from an iPad — but which path you take changes the experience a lot. Official app, SSH client, VNC, and a browser-based option compared." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Claude Code on iPad: What Actually Works" />
+<meta name="twitter:description" content="Yes, you can run Claude Code from an iPad — but which path you take changes the experience a lot. Official app, SSH client, VNC, and a browser-based option compared." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Claude Code on iPad: What Actually Works",
+  "description": "Yes, you can run Claude Code from an iPad — but which path you take changes the experience a lot. Official app, SSH client, VNC, and a browser-based option compared.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/claude-code-on-ipad" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/claude-code-on-ipad" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Claude Code on iPad: What Actually Works</h1>
+  <p class="lede">Short answer: yes, you can. Longer answer: there are three genuinely different paths, and which one you pick changes the experience more than the word "yes" suggests.</p>
+
+  <h2>Why this needs an answer in the first place</h2>
+  <p>iPadOS doesn't ship a terminal, and Claude Code is a command-line TUI. Getting it onto an iPad screen always means going through something else first — an app, an SSH client, or a browser tab talking to a machine that's actually running the terminal.</p>
+
+  <h2>Three paths</h2>
+
+  <h3>1. The official Claude app</h3>
+  <p>On an iPad, you install the same iOS app you'd put on an iPhone. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span> From there you're using either Cloud sessions or Remote Control, same as on a phone. It's the lowest-friction option if you already have an Anthropic account at the right plan tier — no separate SSH setup, no server address to remember.</p>
+
+  <h3>2. An SSH client + tmux</h3>
+  <p>iPad SSH clients like Blink or Termius connect straight to a dev machine you already have running <code>claude</code> inside <code>tmux</code>. This gets you the real terminal experience — actual keybindings, actual scrollback, nothing translated through a mobile UI layer.</p>
+
+  <h3>3. Remote desktop / VNC into a real computer</h3>
+  <p>You're not running Claude Code "on" the iPad at all here — you're looking at a full desktop over VNC or similar and Claude Code happens to be one of the windows on it. It works, but it's the heaviest option: more latency, more data, and a full computer's UI squeezed onto a tablet screen that wasn't the target for it.</p>
+
+  <h2>Where each one runs into a wall</h2>
+  <table>
+    <tr><th>Path</th><th>Where it falls short</th></tr>
+    <tr><td>Official app</td><td>Runs the same layout as the iPhone version; Remote Control still requires your own computer to stay powered on and running Claude Code or Claude Desktop — if the machine's off, you need Cloud sessions instead <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></td></tr>
+    <tr><td>SSH client</td><td>You manage session persistence yourself (see our <a href="/blog/keep-claude-code-running-after-ssh-disconnect">piece on surviving SSH disconnects</a>), there's no built-in push notification, and pure keyboard-driven workflows — especially modifier keys like Ctrl and Esc — aren't naturally comfortable on a touchscreen without an external keyboard or a client that adds its own function row</td></tr>
+    <tr><td>VNC / remote desktop</td><td>Higher latency, higher data usage, and you're operating an entire computer's interface rather than something purpose-built for a touch display</td></tr>
+  </table>
+
+  <blockquote>One thing worth being direct about, because it's the detail this whole question usually hinges on: none of the above — including the option below — turns an iPad into a purpose-built tablet IDE. What follows is a mobile-shaped tool that also opens on a tablet, not a tablet-native layout.</blockquote>
+
+  <h2>Where PocketShell fits</h2>
+  <p>PocketShell is a PWA — pure web, no App Store install. Open Safari on the iPad, point it at your own server, and it's there; "add to home screen" gets you a standalone-feeling icon without going through an app review process. Because touch input on a bare terminal is the actual pain point, it ships a full custom on-screen keyboard layer for exactly the keys a physical iPad keyboard-less session is missing — Ctrl, Alt, Esc, arrow keys, and a function-key row — plus a separate IME buffer tab so a system input method (useful for CJK text or emoji) can send a whole composed string at once instead of fighting the terminal character by character.</p>
+  <p>What it doesn't do, to be direct about the same caveat from above: it isn't a tablet-optimized layout. The project's own scope is explicitly mobile-phone viewports first (roughly 390×844-class), and opening it in an iPad browser gives you that same phone-width interface rather than something that spreads out to use the extra screen the way a native iPad app would. If what you're after is specifically a large-screen, tablet-native coding experience, none of the four options here — including this one — is built for that.</p>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/claude-code-on-ipad" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

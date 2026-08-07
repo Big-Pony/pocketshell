@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude Code Remote Control Not Working? 3 Causes and Fixes — PocketShell</title>
+<meta name="description" content="Remote Control stuck spinning or disconnected? Here are the three most common causes — network timeout, killed process, sleeping machine — and what actually fixes each." />
+<link rel="canonical" href="https://pocketshell.net/blog/claude-code-remote-control-not-working" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-remote-control-not-working" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-remote-control-not-working" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-remote-control-not-working" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/claude-code-remote-control-not-working" />
+<meta property="og:title" content="Claude Code Remote Control Not Working? 3 Causes and Fixes" />
+<meta property="og:description" content="Remote Control stuck spinning or disconnected? Here are the three most common causes — network timeout, killed process, sleeping machine — and what actually fixes each." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Claude Code Remote Control Not Working? 3 Causes and Fixes" />
+<meta name="twitter:description" content="Remote Control stuck spinning or disconnected? Here are the three most common causes — network timeout, killed process, sleeping machine — and what actually fixes each." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Claude Code Remote Control Not Working? 3 Causes and Fixes",
+  "description": "Remote Control stuck spinning or disconnected? Here are the three most common causes — network timeout, killed process, sleeping machine — and what actually fixes each.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/claude-code-remote-control-not-working" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/claude-code-remote-control-not-working" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Claude Code Remote Control Not Working? 3 Causes and Fixes</h1>
+  <p class="lede">Remote Control shows a gray icon, or your phone just spins with no output. It's usually not a bug — it's one of three specific things that killed the local process. Here's how to tell which, and what to do about each.</p>
+
+  <h2>The quick answer</h2>
+  <p>If Remote Control worked yesterday and today it just hangs, the single most likely cause is: your laptop lost network for roughly ten minutes or more, and the Remote Control session timed out and exited. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span> That's documented, expected behavior — not a bug. The fix is to go back to the machine and run <code>claude remote-control</code> again.</p>
+  <p>Remote Control is currently a research preview available on Pro, Max, Team, and Enterprise plans (Team and Enterprise have it off by default until an org owner enables it). <span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span> If that timeout isn't your situation, the table below covers the other two common causes.</p>
+
+  <h2>Three things that kill a Remote Control session</h2>
+  <table>
+    <tr><th>Cause</th><th>What you'll see</th><th>Why it happens</th></tr>
+    <tr>
+      <td>Network timeout</td>
+      <td>Icon goes from green to gray; no new output at all, indefinitely</td>
+      <td>After roughly 10 minutes without network, the session times out and the local <code>claude</code> process exits <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></td>
+    </tr>
+    <tr>
+      <td>Process killed</td>
+      <td>Same symptom, but it happened right after you closed a terminal window, quit VS Code, or your laptop went to sleep</td>
+      <td>Remote Control is a local process. Close the terminal or editor it's attached to and the process dies with it — there's nothing left for your phone to talk to <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></td>
+    </tr>
+    <tr>
+      <td>Machine still waking up</td>
+      <td>Spins for 10–30 seconds right after you open the laptop, then recovers on its own</td>
+      <td>The laptop just woke from sleep; reconnect is still catching up</td>
+    </tr>
+  </table>
+
+  <h2>Fixes that don't need anything extra</h2>
+  <ul>
+    <li><strong>Just restart it.</strong> Go back to the terminal and run <code>claude remote-control</code> again — this covers both the timeout and the process-killed case.</li>
+    <li><strong>Run it inside <code>tmux</code> or <code>screen</code>.</strong> Anthropic's own docs recommend starting Remote Control inside a terminal multiplexer specifically so closing your terminal window doesn't kill the underlying process. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></li>
+    <li><strong>Keep the machine from sleeping.</strong> <code>caffeinate</code> on macOS before you leave, or disable sleep in power settings.</li>
+    <li><strong>Fall back to a phone hotspot</strong> if your home or office WiFi drops often — it won't remove the 10-minute timeout, but it cuts how often you actually hit it.</li>
+  </ul>
+
+  <h2>Where these fixes fall short</h2>
+  <p>Wrapping the process in <code>tmux</code> keeps it <em>alive</em>, but your phone doesn't automatically reattach to it — you may still need to run <code>claude remote-control --continue</code> by hand once you're back. Keeping a laptop from sleeping is easy at a desk and awkward on a plane, and closing the lid on most laptops forces sleep regardless of what your power settings say. A hotspot helps with flaky WiFi but does nothing once you're somewhere with no signal at all for more than ten minutes.</p>
+  <p>If the real goal is "the machine can be off entirely," Remote Control isn't built for that — Anthropic's own docs point you to Cloud sessions instead, which execute on Anthropic's infrastructure rather than your laptop. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span> None of the fixes above change that; they all still assume your machine is on.</p>
+
+  <h2>If what you want is no timeout and no manual restart</h2>
+  <p>Every fix above manages a process that can still die — it just makes that less likely, or makes you the one who has to notice when it happened. If you want a session that survives an arbitrary amount of offline time and reconnects itself without a manual step, that calls for a different architecture, not a longer timeout.</p>
+  <p>PocketShell is a self-hosted alternative built around that idea: the <code>tmux</code> session on your machine is the source of truth, not the phone's connection to it. Output keeps writing into a server-side ring buffer while you're offline, and reconnecting replays whatever you missed by sequence number instead of depending on the same browser tab or app session staying open — it isn't a network-timeout policy you can tune, it's a different way of tracking what happened while you were gone.</p>
+  <p>To be clear about what that doesn't solve: PocketShell isn't cloud-hosted either. If the machine running it loses power, your task stops too — same as any self-hosted setup, and unlike the official Cloud sessions above. What it removes is the phone-side flakiness being the thing that kills your session in the first place.</p>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/claude-code-remote-control-not-working" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

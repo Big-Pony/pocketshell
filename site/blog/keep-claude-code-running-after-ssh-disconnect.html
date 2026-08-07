@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Keep Claude Code Running After an SSH Disconnect — PocketShell</title>
+<meta name="description" content="SSH drops and the Claude Code TUI is just gone, task and context along with it. Why that happens, and how tmux, screen, zellij, and mosh each address a different part of it." />
+<link rel="canonical" href="https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/keep-claude-code-running-after-ssh-disconnect" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" />
+<meta property="og:title" content="Keep Claude Code Running After an SSH Disconnect" />
+<meta property="og:description" content="SSH drops and the Claude Code TUI is just gone, task and context along with it. Why that happens, and how tmux, screen, zellij, and mosh each address a different part of it." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Keep Claude Code Running After an SSH Disconnect" />
+<meta name="twitter:description" content="SSH drops and the Claude Code TUI is just gone, task and context along with it. Why that happens, and how tmux, screen, zellij, and mosh each address a different part of it." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Keep Claude Code Running After an SSH Disconnect",
+  "description": "SSH drops and the Claude Code TUI is just gone, task and context along with it. Why that happens, and how tmux, screen, zellij, and mosh each address a different part of it.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/keep-claude-code-running-after-ssh-disconnect" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Keep Claude Code Running After an SSH Disconnect</h1>
+  <p class="lede">Your laptop lid closes, or WiFi hiccups for a second, and the SSH session drops. When you reconnect, the Claude Code TUI is gone — not paused, not backgrounded, just gone, task and context with it.</p>
+
+  <h2>Why the process doesn't just survive on its own</h2>
+  <p>Claude Code's terminal interface needs a real terminal underneath it: it renders a screen, reads keypresses, and streams output to something that behaves like an actual TTY. When the SSH session that carried that connection ends, the process attached to it typically doesn't survive — and this isn't really a "backgrounding" problem, it's a "there's no terminal left for it to talk to" problem. That's also why <code>nohup</code> doesn't save you here: it stops the process from dying when you log out of a shell that keeps running, but it does nothing if the terminal itself disappears out from under a foreground TUI.</p>
+
+  <h2>Fixes that don't need anything installed beyond a package manager</h2>
+
+  <h3>Run it inside tmux, screen, or zellij</h3>
+  <p>Start <code>claude</code> (or <code>claude remote-control</code>) inside a terminal multiplexer, and the process keeps running on the server after SSH drops — you reconnect and reattach to the same window instead of starting over. Anthropic's own docs recommend exactly this for Remote Control, for the same underlying reason. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></p>
+  <p>One practitioner's account of this exact problem is worth reading directly: after an SSH disconnect killed a long-running Claude Code session mid-task, they found that reattaching to a multiplexer was the only thing that actually got them back to where they'd left off, and settled on <code>zellij</code> specifically — their stated reason was that it comes with a full scrollback buffer by default, where they felt <code>tmux</code>/<code>screen</code> needed extra configuration to get comfortable mouse scrolling working. <span class="src">（<a href="https://cdmckay.org/how-to-keep-claude-code-running-across-ssh-disconnects/">来源</a>，他人报告，我们未复现）</span> That's a personal preference, not a universal ranking — <code>tmux</code> and <code>screen</code> do the same core job.</p>
+
+  <h3>Use mosh instead of plain SSH</h3>
+  <p>Mosh is a different layer: it's designed to survive network changes and brief drops that would otherwise kill a raw SSH connection outright, so you simply hit fewer full disconnects in the first place. It doesn't replace a multiplexer — it complements one, by making the connection itself more resilient.</p>
+
+  <h2>Where this still leaves a gap</h2>
+  <p>A multiplexer keeps the process <em>alive on the server</em>. It says nothing about what you're carrying with you. You still need a device that can run an SSH client, you need to remember the session name, and you need to manually <code>ssh</code> back in and <code>tmux attach</code> to the right window — none of which is available if the only thing in your pocket is a phone with no terminal app installed. Mosh improves the connection layer, but it doesn't help if what you actually have right now is "just a phone, no laptop, no SSH client."</p>
+
+  <h2>Where PocketShell fits</h2>
+  <p>The idea is the same one above — protect the session with something like tmux — just with the client swapped out. Instead of "get a laptop, then SSH back into your dev box," the phone itself is the client: it's a self-hosted web app that talks to an agent on your machine directly, so there's no separate SSH app or terminal emulator to install first. The tmux session it manages is the actual source of truth, and output written while you were disconnected gets replayed by sequence number when you reconnect, rather than expecting you to scroll back through history to find where you left off.</p>
+  <p>It doesn't replace mosh's job either — PocketShell runs over a standard WebSocket plus an application-level replay mechanism, not a transport-layer protocol built to survive dropped packets mid-flight. And it still assumes you have a machine somewhere that stays on to run the agent — the part it removes is needing a decent SSH/tmux client on the phone itself, not needing a server at all.</p>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/keep-claude-code-running-after-ssh-disconnect" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

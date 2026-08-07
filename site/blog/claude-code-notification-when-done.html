@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Get a Notification When Claude Code Finishes (or Needs You) — PocketShell</title>
+<meta name="description" content="Four ways to stop babysitting a running Claude Code task: official mobile push, a prompt-based request, tmux activity monitoring, and your own webhook script — with the tradeoffs of each." />
+<link rel="canonical" href="https://pocketshell.net/blog/claude-code-notification-when-done" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-notification-when-done" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-notification-when-done" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-notification-when-done" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/claude-code-notification-when-done" />
+<meta property="og:title" content="Get a Notification When Claude Code Finishes (or Needs You)" />
+<meta property="og:description" content="Four ways to stop babysitting a running Claude Code task: official mobile push, a prompt-based request, tmux activity monitoring, and your own webhook script — with the tradeoffs of each." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Get a Notification When Claude Code Finishes (or Needs You)" />
+<meta name="twitter:description" content="Four ways to stop babysitting a running Claude Code task: official mobile push, a prompt-based request, tmux activity monitoring, and your own webhook script — with the tradeoffs of each." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Get a Notification When Claude Code Finishes (or Needs You)",
+  "description": "Four ways to stop babysitting a running Claude Code task: official mobile push, a prompt-based request, tmux activity monitoring, and your own webhook script — with the tradeoffs of each.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/claude-code-notification-when-done" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/claude-code-notification-when-done" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Get a Notification When Claude Code Finishes (or Needs You)</h1>
+  <p class="lede">You kick off a long task, wander off, and come back to find it either finished twenty minutes ago or stuck on a confirmation prompt the entire time. Here are four ways to fix that, roughly in order of "how much do I have to set up."</p>
+
+  <h2>The options</h2>
+  <ol>
+    <li><strong>Turn on official mobile push</strong> — no scripting, but a few preconditions.</li>
+    <li><strong>Just ask for it in the prompt</strong> — zero setup, works per-task.</li>
+    <li><strong>tmux activity monitoring / terminal bell</strong> — built into tools you may already use.</li>
+    <li><strong>A webhook script you write yourself</strong> — full control, full maintenance burden.</li>
+  </ol>
+
+  <h2>1. Official mobile push (start here)</h2>
+  <p>If Remote Control is active, Claude Code can push a notification straight to your phone. Under <code>/config</code> there are two independent toggles: "Push when Claude decides" (the model itself judges when something's worth interrupting you for) and "Push when actions required" (fires specifically when it's blocked on your input). You can also just say it in the prompt — "notify me when the tests finish" works as a one-off instruction. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#mobile-push-notifications">来源</a>，官方文档）</span></p>
+  <p>The catch: this is layered on top of Remote Control, which is currently a research preview available on Pro, Max, Team, and Enterprise plans — Team and Enterprise have it off by default until an org owner turns it on. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span> You also need the official app installed, and Remote Control has to actually be connected when the task finishes — if it timed out or the process was killed (see our <a href="/blog/claude-code-remote-control-not-working">Remote Control troubleshooting piece</a> if that's happening to you), there's nothing left to push from.</p>
+
+  <h2>2. Ask for it in the prompt</h2>
+  <p>No setup at all — just tell Claude what you want in plain language. This works because the prompt-based path rides the same push mechanism above, so it inherits the same preconditions (Remote Control connected, right plan tier). It's fine for a one-off, but you're re-typing the instruction every session and it only covers what you remembered to ask for.</p>
+
+  <h2>3. tmux monitor-activity or a terminal bell</h2>
+  <p>If you're already running things in <code>tmux</code>, <code>monitor-activity</code> flags a window when it changes, and most terminals will visually flag or literally ring on a bell character. This costs nothing to set up if you already live in tmux, but it only means something while you're sitting at that machine — walk away, and a flagged window or a bell nobody hears doesn't reach you.</p>
+
+  <h2>4. Write your own webhook script</h2>
+  <p>Wrap a command so that when it exits, it <code>curl</code>s a webhook — a company chat bot, Slack, Discord, whatever you've got. This is the only option here with zero platform lock-in, but the cost shows up per-task: you have to remember to wrap every command individually, forgetting once means silence, and it only ever fires for things you explicitly scripted — it can't cover "the AI decided this moment was worth flagging," only "this specific command finished."</p>
+
+  <h2>Comparing the four</h2>
+  <table>
+    <tr><th></th><th>Setup cost</th><th>Reaches you when phone's locked/away</th><th>Covers "AI decides it matters"</th></tr>
+    <tr><td>Official push</td><td>Low (toggle + app)</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Prompt request</td><td>None</td><td>Yes</td><td>No — only what you asked for</td></tr>
+    <tr><td>tmux / bell</td><td>None (if already using tmux)</td><td>No — only while at the machine</td><td>No</td></tr>
+    <tr><td>Webhook script</td><td>Per-command, ongoing</td><td>Yes</td><td>No — only scripted commands</td></tr>
+  </table>
+
+  <h2>Where PocketShell fits</h2>
+  <p>If what you actually want is "any of the CLI coding tools I use — not just Claude Code — reaches my phone when a run finishes or gets stuck, without me writing a wrapper script for every single task," that's a different shape of problem than the four above, each of which covers one tool or one command at a time.</p>
+  <p>PocketShell wires into the native completion hooks that tools already expose — for Claude Code specifically that means writing to <code>hooks.Notification</code> in <code>~/.claude/settings.json</code> — rather than scanning processes or guessing what's running. It currently auto-wires four tools this way: Claude Code, Codex, OpenCode, and Kimi. Delivery goes over two channels: Web Push (self-signed VAPID keys, encrypted payload, deep-links back to the exact session) and outbound webhooks with built-in templates for WeCom, Feishu, Slack, and Discord, plus a custom JSON template — each channel has its own on/off switch and test-send button. It also distinguishes "you're actively looking at this session right now" (in-app toast only, no system notification) from "you're elsewhere or the phone's locked" (full system push), with a default 10-second dedup window per session so one noisy task doesn't spam you.</p>
+  <p>What it doesn't do: it isn't scanning for arbitrary processes, so a tool without a native completion hook doesn't get wired in automatically — right now that's four tools, not "any CLI program." And the environment variables that make hooks fire are injected when a session is created, so a session that already existed before you wired notifications up needs to be recreated to pick it up.</p>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/claude-code-notification-when-done" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

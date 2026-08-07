@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>iPad 上怎么用 Claude Code：三条路径分别是什么体验 — PocketShell</title>
+<meta name="description" content="能，但分三条路径，体验差得不小：官方 App、SSH 客户端、远程桌面/VNC，外加一个浏览器方案，各自的门槛和短板。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/claude-code-on-ipad" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-on-ipad" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-on-ipad" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-on-ipad" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/claude-code-on-ipad" />
+<meta property="og:title" content="iPad 上怎么用 Claude Code：三条路径分别是什么体验" />
+<meta property="og:description" content="能，但分三条路径，体验差得不小：官方 App、SSH 客户端、远程桌面/VNC，外加一个浏览器方案，各自的门槛和短板。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="iPad 上怎么用 Claude Code：三条路径分别是什么体验" />
+<meta name="twitter:description" content="能，但分三条路径，体验差得不小：官方 App、SSH 客户端、远程桌面/VNC，外加一个浏览器方案，各自的门槛和短板。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "iPad 上怎么用 Claude Code：三条路径分别是什么体验",
+  "description": "能，但分三条路径，体验差得不小：官方 App、SSH 客户端、远程桌面/VNC，外加一个浏览器方案，各自的门槛和短板。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/claude-code-on-ipad" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/claude-code-on-ipad" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>iPad 上怎么用 Claude Code：三条路径分别是什么体验</h1>
+  <p class="lede">短答案：能。长答案：真正能走的有三条完全不同的路，选哪条对体验的影响比"能"这个字暗示的要大得多。</p>
+
+  <h2>为什么这个问题不能一句话答完</h2>
+  <p>iPadOS 本身不带终端，而 Claude Code 是个命令行 TUI。想让它出现在 iPad 屏幕上，一定要先经过点别的什么——一个 App、一个 SSH 客户端，或者一个连着真正在跑终端的机器的浏览器标签页。</p>
+
+  <h2>三条路径</h2>
+
+  <h3>1. 官方 Claude App</h3>
+  <p>iPad 上装的是和 iPhone 一样的那个 iOS 版本 App。<span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span>进去之后用的是 Cloud sessions 或 Remote Control，跟手机上完全一样。如果你已经有对应账号层级，这是门槛最低的一条路——不用另外配 SSH、不用记服务器地址。</p>
+
+  <h3>2. SSH 客户端 + tmux</h3>
+  <p>Blink、Termius 这类 iPad SSH 客户端直接连你自己那台已经在 <code>tmux</code> 里跑着 <code>claude</code> 的开发机。这条路给你的是真正的终端体验——真实的按键绑定、真实的回滚缓冲，中间没有经过任何移动端 UI 层的转译。</p>
+
+  <h3>3. 远程桌面 / VNC 连一台真电脑</h3>
+  <p>这条路上你根本没有在 iPad"上"跑 Claude Code——你看到的是一整个通过 VNC 之类协议传过来的桌面，Claude Code 只是上面的一个窗口。能用，但是最重的一条路：延迟更高、流量更大，而且是把一整台电脑的界面硬塞进一块从设计上就不是为它准备的平板屏幕。</p>
+
+  <h2>每条路各自撞到的墙</h2>
+  <table>
+    <tr><th>路径</th><th>短板在哪</th></tr>
+    <tr><td>官方 App</td><td>跑的还是 iPhone 版本的布局；Remote Control 依旧要求你自己那台电脑保持开机、跑着 Claude Code 或 Claude Desktop——电脑关机的话得换成 Cloud sessions <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></td></tr>
+    <tr><td>SSH 客户端</td><td>会话保活要自己管（可以看我们<a href="/zh/blog/keep-claude-code-running-after-ssh-disconnect">另一篇讲 SSH 断线怎么办的文章</a>），没有内置推送通知，纯键盘驱动的操作方式——尤其是 Ctrl、Esc 这类修饰键——在没有外接键盘或客户端自带功能行的触屏上不算顺手</td></tr>
+    <tr><td>VNC / 远程桌面</td><td>延迟更高、流量更大，你操作的是一整台电脑的界面，而不是专门为触屏设计的东西</td></tr>
+  </table>
+
+  <blockquote>有一点值得直说，因为这问题多半就卡在这个细节上：以上所有路径——包括下面这个——都不会把 iPad 变成一个专为平板打造的 IDE。接下来说的是一个"手机形态、也能在平板上打开"的工具，不是"平板原生布局"。</blockquote>
+
+  <h2>PocketShell 在哪一段有用</h2>
+  <p>PocketShell 是纯 Web 应用（PWA），不用上 App Store。iPad 上打开 Safari，指向你自己的服务器就能用；"添加到主屏幕"能拿到一个看起来像独立应用的图标，不用经过应用商店的审核流程。因为裸终端的触屏输入才是真正的痛点，它做了一整套自定义的屏幕虚拟键盘，专门补上没有外接键盘时会缺的那些键——Ctrl、Alt、Esc、方向键、外加一排功能键；还有一个独立的输入法缓冲子 tab，系统输入法（对中文、表情这类组合输入有用）可以整段发送，不用跟终端逐字符较劲。</p>
+  <p>直说它不做什么，呼应上面那条提示：它不是针对平板优化过的布局。项目本身的定位就是明确的手机浏览器优先（390×844 级别视口），在 iPad 浏览器里打开，拿到的还是那套手机宽度的界面，不会像原生 iPad App 那样把多出来的屏幕铺开用。如果你要的正是大屏、平板原生的编码体验，这里说的四条路——包括这一条——没有一条是为这个准备的。</p>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/claude-code-on-ipad" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

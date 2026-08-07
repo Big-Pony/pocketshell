@@ -331,5 +331,5 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 48px; font-size: 13.
   .article { padding: 36px 20px 60px; }
   .article h1 { font-size: 27px; }
   .article h2 { font-size: 20px; }
-  .article table { font-size: 14px; }
+  .article table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; font-size: 14px; }
 }

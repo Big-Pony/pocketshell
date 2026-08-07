@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude Code 跑完/卡住了怎么让手机收到通知 — PocketShell</title>
+<meta name="description" content="长任务不想一直盯着：官方手机推送、提示词里直接要求、tmux 活动监控、自己写 webhook 脚本，四种办法各自的门槛和短板。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/claude-code-notification-when-done" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-notification-when-done" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-notification-when-done" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-notification-when-done" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/claude-code-notification-when-done" />
+<meta property="og:title" content="Claude Code 跑完/卡住了怎么让手机收到通知" />
+<meta property="og:description" content="长任务不想一直盯着：官方手机推送、提示词里直接要求、tmux 活动监控、自己写 webhook 脚本，四种办法各自的门槛和短板。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Claude Code 跑完/卡住了怎么让手机收到通知" />
+<meta name="twitter:description" content="长任务不想一直盯着：官方手机推送、提示词里直接要求、tmux 活动监控、自己写 webhook 脚本，四种办法各自的门槛和短板。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Claude Code 跑完/卡住了怎么让手机收到通知",
+  "description": "长任务不想一直盯着：官方手机推送、提示词里直接要求、tmux 活动监控、自己写 webhook 脚本，四种办法各自的门槛和短板。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/claude-code-notification-when-done" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/claude-code-notification-when-done" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Claude Code 跑完/卡住了怎么让手机收到通知</h1>
+  <p class="lede">开了个长任务，人跑去干别的了，回来才发现早就跑完二十分钟，或者一直卡在一个确认提示上干等。下面四种办法按"要折腾多少"从少到多排。</p>
+
+  <h2>四个选项</h2>
+  <ol>
+    <li><strong>开官方手机推送</strong>——不用写代码，但有几个前置条件。</li>
+    <li><strong>直接在提示词里说一句</strong>——零配置，按次生效。</li>
+    <li><strong>tmux 活动监控 / 终端响铃</strong>——如果你已经在用这些工具，天生自带。</li>
+    <li><strong>自己写 webhook 脚本</strong>——完全自主，但要自己维护。</li>
+  </ol>
+
+  <h2>1. 官方手机推送（先试这个）</h2>
+  <p>Remote Control 处于连接状态时，Claude Code 能直接给手机推通知。<code>/config</code> 里有两个独立开关：「Push when Claude decides」（模型自己判断这一刻值不值得打扰你）和「Push when actions required」（专门在它被你卡住、等你决策时触发）。也可以直接在提示词里说一句"notify me when the tests finish"，当次任务就按这个来。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#mobile-push-notifications">来源</a>，官方文档）</span></p>
+  <p>门槛在于：这功能架在 Remote Control 之上，而 Remote Control 目前是 research preview，Pro/Max/Team/Enterprise 都能用，但 Team/Enterprise 账号默认关着，得管理员手动打开。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span>你还得装官方 App，而且任务跑完那一刻 Remote Control 必须真的处于连接状态——如果它已经超时或进程被杀了（这种情况可以看我们<a href="/zh/blog/claude-code-remote-control-not-working">另一篇排查 Remote Control 的文章</a>），那就没有东西可推了。</p>
+
+  <h2>2. 提示词里直接要求</h2>
+  <p>不用配置任何东西——用大白话跟 Claude 说清楚就行。这条路走的其实还是上面那套推送机制，所以前置条件也一样（Remote Control 得连着、账号层级得够）。偶尔用一次挺方便，但每次会话都要重新打一遍这句话，而且只覆盖你想起来要说的那部分。</p>
+
+  <h2>3. tmux monitor-activity 或终端响铃</h2>
+  <p>如果你本来就在 <code>tmux</code> 里跑东西，<code>monitor-activity</code> 会在窗口有变化时标记出来，大多数终端在收到响铃字符时也会闪一下或者真的响一声。这个如果你本来就活在 tmux 里，配置成本是零，但它只在你还坐在这台机器前才有意义——人一走，被标记的窗口没人看，铃声没人听得见。</p>
+
+  <h2>4. 自己写 webhook 脚本</h2>
+  <p>把命令包一层，跑完之后 <code>curl</code> 一个 webhook——企业微信机器人、Slack、Discord，随便接哪个。这是这几条里唯一不锁平台的方案，但代价按次算：每条命令都要单独记得包一层，忘了包一次就白搭，而且只覆盖你自己写脚本触发的场景——它能覆盖的是"这条命令跑完了"，覆盖不了"AI 自己判断这一刻值得通知你"。</p>
+
+  <h2>四种办法对比</h2>
+  <table>
+    <tr><th></th><th>配置成本</th><th>手机锁屏/人不在时能收到</th><th>覆盖"AI 自己判断"这类</th></tr>
+    <tr><td>官方推送</td><td>低（开关 + 装 App）</td><td>能</td><td>能</td></tr>
+    <tr><td>提示词要求</td><td>零</td><td>能</td><td>不能——只覆盖你说过的</td></tr>
+    <tr><td>tmux / 响铃</td><td>零（已用 tmux 的话）</td><td>不能——只在人还坐在电脑前</td><td>不能</td></tr>
+    <tr><td>webhook 脚本</td><td>按条命令算，持续投入</td><td>能</td><td>不能——只覆盖包过的命令</td></tr>
+  </table>
+
+  <h2>PocketShell 在哪一段有用</h2>
+  <p>如果你真正想要的是"我用的任意一款 CLI 编码工具——不只是 Claude Code——跑完一轮或卡住等输入时，手机都能收到，而且不用为每个任务单独写一层包装脚本"，这跟上面四条的形状不一样：它们每一条都只覆盖一个工具或一条命令。</p>
+  <p>PocketShell 接的是这些工具自己暴露的原生完成 hook——具体到 Claude Code 就是写 <code>~/.claude/settings.json</code> 里的 <code>hooks.Notification</code>——而不是扫描进程猜谁在跑。目前这样自动接线的有四款工具：Claude Code、Codex、OpenCode、Kimi。送达走两条互补的渠道：Web Push（自签 VAPID 密钥、负载加密、点开直接跳回对应会话）和出站 Webhook（内置企业微信、飞书、Slack、Discord 的模板，外加自定义 JSON 模板），每条渠道各自有开关和测试发送按钮。它还会区分"你正盯着这个会话看"（只给应用内轻提示，不推系统通知）和"你在别处或手机锁屏"（推系统通知），同一会话默认有 10 秒的去重窗口，一个吵闹的任务不会连环轰炸你。</p>
+  <p>它不做的事：不扫描任意进程，所以没有原生完成 hook 的工具接不进来——目前是四款工具，不是"任意 CLI 程序都行"。而且触发 hook 所需的环境变量是新建会话时才注入的，接线之前已经存在的旧会话得重建一下才能生效。</p>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/claude-code-notification-when-done" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

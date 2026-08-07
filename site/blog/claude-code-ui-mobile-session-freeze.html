@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CloudCLI (claudecodeui) Stuck on "Processing" or Shell Frozen on Mobile? — PocketShell</title>
+<meta name="description" content="Two known CloudCLI (claudecodeui) mobile issues — chat that never recovers after a stream drops, and a Shell panel that silently stops after backgrounding — with the open GitHub issues, root causes, and what to do right now." />
+<link rel="canonical" href="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-ui-mobile-session-freeze" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" />
+<meta property="og:title" content="CloudCLI (claudecodeui) Stuck on &quot;Processing&quot; or Shell Frozen on Mobile?" />
+<meta property="og:description" content="Two known CloudCLI (claudecodeui) mobile issues — chat that never recovers after a stream drops, and a Shell panel that silently stops after backgrounding — with the open GitHub issues, root causes, and what to do right now." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CloudCLI (claudecodeui) Stuck on &quot;Processing&quot; or Shell Frozen on Mobile?" />
+<meta name="twitter:description" content="Two known CloudCLI (claudecodeui) mobile issues — chat that never recovers after a stream drops, and a Shell panel that silently stops after backgrounding — with the open GitHub issues, root causes, and what to do right now." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "CloudCLI (claudecodeui) Stuck on \"Processing\" or Shell Frozen on Mobile?",
+  "description": "Two known CloudCLI (claudecodeui) mobile issues — chat that never recovers after a stream drops, and a Shell panel that silently stops after backgrounding — with the open GitHub issues, root causes, and what to do right now.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/claude-code-ui-mobile-session-freeze" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>CloudCLI (claudecodeui) Stuck on "Processing" or Shell Frozen on Mobile?</h1>
+  <p class="lede">If you're self-hosting CloudCLI (also known by its repo name, claudecodeui) and mobile Safari either loses a chat response mid-stream or the Shell tab stops updating after you background the app — this is a known, publicly tracked situation, not something specific to your setup. There are two separate open issues for it. Restart or Disconnect is the immediate move; here's why, and what's actually going on underneath.</p>
+
+  <h2>Two separate symptoms</h2>
+  <ul>
+    <li><strong>Chat freezes mid-response.</strong> On iOS Safari, a streaming reply drops partway through and the UI just sits on "Processing" — no error, no retry, nothing comes back.</li>
+    <li><strong>Shell panel goes stale after backgrounding.</strong> Put the app in the background or lock the phone, come back, and the Shell tab has stopped showing new output — even though the underlying agent process is still running, which you can confirm because the Chat panel keeps advancing normally.</li>
+  </ul>
+
+  <h2>What to do right now</h2>
+  <p>For both symptoms, the fix reporters confirmed works is manually hitting Restart or Disconnect on the stuck session — it's a workaround, not a permanent fix, but it's the one documented path back to a working state.</p>
+
+  <h2>The two issues, and their root causes</h2>
+  <p><strong>Issue <a href="https://github.com/siteboon/claudecodeui/issues/554">#554</a></strong> (opened 2026-03-17, open at time of writing) covers the chat-freeze symptom. The reporter states mobile Safari is "currently unusable for interactive chat" under this condition, and their requested fix reads:</p>
+  <blockquote>Responses should be buffered server-side and replayed on reconnect.</blockquote>
+  <p><span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/554">来源</a>，他人报告，我们未复现）</span></p>
+  <p><strong>Issue <a href="https://github.com/siteboon/claudecodeui/issues/953">#953</a></strong> (opened 2026-07-02, open at time of writing, filed against v1.35.1) covers the Shell-freeze symptom. The reporter's code-level analysis points to the server pinging every 30 seconds but never listening for the corresponding pong, never tracking connection liveness, and never calling <code>terminate()</code> on a half-open socket — combined with iOS not sending a FIN packet when a backgrounded tab's socket effectively dies, data ends up written into a connection that looks open on the server side but has been dead for a while. <span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/953">来源</a>，他人报告，我们未复现）</span></p>
+
+  <h2>Where the manual fix falls short</h2>
+  <p>Restart/Disconnect is reactive — you find out something broke, then you fix it, and if it happened mid-task, that task got interrupted. Avoiding backgrounding entirely would sidestep it, but that's not realistic on a phone that locks itself on a timer. And as of when this was written, both issues are open with no assignee, so there's no committed timeline for either landing upstream.</p>
+
+  <h2>What CloudCLI does better</h2>
+  <p>It's worth being straightforward about this before going further: CloudCLI is <strong>13,158 stars and 1,804 forks</strong> as of 2026-08-07, against PocketShell's much smaller base — that gap is real, and it also tells you something useful, which is that self-hosted mobile access to coding agents is a real, validated need. <span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> Concretely, where it's ahead:</p>
+  <ul>
+    <li><strong>Ecosystem and scale.</strong> A large, active user base and issue tracker, plus support that's grown beyond Claude Code to OpenCode, Cursor CLI, and Codex — one interface across multiple coding agents, not just one. <span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span></li>
+    <li><strong>A chat-first interface.</strong> For someone less comfortable with a raw terminal, a chat UI with an attached shell is a genuinely friendlier entry point — this is a different design tradeoff, not a worse one.</li>
+    <li><strong>A hosted option.</strong> There's a commercial CloudCLI Cloud in progress, aimed at running even when your own computer is off — something no self-hosted tool, PocketShell included, can offer by definition. <span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span></li>
+  </ul>
+
+  <h2>Where PocketShell's architecture differs</h2>
+  <p>This is a description of a design difference, not a claim that PocketShell is immune to every failure mode above — we haven't run it through the scale CloudCLI has, and there's no independently audited track record to point to either way. What can be said concretely: PocketShell tracks connection liveness with heartbeat ping/pong <em>plus</em> a separate staleness timeout, rather than relying only on the socket's own <code>onclose</code>/<code>onerror</code> events firing — the two-signal approach is specifically there to catch a connection that looks open but has gone quiet. Reconnects request everything missed since a tracked sequence number from a server-side ring buffer, rather than assuming the original socket object is still valid. And the top bar shows a live connection-state dot plus a disconnect banner, so a break is visible rather than silent.</p>
+  <p>One structural difference worth naming plainly: CloudCLI runs Chat and Shell as two separate channels (a <code>/ws</code> connection plus file watching for one, an independent <code>/shell</code> WebSocket for the other) — which is how a chat panel can keep advancing while the Shell panel freezes, since they're not the same connection. PocketShell is built around a single tmux/PTY session model instead. These aren't the same shape of system, so it's not a strict "better/worse" comparison — just a different answer to the same problem.</p>
+
+  <h2>Which one to reach for</h2>
+  <table>
+    <tr><th>You want</th><th>Reach for</th></tr>
+    <tr><td>A graphical, chat-style IDE experience, broad agent support, an active plugin ecosystem</td><td>CloudCLI</td></tr>
+    <tr><td>A task that keeps running through a dropped connection, with a notification when it's done or stuck</td><td>PocketShell</td></tr>
+  </table>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/claude-code-ui-mobile-session-freeze" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

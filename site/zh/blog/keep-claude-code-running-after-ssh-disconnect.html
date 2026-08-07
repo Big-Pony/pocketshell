@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SSH 断开后怎么让 Claude Code 继续跑 — PocketShell</title>
+<meta name="description" content="笔记本合盖或 WiFi 抖一下，SSH 就断了，回来发现 Claude Code 的界面连同任务和上下文一起没了。为什么会这样，以及 tmux/screen/zellij/mosh 各自解决的是哪一部分。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/keep-claude-code-running-after-ssh-disconnect" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/keep-claude-code-running-after-ssh-disconnect" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/keep-claude-code-running-after-ssh-disconnect" />
+<meta property="og:title" content="SSH 断开后怎么让 Claude Code 继续跑" />
+<meta property="og:description" content="笔记本合盖或 WiFi 抖一下，SSH 就断了，回来发现 Claude Code 的界面连同任务和上下文一起没了。为什么会这样，以及 tmux/screen/zellij/mosh 各自解决的是哪一部分。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="SSH 断开后怎么让 Claude Code 继续跑" />
+<meta name="twitter:description" content="笔记本合盖或 WiFi 抖一下，SSH 就断了，回来发现 Claude Code 的界面连同任务和上下文一起没了。为什么会这样，以及 tmux/screen/zellij/mosh 各自解决的是哪一部分。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "SSH 断开后怎么让 Claude Code 继续跑",
+  "description": "笔记本合盖或 WiFi 抖一下，SSH 就断了，回来发现 Claude Code 的界面连同任务和上下文一起没了。为什么会这样，以及 tmux/screen/zellij/mosh 各自解决的是哪一部分。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/keep-claude-code-running-after-ssh-disconnect" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/keep-claude-code-running-after-ssh-disconnect" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>SSH 断开后怎么让 Claude Code 继续跑</h1>
+  <p class="lede">合一下笔记本盖子，或者 WiFi 抖一下，SSH 就断了。重新连上去一看，Claude Code 的终端界面没了——不是挂起，不是转后台，是彻底没了，任务和上下文一起消失。</p>
+
+  <h2>为什么进程不会自己活下来</h2>
+  <p>Claude Code 的终端界面需要一个真终端撑着：画面渲染、按键接收、输出流式吐出，全都依赖挂在一个真实 TTY 上。承载这条连接的 SSH 会话一断，挂在上面的进程通常也活不下来——这其实不是"转后台"的问题，而是"没有终端可以对话"的问题。这也是为什么 <code>nohup</code> 在这救不了你：它防的是你退出 shell 之后进程被连带杀掉，但如果终端本身从一个前台 TUI 底下消失了，<code>nohup</code> 什么忙都帮不上。</p>
+
+  <h2>不用额外装东西（只靠包管理器）的解法</h2>
+
+  <h3>把它包进 tmux、screen 或 zellij 里跑</h3>
+  <p>在终端复用器里启动 <code>claude</code>（或 <code>claude remote-control</code>），SSH 断开之后进程照样在服务器上跑着——重新连上去，接回同一个窗口就行，不用从头再来。官方文档对 Remote Control 给出的建议正是这个，原因也一样。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></p>
+  <p>有一篇实践博客值得直接一读：作者的 Claude Code 长任务跑到一半，SSH 断线把进程带走了，最后发现只有重新接回终端复用器才能真正接上原来的进度；他最终选定 <code>zellij</code>，给出的理由是它默认自带完整回滚缓冲，而他觉得 <code>tmux</code>/<code>screen</code> 要让鼠标滚动顺手还得额外配置。<span class="src">（<a href="https://cdmckay.org/how-to-keep-claude-code-running-across-ssh-disconnects/">来源</a>，他人报告，我们未复现）</span>这是他的个人偏好，不是普遍结论——<code>tmux</code> 和 <code>screen</code> 干的是同一件核心的事。</p>
+
+  <h3>用 mosh 代替裸 SSH</h3>
+  <p>mosh 是另一层：它本身就是为扛住网络切换和短暂掉线设计的，换个网络、信号闪一下，裸 SSH 可能直接断，mosh 大概率能扛过去。它不是终端复用器的替代品，而是互补——让连接本身更抗造，你就更少撞上"彻底断开"这件事。</p>
+
+  <h2>这些解法留下的缺口</h2>
+  <p>终端复用器保住的是"进程在服务器上活着"，跟你手上有什么设备没关系。你仍然需要一台能跑 SSH 客户端的设备、要记得会话叫什么名字、要手动 <code>ssh</code> 回去再 <code>tmux attach</code> 到正确的窗口——如果你口袋里此刻只有一部没装终端 App 的手机，这些条件一个都凑不齐。mosh 改善的是连接层，但如果你现在手头就是"只有手机，没有电脑，也没有 SSH 客户端"，它同样帮不上忙。</p>
+
+  <h2>PocketShell 在哪一段有用</h2>
+  <p>思路和上面一样——用类似 tmux 的东西把会话保护起来——只是换了个客户端。不是"先找一台电脑，再 SSH 回自己的开发机"，而是手机本身就是客户端：这是个自托管的 Web 应用，直接跟你机器上的 agent 对话，不需要先装一个独立的 SSH App 或终端模拟器。它管理的 tmux 会话才是真正的真身，断线期间写下的输出会在重连时按序号补发回来，而不是指望你自己滚屏找回断点。</p>
+  <p>它也不是 mosh 的替代品——PocketShell 走的是标准 WebSocket 加应用层的重放机制，不是专为扛住半路丢包设计的传输层协议。而且它同样要求你有一台常开的机器在跑 agent，去掉的只是"手机上要有一个像样的 SSH/tmux 客户端"这一环，不是去掉"你需要一台服务器"这件事。</p>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/keep-claude-code-running-after-ssh-disconnect" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>
