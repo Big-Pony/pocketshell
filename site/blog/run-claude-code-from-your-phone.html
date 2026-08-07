@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Run Claude Code From Your Phone: Every Path, One Overview — PocketShell</title>
+<meta name="description" content="Yes, you can check on Claude Code from your phone. The official app, a self-hosted web UI, a plain SSH client, and PocketShell each solve it differently — a short map of all of them, with links to the deep dive on each." />
+<link rel="canonical" href="https://pocketshell.net/blog/run-claude-code-from-your-phone" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/run-claude-code-from-your-phone" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/run-claude-code-from-your-phone" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/run-claude-code-from-your-phone" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/run-claude-code-from-your-phone" />
+<meta property="og:title" content="Run Claude Code From Your Phone: Every Path, One Overview" />
+<meta property="og:description" content="Yes, you can check on Claude Code from your phone. The official app, a self-hosted web UI, a plain SSH client, and PocketShell each solve it differently — a short map of all of them, with links to the deep dive on each." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Run Claude Code From Your Phone: Every Path, One Overview" />
+<meta name="twitter:description" content="Yes, you can check on Claude Code from your phone. The official app, a self-hosted web UI, a plain SSH client, and PocketShell each solve it differently — a short map of all of them, with links to the deep dive on each." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Run Claude Code From Your Phone: Every Path, One Overview",
+  "description": "Yes, you can check on Claude Code from your phone. The official app, a self-hosted web UI, a plain SSH client, and PocketShell each solve it differently — a short map of all of them, with links to the deep dive on each.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/run-claude-code-from-your-phone" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/run-claude-code-from-your-phone" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Run Claude Code From Your Phone: Every Path, One Overview</h1>
+  <p class="lede">Yes — you can check on a running Claude Code task, or drive one, from your phone. There's no single "the" way to do it, though. This page is a short map of every approach that actually works, with a link to a deeper article on each one if you want the full detail.</p>
+
+  <h2>Why this isn't built in already</h2>
+  <p>Claude Code is a command-line tool — it expects a real terminal underneath it, reading keypresses and rendering a screen the way a TTY does. Phones don't ship a terminal by default, so getting from "phone" to "Claude Code" always means going through something else first: an official app talking to Anthropic's servers or your own machine, an SSH client connecting straight to a box you own, or a purpose-built web client sitting in between. Which layer you pick changes what you're actually depending on.</p>
+
+  <h2>The official Claude app</h2>
+  <p>This is the lowest-friction starting point if you already have an Anthropic account at the right plan tier. It covers two different modes: Cloud sessions run your task on Anthropic's own infrastructure, so your laptop can be fully off; Remote Control instead drives a Claude Code session already running on your own machine, which means it inherits that machine's uptime and network as a dependency. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></p>
+  <p>Remote Control is currently a research preview, and because it's tied to a live local process, it has real limits: go without network for roughly ten minutes and the session times out; close the terminal or editor it's running in and the process dies with it. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></p>
+  <p>详见 → <a href="/blog/claude-code-remote-control-not-working">the three specific things that kill a Remote Control session and how to fix each</a>, and <a href="/blog/claude-code-notification-when-done">how to get notified from the official app without staring at the terminal</a>.</p>
+
+  <h2>CloudCLI (claudecodeui): a dedicated self-hosted web UI</h2>
+  <p>If you'd rather not depend on Anthropic's account tiers at all, CloudCLI is an open-source web interface you point at your own machine — it's the most mature self-hosted alternative in this space, actively maintained, and it also drives other coding agents beyond Claude Code from the same dashboard. There's now a hosted version too, so "my machine has to stay on" isn't a hard requirement of the CloudCLI project as a whole, just of its self-hosted mode specifically.</p>
+  <p>详见 → <a href="/blog/claude-code-ui-mobile-session-freeze">the two known mobile issues in CloudCLI, what triggers each, and where a different architecture avoids the same failure mode</a>.</p>
+
+  <h2>A plain SSH client + tmux</h2>
+  <p>If you already have a machine reachable over SSH, this is the fewest-moving-parts option: an SSH app on your phone, connecting into a <code>tmux</code> session where <code>claude</code> is already running. It genuinely works — the process survives a dropped connection — but you're on your own for the parts that make a phone a phone: no push notification when a task finishes, no touch-friendly Ctrl/Esc/arrow keys, and you reconnect and reattach by hand every time the network hiccups.</p>
+  <p>详见 → <a href="/blog/keep-claude-code-running-after-ssh-disconnect">why the process survives an SSH drop in the first place (and why <code>nohup</code> alone doesn't)</a>, and <a href="/blog/why-tmux-and-ssh-arent-enough">what this combination still doesn't solve on a touchscreen, and what people try next</a>.</p>
+
+  <h2>Specifically on an iPad</h2>
+  <p>All of the above apply to an iPad too, plus one more option worth knowing about: remote desktop / VNC into a full computer, which trades a lot of latency and screen space for not needing any of the setup above. Whether that tradeoff is worth it depends entirely on what you're used to.</p>
+  <p>详见 → <a href="/blog/claude-code-on-ipad">a closer look at all three iPad-specific paths and where each one runs into a wall</a>.</p>
+
+  <h2>Where PocketShell fits</h2>
+  <p>PocketShell is a self-hosted, single-binary alternative built specifically to be a phone-native terminal client — not tied to an Anthropic account or plan tier, and not limited to Claude Code specifically: the terminal itself is general <code>tmux</code>/PTY hosting, so any CLI tool you'd normally run over SSH works in it, though only four tools (Claude Code, Codex, opencode, Kimi CLI) get the automatic completion-notification wiring out of the box. It ships a dedicated touch keyboard, sequence-based reconnect replay instead of a manual reattach, and Web Push plus outbound webhook notifications.</p>
+  <p>What it isn't: there's no cloud-hosted execution mode, so like the SSH option above, your own machine still has to stay on; and its interface targets a mobile-phone-sized screen specifically, not a larger tablet or desktop layout.</p>
+  <p>详见 → <a href="/blog/claude-code-mobile-options-compared">the full side-by-side comparison of every option on this page, including cost, setup, and three cases where none of the self-hosted options — this one included — is the right call</a>.</p>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/run-claude-code-from-your-phone" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

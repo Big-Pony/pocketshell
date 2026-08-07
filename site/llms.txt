@@ -11,6 +11,17 @@ PocketShell is not a cloud service and not an IDE. It assumes you already have t
 - [Full demo video](https://pocketshell.net/#video): a 40-second unedited walkthrough — unlock the phone, open the app from the home screen, start a tmux session, launch Claude Code from a saved snippet, compose the whole request in the system keyboard and send it, lock the phone and walk away, get a push on the lock screen when the task finishes, tap it and read the answer
 - [Live demo](https://demo.pocketshell.net): the real frontend running against a simulated agent — no install, no host, no signup. Best on a phone; a desktop visit shows the app inside a phone frame. Includes a "try going offline" button that drops the connection for real and replays the missed output on reconnect
 
+## Articles
+
+- [Run Claude Code from your phone](https://pocketshell.net/blog/run-claude-code-from-your-phone): overview of every approach — the official Claude app, Remote Control, cloud sessions, CloudCLI, SSH + tmux, and PocketShell — with when each one fits
+- [Claude Code remote control not working](https://pocketshell.net/blog/claude-code-remote-control-not-working): the three most common causes a Remote Control session hangs or drops, and what fixes each
+- [Keep Claude Code running after an SSH disconnect](https://pocketshell.net/blog/keep-claude-code-running-after-ssh-disconnect): why the process dies with the connection, why `nohup` doesn't save it, and how tmux, screen, zellij, and mosh each address a different part of it
+- [Get a notification when Claude Code finishes](https://pocketshell.net/blog/claude-code-notification-when-done): four ways to find out a task is done or stuck without watching the terminal
+- [Claude Code on iPad](https://pocketshell.net/blog/claude-code-on-ipad): three genuinely different paths — official app, SSH client, remote desktop/VNC — and where each one falls short
+- [CloudCLI (claudecodeui) stuck on mobile](https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze): two known mobile issues in CloudCLI, their GitHub issue numbers and root causes, and a different architecture that avoids the same failure mode
+- [Every way to run Claude Code from your phone, compared](https://pocketshell.net/blog/claude-code-mobile-options-compared): a freshly re-verified side-by-side of every mobile option, plus three cases where self-hosting anything is the wrong call
+- [tmux and SSH keep Claude Code alive — they weren't designed for a phone](https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough): what tmux + SSH already solve, what they don't (touch input, notifications, network switching), and what people reach for next
+
 ## Documentation
 
 - [README](https://github.com/Big-Pony/pocketshell/blob/main/README.md): full feature list, quick start, install options, good-fit / not-a-fit guidance

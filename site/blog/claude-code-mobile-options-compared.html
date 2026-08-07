@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Every Way to Run Claude Code From Your Phone, Compared — PocketShell</title>
+<meta name="description" content="Official Cloud sessions, Remote Control, Dispatch, CloudCLI (self-hosted and Cloud), a bare SSH client, and PocketShell — what each one actually requires, and three cases where none of the self-hosted options (including this one) is the right pick." />
+<link rel="canonical" href="https://pocketshell.net/blog/claude-code-mobile-options-compared" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-mobile-options-compared" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-mobile-options-compared" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-mobile-options-compared" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+<meta property="og:url" content="https://pocketshell.net/blog/claude-code-mobile-options-compared" />
+<meta property="og:title" content="Every Way to Run Claude Code From Your Phone, Compared" />
+<meta property="og:description" content="Official Cloud sessions, Remote Control, Dispatch, CloudCLI (self-hosted and Cloud), a bare SSH client, and PocketShell — what each one actually requires, and three cases where none of the self-hosted options (including this one) is the right pick." />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Every Way to Run Claude Code From Your Phone, Compared" />
+<meta name="twitter:description" content="Official Cloud sessions, Remote Control, Dispatch, CloudCLI (self-hosted and Cloud), a bare SSH client, and PocketShell — what each one actually requires, and three cases where none of the self-hosted options (including this one) is the right pick." />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Every Way to Run Claude Code From Your Phone, Compared",
+  "description": "Official Cloud sessions, Remote Control, Dispatch, CloudCLI (self-hosted and Cloud), a bare SSH client, and PocketShell — what each one actually requires, and three cases where none of the self-hosted options (including this one) is the right pick.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/blog/claude-code-mobile-options-compared" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">Live demo</a>
+      <a href="/blog">Blog</a>
+      <a href="/#features">Features</a>
+      <a href="/#quickstart">Quick start</a>
+      <a href="/#security">Security</a>
+    </nav>
+    <a class="btn-lang" href="/zh/blog/claude-code-mobile-options-compared" hreflang="zh-Hans" title="中文">中文</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>Every Way to Run Claude Code From Your Phone, Compared</h1>
+  <p class="lede">There isn't one answer to "how do I use Claude Code on my phone" — there are at least six, and they solve different problems. Here's a map before the details, so you can jump straight to the section that matches what you actually need.</p>
+
+  <h2>Pick your starting question</h2>
+  <table>
+    <tr><th>What you need</th><th>Start with</th></tr>
+    <tr><td>I want the official, no-setup path and I don't mind a plan requirement</td><td>Cloud sessions or Remote Control (below)</td></tr>
+    <tr><td>I want to hand Desktop a task and check back later</td><td>Dispatch (below)</td></tr>
+    <tr><td>I want a self-hosted web UI built specifically for Claude Code</td><td>CloudCLI, self-hosted or their Cloud plan (below)</td></tr>
+    <tr><td>I already have SSH working and just want the raw terminal</td><td>SSH client + tmux (below)</td></tr>
+    <tr><td>I want a phone-native touch keyboard, replay, and push notifications, self-hosted</td><td>PocketShell (below)</td></tr>
+  </table>
+  <p>If none of those descriptions fit yet, keep reading — the three sections after the comparison table cover cases where the answer is "don't self-host anything."</p>
+
+  <h2>The official app: three different modes, not one</h2>
+  <p>The Claude app itself isn't a single mobile experience — it's three, and which one you're using changes what "your phone" is actually connected to. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></p>
+
+  <h3>Cloud sessions</h3>
+  <p>Work runs on Anthropic's own infrastructure, not your laptop. This is the only official option where your machine can be fully off — start a task, close the lid, come back later.</p>
+
+  <h3>Remote Control</h3>
+  <p>Your phone drives a Claude Code (or Claude Desktop) session already running on your own machine. It's currently a research preview, available on Pro, Max, Team, and Enterprise plans, with Team and Enterprise defaulting to off until an org owner turns it on. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span> Because it's tethered to a live local process, it inherits that process's limits: after roughly ten minutes without network, the session times out and the underlying process exits, and closing the terminal or editor it's attached to kills it outright — Anthropic's own docs recommend running it inside <code>tmux</code> or <code>screen</code> for exactly that reason. <span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></p>
+
+  <h3>Dispatch</h3>
+  <p>You send a task to Claude Desktop on your own machine and check back on results later, rather than driving a live session in real time. It's Pro and Max only — Team and Enterprise accounts don't have it. <span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></p>
+
+  <h2>CloudCLI (claudecodeui): a purpose-built self-hosted web UI</h2>
+  <p><a href="https://github.com/siteboon/claudecodeui" target="_blank" rel="noopener">CloudCLI</a> is an open-source web interface you point at your own machine, licensed AGPL-3.0-or-later, with 13.2k stars and 1.8k forks as of today. <span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库，2026-08-07 复查）</span> It's the most direct alternative to what this article's own site is offering — a self-hosted web layer over Claude Code — and its scope is broader than a single tool: it also drives Codex CLI, Cursor CLI, and other coding agents from the same interface.</p>
+  <p>Self-hosting it needs Node.js v22+ and your own reverse proxy for HTTPS if you want to reach it from outside your LAN. <span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> There's also a hosted option now: CloudCLI Cloud is a commercial offering that's already live — the README lists it first in Quick Start, marked "(Recommended)," starting at €7/month, and its FAQ states plainly: close your laptop, the agent keeps running. <span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> That's something no self-hosted tool — PocketShell included — can offer by definition; it needs your machine to run its agent somewhere.</p>
+  <p>The project currently has 103 open issues, two of which are specifically mobile-related: one where the chat's streaming response can drop on iOS Safari (#554), and one where, on v1.35.1, the shell terminal can silently freeze after the app goes to the background on iOS while chat keeps updating (#953). <span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/554">来源</a>，他人报告，我们未复现）</span> <span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/953">来源</a>，他人报告，我们未复现）</span> These are open, active-project issue reports, not a verdict on whether the tool works for you — a young, actively maintained project having open mobile bug reports is normal, not disqualifying.</p>
+
+  <h2>A bare SSH client + tmux</h2>
+  <p>If you already have a machine reachable over SSH, the lowest-dependency path is a mobile SSH client (Termius, Blink, JuiceSSH) connecting straight into a <code>tmux</code> session where <code>claude</code> is already running. It's the most flexible option here — nothing to install on the server beyond what you already have — but it's also the most manual: no push notification when a task finishes, no touch-optimized key row for Ctrl/Alt/Esc, and you're responsible for remembering session names and reattaching yourself.</p>
+
+  <h2>Where PocketShell fits</h2>
+  <p>PocketShell is a single self-hosted binary purpose-built for this exact gap: a phone-native client for a persistent terminal session, not a general SSH app and not a CloudCLI-style multi-agent dashboard. The <code>tmux</code> session on your machine is the source of truth; the phone is a thin, encrypted (Noise IK) window onto it. Reconnecting after a drop replays only what you missed by sequence number, rather than leaving you to scroll. Because the whole interaction is touch-first, it ships three selectable on-screen keyboard layouts (Classic, Layered, Flick) plus a separate IME buffer for composing full strings before sending, and it wires push notifications (Web Push) and outbound webhooks directly to session-completion hooks for four CLI tools — Claude Code, Codex, opencode, and Kimi CLI — so you get a notification instead of having to poll the screen.</p>
+  <p>What it deliberately isn't: it has no cloud-hosted execution mode, so unlike Cloud sessions your machine still has to stay on; it has no team or org permission system, just per-device pairing, so it's built for one person's own machines rather than a shared team deployment; and it's a PWA, not something installed through an app store.</p>
+
+  <h2>Reality-checked comparison</h2>
+  <table>
+    <tr><th>Option</th><th>Where it runs</th><th>Machine must stay on</th><th>Cost</th><th>Worth knowing</th></tr>
+    <tr><td>Cloud sessions</td><td>Anthropic's infrastructure</td><td>No</td><td>Included in Pro/Max/Team/Enterprise</td><td>Only official option that survives your machine being off</td></tr>
+    <tr><td>Remote Control</td><td>Your machine</td><td>Yes</td><td>Included in Pro/Max/Team/Enterprise (Team/Enterprise off by default)</td><td>Research preview; ~10 min offline timeout; process dies with its terminal</td></tr>
+    <tr><td>Dispatch</td><td>Claude Desktop on your machine</td><td>Yes</td><td>Pro/Max only</td><td>Async — send a task, check back, not a live session</td></tr>
+    <tr><td>CloudCLI, self-hosted</td><td>Your machine</td><td>Yes</td><td>Free, open source</td><td>Multi-agent dashboard; two known mobile issues, both open</td></tr>
+    <tr><td>CloudCLI Cloud</td><td>CloudCLI's infrastructure</td><td>No</td><td>From €7/month</td><td>Hosted, so your laptop can close — no self-hosted tool matches this</td></tr>
+    <tr><td>SSH client + tmux</td><td>Your machine</td><td>Yes</td><td>Cost of an SSH app you may already own</td><td>Most flexible, most manual — no notifications, no touch keyboard</td></tr>
+    <tr><td>PocketShell</td><td>Your machine</td><td>Yes</td><td>Free, self-hosted (Apache-2.0)</td><td>Phone-native keyboard + replay + push, single-purpose terminal client</td></tr>
+  </table>
+
+  <h2>Three cases where you shouldn't self-host anything</h2>
+  <p>Being direct about this is the only way a comparison written by one of the options can be trusted at all, so:</p>
+  <ul>
+    <li><strong>Your computer needs to be off sometimes.</strong> Every self-hosted option on this page — CloudCLI's self-hosted mode and PocketShell both — needs a machine that's on to reach. If the plan is "close the laptop, keep working," that's what Cloud sessions or CloudCLI Cloud are for, not this list.</li>
+    <li><strong>You just want to glance at progress occasionally.</strong> If checking in once in a while is the whole use case, official Remote Control already does that with zero extra setup, as long as your account has the right plan tier. Standing up a self-hosted service for occasional glances is more effort than the problem deserves.</li>
+    <li><strong>You don't want to run and maintain a service.</strong> Self-hosting anything — CloudCLI, PocketShell, or otherwise — means you're the one keeping a process alive, applying updates, and troubleshooting when it breaks. If that's not a tradeoff you want to make, the hosted options above (Cloud sessions, Dispatch, CloudCLI Cloud) exist specifically so you don't have to.</li>
+  </ul>
+
+  <div class="article-nav">
+    <a href="/blog">← All articles</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/blog">Blog</a>
+    <a href="/zh/blog/claude-code-mobile-options-compared" hreflang="zh-Hans">中文</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -127,4 +127,58 @@
     <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-ui-mobile-session-freeze"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-ui-mobile-session-freeze"/>
   </url>
+  <url>
+    <loc>https://pocketshell.net/blog/claude-code-mobile-options-compared</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-mobile-options-compared"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-mobile-options-compared"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-mobile-options-compared"/>
+  </url>
+  <url>
+    <loc>https://pocketshell.net/zh/blog/claude-code-mobile-options-compared</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-mobile-options-compared"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-mobile-options-compared"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-mobile-options-compared"/>
+  </url>
+  <url>
+    <loc>https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough"/>
+  </url>
+  <url>
+    <loc>https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough"/>
+  </url>
+  <url>
+    <loc>https://pocketshell.net/blog/run-claude-code-from-your-phone</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/run-claude-code-from-your-phone"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/run-claude-code-from-your-phone"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/run-claude-code-from-your-phone"/>
+  </url>
+  <url>
+    <loc>https://pocketshell.net/zh/blog/run-claude-code-from-your-phone</loc>
+    <lastmod>2026-08-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/run-claude-code-from-your-phone"/>
+    <xhtml:link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/run-claude-code-from-your-phone"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/run-claude-code-from-your-phone"/>
+  </url>
 </urlset>

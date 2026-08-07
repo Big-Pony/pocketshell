@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>手机上跑 Claude Code 的所有方案，一次比全 — PocketShell</title>
+<meta name="description" content="官方 Cloud sessions、Remote Control、Dispatch，CloudCLI 自托管版和云端版，裸 SSH 客户端，以及 PocketShell——各自实际要求什么，以及三种自托管方案（包括本站）都不该用的场景。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/claude-code-mobile-options-compared" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/claude-code-mobile-options-compared" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/claude-code-mobile-options-compared" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/claude-code-mobile-options-compared" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/claude-code-mobile-options-compared" />
+<meta property="og:title" content="手机上跑 Claude Code 的所有方案，一次比全" />
+<meta property="og:description" content="官方 Cloud sessions、Remote Control、Dispatch，CloudCLI 自托管版和云端版，裸 SSH 客户端，以及 PocketShell——各自实际要求什么，以及三种自托管方案（包括本站）都不该用的场景。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="手机上跑 Claude Code 的所有方案，一次比全" />
+<meta name="twitter:description" content="官方 Cloud sessions、Remote Control、Dispatch，CloudCLI 自托管版和云端版，裸 SSH 客户端，以及 PocketShell——各自实际要求什么，以及三种自托管方案（包括本站）都不该用的场景。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "手机上跑 Claude Code 的所有方案，一次比全",
+  "description": "官方 Cloud sessions、Remote Control、Dispatch，CloudCLI 自托管版和云端版，裸 SSH 客户端，以及 PocketShell——各自实际要求什么，以及三种自托管方案（包括本站）都不该用的场景。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/claude-code-mobile-options-compared" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/claude-code-mobile-options-compared" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>手机上跑 Claude Code 的所有方案，一次比全</h1>
+  <p class="lede">"手机上怎么用 Claude Code"不是一个答案，而是至少六个，解决的是不同的问题。先给一张地图，你可以直接跳到自己需要的那一段，不用从头看到尾。</p>
+
+  <h2>先问自己一个问题</h2>
+  <table>
+    <tr><th>你需要什么</th><th>先看哪一段</th></tr>
+    <tr><td>想要官方、免搭建的路径，不介意订阅要求</td><td>下文 Cloud sessions 或 Remote Control</td></tr>
+    <tr><td>想把任务丢给 Desktop，过会儿再回来看结果</td><td>下文 Dispatch</td></tr>
+    <tr><td>想要一个专门为 Claude Code 做的自托管 Web 界面</td><td>下文 CloudCLI（自托管或云端版）</td></tr>
+    <tr><td>已经有 SSH 能用，只想要个纯终端</td><td>下文 SSH 客户端 + tmux</td></tr>
+    <tr><td>想要手机原生触屏键盘、断线重放、推送通知，且要自托管</td><td>下文 PocketShell</td></tr>
+  </table>
+  <p>如果上面几条都不太对，接着往下看——对比表后面那三条，讲的是"什么都别自建"更合适的场景。</p>
+
+  <h2>官方 App：其实是三种不同模式，不是一种</h2>
+  <p>Claude 官方 App 本身不是单一的手机体验，而是三种，用的是哪一种，决定了你的手机实际连的是什么。<span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></p>
+
+  <h3>Cloud sessions</h3>
+  <p>任务跑在 Anthropic 自己的基础设施上，不是你的笔记本。这是唯一一个电脑可以完全关机的官方选项——开始任务、合上盖子，回头再看结果。</p>
+
+  <h3>Remote Control</h3>
+  <p>手机驱动的是已经在你自己机器上跑着的 Claude Code（或 Claude Desktop）会话。目前是研究预览版，Pro、Max、Team、Enterprise 都能用，但 Team 和 Enterprise 默认关闭，得由组织所有者手动打开。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control">来源</a>，官方文档）</span> 因为绑定的是一个正在跑的本地进程，它也继承了这个进程的所有限制：断网大约十分钟以上，会话就会超时、底层进程随之退出；而关掉它所在的终端或编辑器窗口，进程直接就没了——官方文档正是因为这个原因，建议把它放进 <code>tmux</code> 或 <code>screen</code> 里跑。<span class="src">（<a href="https://code.claude.com/docs/en/remote-control#limitations">来源</a>，官方文档）</span></p>
+
+  <h3>Dispatch</h3>
+  <p>把任务派给你自己机器上的 Claude Desktop，之后再回来看结果，而不是实时驱动一个正在跑的会话。仅 Pro 和 Max 有，Team、Enterprise 账号没有这个功能。<span class="src">（<a href="https://code.claude.com/docs/en/mobile">来源</a>，官方文档）</span></p>
+
+  <h2>CloudCLI（claudecodeui）：专门做的自托管 Web 界面</h2>
+  <p><a href="https://github.com/siteboon/claudecodeui" target="_blank" rel="noopener">CloudCLI</a> 是一个开源 Web 界面，接到你自己的机器上，AGPL-3.0-or-later 协议，截至今天 13.2k star、1.8k fork。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库，2026-08-07 复查）</span> 它是本文所在这个自托管 Web 层思路最直接的同类项，而且覆盖范围比单一工具更广——同一个界面下还能驱动 Codex CLI、Cursor CLI 等其他编码 agent。</p>
+  <p>自托管需要 Node.js v22+，如果想从局域网外访问，还得自己配反向代理做 HTTPS。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> 现在也有托管版本：商用的 CloudCLI Cloud 已经上线——README 的 Quick Start 里排在第一位，标着"(Recommended)"，起价 €7/月，FAQ 里写得很直白：合上笔记本，agent 照样继续跑。<span class="src">（<a href="https://github.com/siteboon/claudecodeui">来源</a>，官方仓库）</span> 这是任何自托管方案——包括 PocketShell——在定义上都做不到的事：自托管就需要有台机器跑它的 agent。</p>
+  <p>项目目前有 103 个 open issue，其中两个明确和手机端有关：一个是 iOS Safari 上聊天的流式响应容易丢（#554）；另一个是 v1.35.1 版本下，iOS 切到后台之后 shell 终端会静默冻结，而聊天区还在照常更新（#953）。<span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/554">来源</a>，他人报告，我们未复现）</span> <span class="src">（<a href="https://github.com/siteboon/claudecodeui/issues/953">来源</a>，他人报告，我们未复现）</span> 这些是一个活跃项目里正在跟进的 issue，不是给这个工具下"能不能用"的结论——一个年轻且还在积极维护的项目有公开的手机端 bug 报告，是正常状态，不是否决理由。</p>
+
+  <h2>裸 SSH 客户端 + tmux</h2>
+  <p>如果你已经有一台能 SSH 上去的机器，依赖最少的路径就是用手机 SSH 客户端（Termius、Blink、JuiceSSH）直接连进一个已经跑着 <code>claude</code> 的 <code>tmux</code> 会话。这是这份清单里最灵活的选项——服务器端不用额外装任何东西——但也是最靠手动的：任务跑完不会推送通知，没有为触屏优化过的 Ctrl/Alt/Esc 按键行，会话名字得自己记、断线了得自己重连。</p>
+
+  <h2>PocketShell 在这张地图上的位置</h2>
+  <p>PocketShell 是一个专门补这个空档的自托管单文件程序：一个为持久终端会话做的手机原生客户端，不是通用 SSH App，也不是 CloudCLI 那种多 agent 仪表盘。你机器上的 <code>tmux</code> 会话才是真身，手机只是一层加密（Noise IK）的薄窗口。断线重连之后只按序号补发你错过的那部分输出，不用自己往回翻。因为整套交互是触屏优先设计的，它内置三种可切换的屏幕键盘布局（经典、分层、Flick），外加一个独立的输入法缓冲区用来先拼好整句再发送；推送方面直接把 Web Push 和外发 Webhook 接到会话完成的钩子上，覆盖 Claude Code、Codex、opencode、Kimi CLI 四个工具——任务跑完是收到通知，不用自己盯着屏幕轮询。</p>
+  <p>它刻意没做的事：没有云端执行模式，所以和 Cloud sessions 不同，你的机器还是得开着；没有团队/组织权限体系，只有设备配对，是为一个人管自己的几台机器设计的，不是给团队共享部署用的；它是个 PWA，不是从应用商店装的东西。</p>
+
+  <h2>重新核实过的对比</h2>
+  <table>
+    <tr><th>方案</th><th>跑在哪</th><th>机器要开着吗</th><th>费用</th><th>值得知道的事</th></tr>
+    <tr><td>Cloud sessions</td><td>Anthropic 的基础设施</td><td>不用</td><td>包含在 Pro/Max/Team/Enterprise 里</td><td>唯一一个电脑可以关机的官方选项</td></tr>
+    <tr><td>Remote Control</td><td>你的机器</td><td>要</td><td>包含在 Pro/Max/Team/Enterprise 里（Team/Enterprise 默认关）</td><td>研究预览版；约 10 分钟断网超时；进程随所在终端一起没</td></tr>
+    <tr><td>Dispatch</td><td>你机器上的 Claude Desktop</td><td>要</td><td>仅 Pro/Max</td><td>异步——派任务、回头看，不是实时会话</td></tr>
+    <tr><td>CloudCLI 自托管</td><td>你的机器</td><td>要</td><td>免费、开源</td><td>多 agent 仪表盘；两个已知手机端问题，均未关闭</td></tr>
+    <tr><td>CloudCLI Cloud</td><td>CloudCLI 的基础设施</td><td>不用</td><td>起价 €7/月</td><td>托管版，笔记本可以合盖——没有自托管方案能做到这点</td></tr>
+    <tr><td>SSH 客户端 + tmux</td><td>你的机器</td><td>要</td><td>一个 SSH App 的钱，可能你已经有了</td><td>最灵活也最手动——没有通知，没有触屏键盘</td></tr>
+    <tr><td>PocketShell</td><td>你的机器</td><td>要</td><td>免费、自托管（Apache-2.0）</td><td>手机原生键盘 + 重放 + 推送，专职终端客户端</td></tr>
+  </table>
+
+  <h2>三种情况下，什么都别自建</h2>
+  <p>把这个说清楚，是一篇由方案本身来写的对比文章唯一能建立可信度的方式，所以：</p>
+  <ul>
+    <li><strong>你的电脑有时候要关机。</strong> 这页上所有自托管选项——CloudCLI 自托管模式也好、PocketShell 也好——都需要一台开着的机器才能连上。如果计划是"合上笔记本，工作还得继续"，那是 Cloud sessions 或 CloudCLI Cloud 该管的事，不在这份清单里。</li>
+    <li><strong>你只是偶尔想瞄一眼进度。</strong> 如果偶尔看看就是全部需求，官方 Remote Control 已经能做到这点，只要账号订阅层级对，零额外搭建。为了偶尔瞄一眼去搭一个自托管服务，投入和问题不成比例。</li>
+    <li><strong>你不想维护一个服务。</strong> 不管是 CloudCLI 还是 PocketShell，自托管都意味着你得自己让进程一直活着、自己打更新、坏了自己排查。如果这不是你想接受的代价，上面那几个托管选项（Cloud sessions、Dispatch、CloudCLI Cloud）存在的意义就是让你不用做这件事。</li>
+  </ul>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/claude-code-mobile-options-compared" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>

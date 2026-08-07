@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tmux + SSH 能让 Claude Code 活下去，但从没为手机设计过 — PocketShell</title>
+<meta name="description" content="手机上 SSH 进去、在 tmux 里跑 Claude Code，这套组合本身已经解决了最难的部分：进程不会断。没解决的是触屏输入、网络切换和通知——因为这两个工具压根不是为手机屏幕做的。" />
+<link rel="canonical" href="https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough" />
+<link rel="alternate" hreflang="en" href="https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough" />
+<link rel="alternate" hreflang="zh-Hans" href="https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough" />
+<link rel="alternate" hreflang="x-default" href="https://pocketshell.net/blog/why-tmux-and-ssh-arent-enough" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="PocketShell" />
+<meta property="og:locale" content="zh_CN" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough" />
+<meta property="og:title" content="tmux + SSH 能让 Claude Code 活下去，但从没为手机设计过" />
+<meta property="og:description" content="手机上 SSH 进去、在 tmux 里跑 Claude Code，这套组合本身已经解决了最难的部分：进程不会断。没解决的是触屏输入、网络切换和通知——因为这两个工具压根不是为手机屏幕做的。" />
+<meta property="og:image" content="https://pocketshell.net/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="tmux + SSH 能让 Claude Code 活下去，但从没为手机设计过" />
+<meta name="twitter:description" content="手机上 SSH 进去、在 tmux 里跑 Claude Code，这套组合本身已经解决了最难的部分：进程不会断。没解决的是触屏输入、网络切换和通知——因为这两个工具压根不是为手机屏幕做的。" />
+<meta name="twitter:image" content="https://pocketshell.net/assets/og-cover.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/site.css?v=20260807" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "tmux + SSH 能让 Claude Code 活下去，但从没为手机设计过",
+  "description": "手机上 SSH 进去、在 tmux 里跑 Claude Code，这套组合本身已经解决了最难的部分：进程不会断。没解决的是触屏输入、网络切换和通知——因为这两个工具压根不是为手机屏幕做的。",
+  "inLanguage": "zh-CN",
+  "datePublished": "2026-08-07",
+  "dateModified": "2026-08-07",
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pocketshell.net/zh/blog/why-tmux-and-ssh-arent-enough" },
+  "author": { "@type": "Person", "name": "Big-Pony", "url": "https://github.com/Big-Pony" },
+  "publisher": { "@type": "Organization", "name": "PocketShell", "url": "https://pocketshell.net/" }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/zh"><span class="logo">❯_</span>PocketShell</a>
+    <nav class="nav-links">
+      <a href="https://demo.pocketshell.net">在线演示</a>
+      <a href="/zh/blog">文章</a>
+      <a href="/zh#features">功能</a>
+      <a href="/zh#quickstart">快速开始</a>
+      <a href="/zh#security">安全</a>
+    </nav>
+    <a class="btn-lang" href="/blog/why-tmux-and-ssh-arent-enough" hreflang="en" title="English">English</a>
+    <a class="btn-gh" href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub ★</a>
+  </div>
+</header>
+
+<article class="article">
+  <p class="article-meta">2026-08-07</p>
+  <h1>tmux + SSH 能让 Claude Code 活下去，但从没为手机设计过</h1>
+  <p class="lede">如果你已经在用手机 SSH 进服务器、在 tmux 里跑 Claude Code，那最难的问题已经解决了：进程不会因为断线而死。剩下的是一份 tmux 和 SSH 从来没被要求解决的问题清单——这是一份真实存在的差距，不是在挑两个工具的毛病。</p>
+
+  <h2>该给的功劳先给</h2>
+  <p>tmux 让一个进程在服务器上独立于任何一次具体连接持续运行——关掉 SSH 会话，tmux 里的 <code>claude</code> 进程照样跑着，之后重新 attach 会直接回到同一个窗口，连回滚缓冲都还在。SSH 负责让你的手机 SSH 客户端先安全连上那台服务器。两者加在一起解决的是唯一真正会丢工作量的失败模式：连接断开直接干掉正在跑的任务。有一篇实践博客正好写的是这个问题——作者在一次 SSH 断线弄丢了正在跑的 Claude Code 长任务之后，最终靠重新 attach 到终端复用器解决，因为一个裸的 TUI 进程需要真正的终端在下面撑着，连接一消失它自己是撑不住的。<span class="src">（<a href="https://cdmckay.org/how-to-keep-claude-code-running-across-ssh-disconnects/">来源</a>，他人报告，我们未复现）</span></p>
+
+  <h2>这两个工具从来没承诺过的事</h2>
+  <p>tmux 是 2007 年出的，SSH 协议的历史比智能手机还早——两者设计时想的都是坐在键盘鼠标前的人，不是拿着一块玻璃、用两个大拇指操作的人。这不是缺陷，只是超出了它们的设计范围，而且每次都是在同样三个地方露出来：</p>
+  <ul>
+    <li><strong>触屏输入。</strong> Ctrl、Alt、Esc、方向键，手机软键盘上根本没有。大部分 SSH 客户端 App 会自己加一行按键补上，有帮助，但终究是搭在一个默认你有实体键盘的协议之上的补丁。</li>
+    <li><strong>通知。</strong> tmux 和 SSH 都没有"前台进程需要输入了，告诉我一声"这个概念。要么开着 App 盯着，要么等你想起来去看的时候任务早就跑完了。</li>
+    <li><strong>网络切换。</strong> 从 WiFi 走到蜂窝网络，或者穿过一段信号盲区，普通 SSH 连接直接就断。每次都得自己手动重连、重新 attach——tmux 保护的是进程，不是通向它的那条连接。</li>
+  </ul>
+
+  <h2>大家通常接下来会找什么</h2>
+  <table>
+    <tr><th>工具</th><th>改善的是哪一层</th></tr>
+    <tr><td>mosh</td><td>连接本身——能在网络切换中漫游，扛得住会直接搞死普通 SSH 的短暂断线，所以你碰到完全断开的次数会少一些</td></tr>
+    <tr><td>带自定义按键行的 SSH 客户端</td><td>修饰键和方向键的触屏输入——是终端上面的一层 UI 补丁，不是协议层面的改动</td></tr>
+    <tr><td>Termux（仅 Android）</td><td>把整套工具链跑在手机本地——完全是另一个类别，因为根本不存在要连的另一台机器</td></tr>
+  </table>
+  <p>这几样各自把差距缩小了一点，但都没补全。mosh 让连接更结实，可它仍然是个没有推送通知概念的终端会话，键盘问题它一点没碰。自定义按键行能让你打出 Ctrl-C，但断线重连之后怎么办、Claude Code 什么时候跑完不看屏幕怎么知道，它都不管。Termux 只存在于 Android——iOS 没有对应物，因为苹果不允许这类 App 上架，所以就算在能用的平台上，它也不是一个跨平台的答案。</p>
+
+  <h2>PocketShell 的不同之处</h2>
+  <p>PocketShell 从客户端这一侧、而不是从连接层去补同样这三个差距。它通过加密 WebSocket（Noise IK）直接和自己的 agent 通信，不依赖另外一个 SSH 客户端 App；而且不像 mosh 那样在传输层做丢包恢复，它在应用层做重放：每个会话维护一个连接级的序号和最近输出的环形缓冲区，不管什么原因断线重连——WiFi 切到蜂窝网络也算——都会精确补发你在上次确认位置之后错过的那部分，含缺口检测。输入这一侧有一套独立的触屏键盘，三种可切换布局（经典、分层、Flick），把手机键盘没有的 Ctrl/Alt/Esc/方向键/功能键全补齐，外加一个独立的输入法缓冲区标签页，可以先用系统输入法拼好一整句再一次性发送。因为它直接接入了 Claude Code、Codex、opencode、Kimi CLI 的会话完成钩子，任务跑完或者需要你输入的那一刻就能推送——走 Web Push 或者外发 Webhook，前台后台分别处理——不用自己去轮询屏幕。</p>
+  <p>说清楚它没改变的地方：它不是像 mosh 那样的连接层协议——底下没有 UDP 层的漫游或丢包恢复，就是标准 WebSocket 加上面说的那层应用级重放。它也不管你的 tmux 配置——tmux 里的鼠标滚动、复制模式，还是你自己配的那套。而且和 Termux 不一样，它仍然假设某个地方有一台一直开着的机器在跑真正的 agent——它不是一种把 Claude Code 整个搬到手机上跑的办法。</p>
+
+  <h2>三种情况下，这些都帮不上忙</h2>
+  <ul>
+    <li><strong>你的电脑有时候要关机。</strong> PocketShell、mosh、带自定义按键行的 SSH 客户端，都还是需要一台开着的机器。如果计划是"合上笔记本，工作还得继续"，那是官方 Cloud sessions 该管的事——这里的任何一个，包括这个项目本身，都改变不了这一点。</li>
+    <li><strong>你只是偶尔想瞄一眼进度。</strong> 如果偶尔看看就是全部需求，官方 Remote Control 已经能做到，不用自己搭任何东西，只要账号订阅层级对就行。</li>
+    <li><strong>你不想维护一个服务。</strong> 自托管 PocketShell 意味着你得自己让进程一直活着、自己更新，跟任何自托管工具一样。如果这不是你想接受的代价，继续用纯 SSH 加 mosh，或者用官方托管选项，才是更诚实的选择。</li>
+  </ul>
+
+  <div class="article-nav">
+    <a href="/zh/blog">← 所有文章</a>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:14.5px"><span class="logo" style="width:24px;height:24px;font-size:12px">❯_</span>PocketShell</span>
+    <a href="https://github.com/Big-Pony/pocketshell" target="_blank" rel="noopener">GitHub</a>
+    <a href="/zh/blog">文章</a>
+    <a href="/blog/why-tmux-and-ssh-arent-enough" hreflang="en">English</a>
+    <span class="sp">© 2026 PocketShell · Apache-2.0</span>
+  </div>
+</footer>
+
+</body>
+</html>
