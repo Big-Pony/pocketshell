@@ -83,7 +83,7 @@
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
-  import { buildReseedPayload, ReseedGate, type ReseedTrigger } from "../lib/term/reseed";
+  import { buildReseedPayload, buildReseedReport, ReseedGate, type ReseedTrigger } from "../lib/term/reseed";
   import { Connection } from "../lib/net/connection";
   import { fromB64 } from "../lib/bytes";
   import type { TermHistoryResult } from "../lib/net/protocol";
@@ -357,9 +357,14 @@
     // R1: while hidden, stash raw bytes instead of writing to xterm (parse +
     // render is the expensive part); activation flushes them in one write.
     // Tombstoned sessions get no live stream anymore — drop their frames.
+    // 埋点计数器：实时流到达的帧数与字节数（单调递增，只做差值用）。
+    let probeFrames = 0;
+    let probeBytes = 0;
     const pendingOut = new PendingBuffer();
     const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId !== sessionId) return;
+      probeFrames++;
+      probeBytes += f.data.byteLength;
       if (active) { term.write(f.data); return; }
       if (closed) return;
       pendingOut.push(f.data);
@@ -384,17 +389,40 @@
     const reloadHistory = async (trigger: ReseedTrigger = "alt-normal") => {
       if (currentBuffer !== "normal") return;
       const gen = reseedGate.begin();
+      // 埋点：量 await 窗口有多宽、期间涌进来多少实时字节。旧实现下那些字节
+      // 正是会被 reset() 抹掉的内容，所以这两个数直接对应故障严重程度。
+      const startedAt = Date.now();
+      const framesAtStart = probeFrames;
+      const bytesAtStart = probeBytes;
+      const lenBefore = term.buffer.active.length;
       try {
         const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
         // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
-        if (reseedGate.isStale(gen)) return;
+        const stale = reseedGate.isStale(gen);
+        const data = stale ? "" : new TextDecoder().decode(fromB64(h?.data ?? ""));
         // await 期间组件可能已卸载，或 pane 已切进 alt buffer（那里 capture-pane
         // 拿到的东西没有意义）。两者都不该再写。
-        if (destroyed) return;
-        if (currentBuffer !== "normal") return;
+        //
         // RIS 与内容必须拼进**同一次** write：拆成两次虽然队列里也有序，但中间
         // 会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
-        term.write(buildReseedPayload(new TextDecoder().decode(fromB64(h?.data ?? ""))));
+        if (!stale && !destroyed && currentBuffer === "normal") {
+          term.write(buildReseedPayload(data));
+        }
+        try {
+          void conn.rpc("diag.report", {
+            tag: sessionId,
+            ...buildReseedReport({
+              trigger,
+              rttMs: Date.now() - startedAt,
+              discarded: stale,
+              snapshotBytes: data.length,
+              framesDuringAwait: probeFrames - framesAtStart,
+              bytesDuringAwait: probeBytes - bytesAtStart,
+              bufferLenBefore: lenBefore,
+              bufferLenAfter: term.buffer.active.length,
+            }),
+          }).catch(() => {});
+        } catch { /* 探针永不影响终端本身 */ }
       } catch { /* best-effort */ }
     };
 
@@ -426,7 +454,7 @@
     flushPending = () => {
       if (pendingOut.dirty) {
         pendingOut.clearDirty();
-        if (currentBuffer === "normal") void reloadHistory();
+        if (currentBuffer === "normal") void reloadHistory("stash-dirty");
         else void conn.rpc("term.redraw", { session: sessionId }).catch(() => {});
         return;
       }

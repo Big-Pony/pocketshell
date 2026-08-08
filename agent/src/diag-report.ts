@@ -24,7 +24,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll"]);
+const KINDS = new Set(["atlas", "scroll", "reseed"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -83,6 +83,17 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     for (const k of [
       "bufferLength", "baseY", "ydisp", "rows", "cols",
       "cellHeight", "canvasHeight", "scrollHeight", "scrollTop", "clientHeight",
+    ] as const) {
+      const v = num(p[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    // 重灌历史的诊断（2026-08-08）。字段名与 app/src/lib/term/reseed.ts 的
+    // ReseedReportInput 逐字对应。只有计数，没有终端内容。
+    if (typeof p.trigger === "string") out.trigger = oneLine(p.trigger, MAX_TAG);
+    if (typeof p.discarded === "boolean") out.discarded = p.discarded;
+    for (const k of [
+      "rttMs", "snapshotBytes", "framesDuringAwait", "bytesDuringAwait",
+      "bufferLenBefore", "bufferLenAfter",
     ] as const) {
       const v = num(p[k]);
       if (v !== undefined) out[k] = v;

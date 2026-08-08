@@ -151,3 +151,25 @@ test("sanitises bufferType like every other client string", () => {
   expect(o.bufferType.includes("\n")).toBe(false);
   expect(o.bufferType.length).toBeLessThanOrEqual(64);
 });
+
+// 重灌历史的诊断（2026-08-08）。同样是白名单制：不显式加进去的字段会被静默
+// 丢掉，日志里只是少几个数、什么都不报错，是最难发现的失效。
+test("reseed 诊断：kind 被接受，计数字段原样带上", () => {
+  const line = formatDiagReport({
+    tag: "sess-1", kind: "reseed", trigger: "alt-normal",
+    rttMs: 120, discarded: true, snapshotBytes: 4096,
+    framesDuringAwait: 3, bytesDuringAwait: 800,
+    bufferLenBefore: 500, bufferLenAfter: 480,
+  });
+  const body = JSON.parse(line.slice(DIAG_PREFIX.length + 1));
+  expect(body.kind).toBe("reseed");
+  expect(body.trigger).toBe("alt-normal");
+  expect(body.rttMs).toBe(120);
+  expect(body.discarded).toBe(true);
+  expect(body.bufferLenAfter).toBe(480);
+});
+
+test("reseed 诊断：trigger 里的换行被抹平，不能伪造第二行日志", () => {
+  const line = formatDiagReport({ kind: "reseed", trigger: "a\nFAKE" });
+  expect(line.split("\n").length).toBe(1);
+});

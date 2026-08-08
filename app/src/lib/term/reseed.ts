@@ -51,3 +51,38 @@ export class ReseedGate {
 
 /** 重灌的触发来源。埋点按它区分路径，故障复现后可直接定位。 */
 export type ReseedTrigger = "alt-normal" | "stash-dirty" | "resync";
+
+export interface ReseedReportInput {
+  trigger: ReseedTrigger;
+  /** RPC 往返耗时（ms）。量的是竞态窗口有多宽。 */
+  rttMs: number;
+  /** 本次快照是否因代际过期被整份丢弃。为真 = 并发确实发生了、且被拦下。 */
+  discarded: boolean;
+  snapshotBytes: number;
+  /** await 期间到达的实时帧数与字节数 —— 旧实现下这些正是会被抹掉的内容。 */
+  framesDuringAwait: number;
+  bytesDuringAwait: number;
+  bufferLenBefore: number;
+  bufferLenAfter: number;
+}
+
+/**
+ * 组装一次重灌的诊断上报体。
+ *
+ * 只放计数，不放任何终端内容 —— 这条日志用户可能直接贴进公开 issue。
+ * agent 侧 diag-report.ts 是白名单制，字段名两边必须逐字对应，漂移是静默的
+ * （字段被丢掉，日志里只是少几个数，什么都不报错）。
+ */
+export function buildReseedReport(input: ReseedReportInput): Record<string, unknown> {
+  return {
+    kind: "reseed",
+    trigger: input.trigger,
+    rttMs: input.rttMs,
+    discarded: input.discarded,
+    snapshotBytes: input.snapshotBytes,
+    framesDuringAwait: input.framesDuringAwait,
+    bytesDuringAwait: input.bytesDuringAwait,
+    bufferLenBefore: input.bufferLenBefore,
+    bufferLenAfter: input.bufferLenAfter,
+  };
+}

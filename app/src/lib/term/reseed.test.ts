@@ -40,3 +40,37 @@ describe("ReseedGate", () => {
     expect([g.begin(), g.begin(), g.begin()]).toEqual([1, 2, 3]);
   });
 });
+
+import { buildReseedReport } from "./reseed";
+
+describe("buildReseedReport", () => {
+  const base = {
+    trigger: "alt-normal" as const,
+    rttMs: 120,
+    discarded: false,
+    snapshotBytes: 4096,
+    framesDuringAwait: 3,
+    bytesDuringAwait: 800,
+    bufferLenBefore: 500,
+    bufferLenAfter: 480,
+  };
+
+  it("kind 固定为 reseed —— agent 侧按它路由白名单", () => {
+    expect(buildReseedReport(base).kind).toBe("reseed");
+  });
+
+  it("原样带上所有计数字段", () => {
+    const r = buildReseedReport(base);
+    expect(r.trigger).toBe("alt-normal");
+    expect(r.rttMs).toBe(120);
+    expect(r.framesDuringAwait).toBe(3);
+    expect(r.bytesDuringAwait).toBe(800);
+    expect(r.bufferLenBefore).toBe(500);
+    expect(r.bufferLenAfter).toBe(480);
+    expect(r.snapshotBytes).toBe(4096);
+  });
+
+  it("discarded 为真时如实带上 —— 那是「并发被拦下」的证据", () => {
+    expect(buildReseedReport({ ...base, discarded: true }).discarded).toBe(true);
+  });
+});
