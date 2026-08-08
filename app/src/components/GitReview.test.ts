@@ -333,6 +333,99 @@ describe("GitReview 返回键（硬件/浏览器 Back）", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // 线上反馈的 bug：点遮罩 / 取消 / 选中分支关掉弹层时，审查页也跟着关了。
+  //
+  // 根因是初版让两层各压一条 history 记录，弹层收尾要调 history.back() 去
+  // 消掉自己那条，而那次 back 会发出真实 popstate，被外层当成用户按了返回。
+  // 现在改成整个审查页只压一条记录、由 goBack() 按状态分派，弹层不碰
+  // history——所以这些「正常关闭」路径压根不会产生 popstate。
+  //
+  // 下面几条用例断言的就是这件事：关弹层之后 onClose 一次都没被调过，
+  // 且审查页仍在 DOM 里。
+  it("点遮罩关弹层：只关弹层，审查页留着", async () => {
+    const onClose = vi.fn();
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" }, onClose }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+
+    await fireEvent.click(container.querySelector(".bp-mask")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    expect(onClose, "关弹层不该连带关审查页").not.toHaveBeenCalled();
+    expect(container.querySelector(".rv-body"), "审查页仍在").toBeTruthy();
+  });
+
+  it("Esc 关弹层：只关弹层，审查页留着", async () => {
+    const onClose = vi.fn();
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" }, onClose }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+
+    await fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("选中分支关弹层：只关弹层，审查页留着并重拉", async () => {
+    const conn = connStub(RANGE);
+    const onClose = vi.fn();
+    const { container } = render(GitReview, {
+      props: props({ conn, scope: { kind: "range" }, onClose }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelectorAll(".bp-item").length).toBeGreaterThan(0));
+
+    await fireEvent.click(container.querySelectorAll(".bp-item")[0]);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.querySelector(".rv-body")).toBeTruthy();
+  });
+
+  // 这条锁的是「弹层吃掉一次返回后必须补压一条记录」——否则审查页那条
+  // 已被消耗，下一次返回会直接退出 App（就是最初报的问题）。
+  //
+  // jsdom 的 history 栈行为与真实浏览器不同，靠派发 popstate 测不出栈深，
+  // 所以直接监视 pushState 的调用次数：打开时 1 次，弹层吃掉返回后应变成 2 次。
+  it("弹层吃掉返回后补压 history 记录，审查页仍可被下一次返回关掉", async () => {
+    const spy = vi.spyOn(history, "pushState");
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" } }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    const afterOpen = spy.mock.calls.length;
+
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+    window.dispatchEvent(new PopStateEvent("popstate"));      // 用户按返回
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+
+    expect(spy.mock.calls.length, "关弹层后应补压一条").toBe(afterOpen + 1);
+    expect(spy.mock.calls.at(-1)).toEqual([{ psFs: true }, ""]);
+    spy.mockRestore();
+  });
+
+  it("关弹层后再按返回，才轮到关审查页", async () => {
+    const onClose = vi.fn();
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" }, onClose }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bp-mask")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new PopStateEvent("popstate"));   // 这次是用户真按的
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("基线按钮带切换图标且触摸目标够大", async () => {
     const { container } = render(GitReview, {
       props: props({ conn: connStub(RANGE), scope: { kind: "range" } }),

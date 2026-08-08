@@ -68,37 +68,32 @@
 
   function closePicker() { picking = false; }
 
-  // 硬件/浏览器返回键与 Esc 都走「返回上一级」，不再直接退出整个应用。
+  // 硬件/浏览器返回键与 Esc 都走「返回上一级」，不再退出整个应用。
   // 照抄 FilePreview 全屏那套 psFs 约定：进来压一条 history 记录，Back
-  // 弹掉它时触发 popstate；从按钮正常退出时把那条记录一并 back() 掉，
-  // 免得历史里留下一个「再按一次才真的退出」的空档。
+  // 弹掉它时触发 popstate；从按钮正常退出时把那条记录一并 back() 掉。
   //
-  // **两层各压各的记录**（审查页一条、选择层一条），这样从选择层连按
-  // 两次返回是「关弹层 → 关审查页」。少压一条的话，第一次返回会把审查
-  // 页那条也消耗掉，第二次就直接退出应用了——正是这次要修的问题。
-  // 两层的 popstate 监听同时挂着时，一次 Back 会**两个都触发**（popstate
-  // 在 window 上广播，stopPropagation 对它无效），而且外层先注册、先收到，
-  // 所以「内层置个标志让外层跳过」是行不通的——外层跑的时候标志还没置上。
+  // **整个审查页只压一条记录**，不给弹层再压一条。这是被一个 bug 教出来的：
+  // 让两层各压各的记录，就必须区分「用户按了返回」和「弹层收尾时自己调
+  // back() 发出的回声」——但 popstate 不带来源信息，标志位方案又依赖
+  // 「back() 必定回发 popstate」这个不牢靠的假设（历史栈空时不发，jsdom
+  // 也不发），补出来的逻辑既绕又漏。
   //
-  // 可靠的判据是直接读状态：弹层开着，这次返回就归弹层，外层不管。
-  $effect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !picking) onClose(); };
-    const onPop = () => { if (!picking) onClose(); };
-    history.pushState({ psFs: true }, "");
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("popstate", onPop);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("popstate", onPop);
-      if ((history.state as { psFs?: boolean } | null)?.psFs) history.back();
-    };
-  });
+  // 单条记录 + 一个处理器就没有这个问题：返回该关哪一层由当前状态直接
+  // 决定，弹层纯粹是内部状态、不碰 history。代价是弹层开着时按返回会连
+  // 记录一起消耗掉，所以关弹层后要补压一条，让审查页仍能被下一次返回关掉。
+  function goBack() {
+    if (picking) { picking = false; repushEntry(); return; }
+    onClose();
+  }
 
-  // 选择层自己那一层，仅在弹开时挂。
+  /** 弹层吃掉返回后补回那条记录，保证审查页自己仍有一次返回可用。 */
+  function repushEntry() {
+    history.pushState({ psFs: true }, "");
+  }
+
   $effect(() => {
-    if (!picking) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closePicker(); };
-    const onPop = () => { picking = false; };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") goBack(); };
+    const onPop = () => goBack();
     history.pushState({ psFs: true }, "");
     window.addEventListener("keydown", onKey);
     window.addEventListener("popstate", onPop);
