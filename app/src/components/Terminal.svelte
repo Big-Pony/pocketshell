@@ -97,6 +97,7 @@
     fontSize = 14,
     fontFamily = "maple-mono",
     onReady,
+    onReseedReady,
   }: {
     conn: Connection;
     sessionId: string;
@@ -105,6 +106,7 @@
     fontSize?: number;
     fontFamily?: FontId;
     onReady?: (sessionId: string, term: Terminal) => void;
+    onReseedReady?: (sessionId: string, reseed: (t: ReseedTrigger) => void) => void;
   } = $props();
 
   let host: HTMLDivElement;
@@ -553,6 +555,9 @@
     // 没显示出来就没有任何理由去打扰 tmux。真正显示时由下面的 ResizeObserver 补上。
     if (active) refit();
     onReady?.(sessionId, term);
+    // 让外壳能对指定会话触发重灌。目前唯一的调用方是 App 的 onResync —— 服务端
+    // 说「你缺了一段字节」时，只有重灌快照能补，重推当前屏补不了 scrollback。
+    onReseedReady?.(sessionId, (t) => { void reloadHistory(t); });
     // The classifyPane poll is NOT started here: the visibility $effect below
     // starts it when (and only while) this terminal is active + live (A4).
 

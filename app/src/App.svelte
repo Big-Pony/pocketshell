@@ -152,6 +152,8 @@
     catch { /* 断线时保持现状，不清空已显示的名字 */ }
   }
   const terms = new Map<string, Terminal>();
+  // 每个终端暴露的重灌入口（onResync 用）。与 terms 同生命周期。
+  const reseeders = new Map<string, (t: "alt-normal" | "stash-dirty" | "resync") => void>();
   const cmdLines = new Map<string, CmdLineState>();
   let hints = $state<string[]>([]);
   // 需求 5：用户自定义联想库。hintsChanged 广播无载荷，收到后重拉全量。
@@ -322,9 +324,16 @@
   conn.onInput((sid, data) => {
     anchors.record(sid, data, terms.get(sid)?.buffer.active);
   });
-  conn.onResync(() => {
+  // resync 的语义是「你确定性地缺了一段字节」（服务端背压丢帧，或 replay 环形
+  // 缓冲已把客户端要的 seq 淘汰掉）。此前这里只弹一句提示，缺的字节永远补不
+  // 回来 —— 那正是「中间少几行、重开才恢复」的一个独立来源。
+  //
+  // 必须是重灌快照而不是 term.redraw：refresh-client 只推可见屏那 rows 行，
+  // scrollback 一个字节都不推（实测），补不了洞。
+  conn.onResync((f) => {
     flash = tr("app.notice.historyLost");
     setTimeout(() => (flash = ""), 4000);
+    reseeders.get(f.sessionId)?.("resync");
   });
   conn.onError((f) => {
     flash = `${f.code}: ${f.message}`;
@@ -519,6 +528,7 @@
     conn.detach(name);
     sessions = closeTabFn(sessions, name);
     terms.delete(name);
+    reseeders.delete(name);
     anchors.clear(name); // the xterm buffer it referenced is gone
     if (activeId === name) activeId = topSessions[0]?.name ?? "";
   }
@@ -616,6 +626,7 @@
       conn.kill(id);
       sessions = closeTabFn(sessions, id);
       terms.delete(id);
+      reseeders.delete(id);
       anchors.clear(id);
       tabOrder = removeOrder(tabOrder, id);
       if (activeId === id) activeId = topSessions.filter((x) => x.name !== id)[0]?.name ?? "";
@@ -923,6 +934,7 @@
         fontSize={settings.fontSize}
         fontFamily={settings.fontFamily}
         onReady={(id, t) => terms.set(id, t)}
+        onReseedReady={(id, fn) => reseeders.set(id, fn)}
       />
     {/each}
     {#each fileTabs as t (t.id)}
