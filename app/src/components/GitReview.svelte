@@ -68,6 +68,47 @@
 
   function closePicker() { picking = false; }
 
+  // 硬件/浏览器返回键与 Esc 都走「返回上一级」，不再直接退出整个应用。
+  // 照抄 FilePreview 全屏那套 psFs 约定：进来压一条 history 记录，Back
+  // 弹掉它时触发 popstate；从按钮正常退出时把那条记录一并 back() 掉，
+  // 免得历史里留下一个「再按一次才真的退出」的空档。
+  //
+  // **两层各压各的记录**（审查页一条、选择层一条），这样从选择层连按
+  // 两次返回是「关弹层 → 关审查页」。少压一条的话，第一次返回会把审查
+  // 页那条也消耗掉，第二次就直接退出应用了——正是这次要修的问题。
+  // 两层的 popstate 监听同时挂着时，一次 Back 会**两个都触发**（popstate
+  // 在 window 上广播，stopPropagation 对它无效），而且外层先注册、先收到，
+  // 所以「内层置个标志让外层跳过」是行不通的——外层跑的时候标志还没置上。
+  //
+  // 可靠的判据是直接读状态：弹层开着，这次返回就归弹层，外层不管。
+  $effect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !picking) onClose(); };
+    const onPop = () => { if (!picking) onClose(); };
+    history.pushState({ psFs: true }, "");
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("popstate", onPop);
+      if ((history.state as { psFs?: boolean } | null)?.psFs) history.back();
+    };
+  });
+
+  // 选择层自己那一层，仅在弹开时挂。
+  $effect(() => {
+    if (!picking) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closePicker(); };
+    const onPop = () => { picking = false; };
+    history.pushState({ psFs: true }, "");
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("popstate", onPop);
+      if ((history.state as { psFs?: boolean } | null)?.psFs) history.back();
+    };
+  });
+
   function chooseBase(b: string) {
     picking = false;
     // base 进了 reviewCacheKey，所以换基线一定重新请求而不会命中旧缓存。
@@ -170,7 +211,9 @@
     {#if cur.kind === "range" && activeBase}
       <div class="baseline">
         {$t('git.review.baselineLabel')}
-        <button class="bl mono" onclick={openPicker}>{activeBase}</button>
+        <button class="bl" onclick={openPicker}>
+          <span class="mono">{activeBase}</span><span class="bl-ic" aria-hidden="true">⇅</span>
+        </button>
         {#if data?.baseline?.inferred && !cur.base}<span class="bi">（{$t('git.review.baselineInferred')}）</span>{/if}
       </div>
     {/if}
@@ -346,7 +389,16 @@
   .seg .n { font-size: 0.6rem; opacity: 0.75; }
 
   .baseline { display: flex; align-items: center; gap: 6px; margin: 0 10px 8px; font-size: 0.66rem; color: var(--dim); }
-  .bl { background: transparent; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); font-size: 0.66rem; padding: 2px 7px; }
+  /* 基线切换按钮。初版是「淡边框 + 10px 字 + 2px 内边距」，可点区域只有
+     约 11px 高，且长得和旁边的静态文字一样——真机上找不到它。现在给足
+     32px 高（拇指够得着）、主色描边、外加一个 ⇅ 图标明示可切换。 */
+  .bl {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md);
+    color: var(--accent); font-size: 0.68rem; padding: 0 9px; min-height: 32px;
+  }
+  .bl-ic { font-size: 0.72rem; line-height: 1; opacity: 0.85; }
+  .bl:active { opacity: 0.75; }
   .bi { color: var(--dimmer); }
 
   /* 骨架屏：比转圈更能传达"这里将是一列文件"，也避免高度塌陷导致的跳动 */

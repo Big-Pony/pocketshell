@@ -270,6 +270,81 @@ const rangeProps = (over: Record<string, any> = {}) => ({
   onClose: () => {}, ...over,
 });
 
+describe("GitReview 返回键（硬件/浏览器 Back）", () => {
+  // 真机反馈：在审查页按手机的返回键会直接退出整个 App，而不是回到 Git
+  // 面板。修法照抄 FilePreview 全屏那套 psFs 约定——进来压一条 history
+  // 记录，Back 弹掉它时 popstate 触发关闭。
+  const RANGE: ReviewResult = {
+    ...RESULT, scope: { kind: "range" }, counts: undefined,
+    baseline: { base: "main", inferred: true },
+  };
+
+  it("打开时压入一条 history 记录", async () => {
+    const spy = vi.spyOn(history, "pushState");
+    render(GitReview, { props: props() });
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ psFs: true }, ""));
+    spy.mockRestore();
+  });
+
+  it("popstate 触发 onClose（返回上一级而不是退出 App）", async () => {
+    const onClose = vi.fn();
+    render(GitReview, { props: props({ onClose }) });
+    await waitFor(() => expect(document.querySelector(".rv-body")).toBeTruthy());
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Esc 同样关闭审查页", async () => {
+    const onClose = vi.fn();
+    render(GitReview, { props: props({ onClose }) });
+    await waitFor(() => expect(document.querySelector(".rv-body")).toBeTruthy());
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("弹层开着时，返回只关弹层、不关审查页", async () => {
+    const onClose = vi.fn();
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" }, onClose }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    expect(onClose, "第一次返回不该关掉审查页").not.toHaveBeenCalled();
+
+    // 再按一次才关审查页——这就是「返回上一级」
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("弹层开着时 Esc 也只关弹层", async () => {
+    const onClose = vi.fn();
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" }, onClose }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    await fireEvent.click(container.querySelector(".bl")!);
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeTruthy());
+    await fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".bpick")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("基线按钮带切换图标且触摸目标够大", async () => {
+    const { container } = render(GitReview, {
+      props: props({ conn: connStub(RANGE), scope: { kind: "range" } }),
+    });
+    await waitFor(() => expect(container.querySelector(".bl")).toBeTruthy());
+    expect(container.querySelector(".bl .bl-ic")).toBeTruthy();
+    // jsdom 不算布局，断言样式声明本身（min-height 是可点区域的保证）
+    const src = readFileSync(resolve(__dirname, "./GitReview.svelte"), "utf8");
+    expect(src.match(/\.bl\s*\{[^}]*\}/s)![0]).toContain("min-height: 32px");
+  });
+});
+
 describe("GitReview 基线手选", () => {
   it("懒加载：不点基线按钮就不拉分支列表", async () => {
     const conn = connStub(RANGE_RESULT);
