@@ -1,5 +1,6 @@
 import { test, expect, vi, beforeAll } from "vitest";
 import { Terminal } from "@xterm/xterm";
+import { buildReseedPayload } from "../lib/term/reseed";
 
 // jsdom 没有 matchMedia，而 term.open() 会去读它（CoreBrowserService._updateDpr）。
 // vitest-setup.ts 里没有全局桩，所以每个开真终端的测试文件都要自己桩一份
@@ -22,11 +23,12 @@ function openTerm(): Terminal {
   return t;
 }
 
-// Terminal.svelte 的 reloadHistory()：清空 → 写入 tmux capture-pane 的全量输出。
-// 这里复刻的就是那两步。
+// Terminal.svelte 的 reloadHistory()：清空 + 写入 tmux capture-pane 的全量输出。
+// 【2026-08-08】那两步已经合成一步——清空走**流内 RIS**，与内容拼进同一次
+// write（reset() 同步而 write() 异步入队，挡不住排队字节，见 lib/term/reseed.ts）。
+// 这里照样调 buildReseedPayload，保证本文件复刻的是组件真正在做的事。
 function reseed(t: Terminal, capture: string): Promise<void> {
-  t.reset();
-  return flush(t, capture);
+  return flush(t, buildReseedPayload(capture));
 }
 
 // 需求 4（12 期）：光标停在行中间时重灌历史，第 0 行会变成「旧内容 + 历史首行」。

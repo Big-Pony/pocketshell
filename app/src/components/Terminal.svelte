@@ -83,6 +83,7 @@
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
+  import { buildReseedPayload, ReseedGate, type ReseedTrigger } from "../lib/term/reseed";
   import { Connection } from "../lib/net/connection";
   import { fromB64 } from "../lib/bytes";
   import type { TermHistoryResult } from "../lib/net/protocol";
@@ -368,31 +369,33 @@
     // holds. Called once when the pane (re)enters shell mode and on a cols change
     // (xterm wraps history to the current width, so a resize invalidates it).
     let lastCols = term.cols;
-    // 重排/回到 normal buffer 时用：清空后按当前宽度重灌整份历史。
-    // 首屏 seed 不走这里（那条路不能 clear，见 seedFromHistory）。
-    const reloadHistory = async () => {
+    // 重灌历史：清空后按当前宽度重灌整份 tmux 快照。
+    //
+    // 【2026-08-08 重写】此前用 term.reset() 清屏，那是错的 —— xterm 的 write()
+    // 是异步入队的，而 reset() 同步且不清那个队列，于是 reset 之前排队的实时
+    // 字节会在 reset **之后**被解析，与快照熔成一行。真机症状是 `p8rmissions`
+    // （应为 bypass permissions）与同一个 UI 框多世代堆叠。
+    //
+    // 历史注记：更早一版用的是 clear()，当时实测「clear() 会熔行、reset() 不会」
+    // 于是换成了 reset()。那个实测是**误诊** —— 看到的熔行正是本 bug，换 reset()
+    // 只是把发作概率压低了（它比 clear 多复位了一些状态），竞态一直都在，所以
+    // 故障后来又回来了。真正的解法是 xterm 上游注释里写的那条：用流内 RIS。
+    // 载荷拼装与代际闸门在 lib/term/reseed.ts，那里有完整的实测记录。
+    const reseedGate = new ReseedGate();
+    const reloadHistory = async (trigger: ReseedTrigger = "alt-normal") => {
       if (currentBuffer !== "normal") return;
+      const gen = reseedGate.begin();
       try {
         const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
-        // reset() 而不是 clear()：实测（xterm 6.1）clear() 只重置 y/ybase/ydisp，
-        // 光标列 x、SGR 属性、DECSTBM 滚动区**都原样留着**，紧接着写入的 capture
-        // 于是从残留的列号开始落笔，与旧字符熔成一行（"DDDDDDDDDD" + "1111"），
-        // 整份历史横向错位——这就是「表格渲染一半被普通文本盖住」的形态，且只在
-        // 光标恰好不在第 0 列时发作，所以是偶现。
-        //
-        // 三种收尾实测对比：clear() → "DDDDDDDDDD1111"（且反色残留）；
-        // clear() + \x1b[H → "1111DDDDDD"（H 只移光标不擦除）；reset() → "1111"。
-        //
-        // reset() 多复位的东西逐条核过都安全：scrollback 照常重建（上翻不受影响）；
-        // alt buffer 会被拉回 normal，而本函数开头就 `if (currentBuffer !== "normal") return`，
-        // 走不到；cursorInactiveStyle / showCursorImmediately 等选项不受影响
-        // （实测），手机上的光标可见性不回退。
-        term.reset();
-        // capture-pane lines are trimmed and bare-\n separated; xterm runs with
-        // convertEol:false, so a bare \n moves down WITHOUT returning to column
-        // 0 and the reseed renders as a diagonal staircase (visible after `:q`
-        // from vim, where no live repaint masks it). Normalize to \r\n.
-        if (h?.data) term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
+        // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
+        if (reseedGate.isStale(gen)) return;
+        // await 期间组件可能已卸载，或 pane 已切进 alt buffer（那里 capture-pane
+        // 拿到的东西没有意义）。两者都不该再写。
+        if (destroyed) return;
+        if (currentBuffer !== "normal") return;
+        // RIS 与内容必须拼进**同一次** write：拆成两次虽然队列里也有序，但中间
+        // 会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
+        term.write(buildReseedPayload(new TextDecoder().decode(fromB64(h?.data ?? ""))));
       } catch { /* best-effort */ }
     };
 

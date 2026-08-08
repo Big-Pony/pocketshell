@@ -214,7 +214,9 @@ test("overflow while hidden reseeds via term.history instead of flushing", async
   await waitFor(() => expect(historyCalls()).toBe(h0 + 1)); // full reseed happened
   // The truncated stash was never written: no chunk anywhere near 2MB.
   expect(term.written.some((c) => c instanceof Uint8Array && c.byteLength > 2 * 1024 * 1024)).toBe(false);
-  expect(term.written.at(-1)).toBe("HISTORY\r\n"); // reseed content is the last write
+  // 重灌走**流内 RIS**（2026-08-08）：清空与内容拼进同一次 write，所以最后一次
+  // 写入是 "\x1bc" + 快照，而不是裸快照。见 lib/term/reseed.ts 的实测记录。
+  expect(term.written.at(-1)).toBe("\x1bcHISTORY\r\n"); // reseed content is the last write
 });
 
 // ──────────────────────────────────────────────────────────────
