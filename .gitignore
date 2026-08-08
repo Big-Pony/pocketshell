@@ -21,3 +21,6 @@ CLAUDE.md
 deploy-info/
 .agents/
 skills-lock.json
+
+# wrangler（Cloudflare Pages 部署）的本地缓存，每次 deploy 都会重新生成
+.wrangler/
