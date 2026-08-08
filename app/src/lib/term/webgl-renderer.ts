@@ -58,11 +58,11 @@ export interface WebglHost {
   // Construct + load a fresh addon. May throw (no WebGL2, blocked context, GPU
   // out of memory) — callers treat a throw as "stay on the DOM renderer".
   create(): WebglAddonLike;
-  // Reload the screen's contents from the authoritative source (tmux history).
-  // After a context loss the on-screen state is not trustworthy: the frames that
-  // were dropped while the context was dead never reach the new renderer, and
-  // xterm has no "repaint from the byte stream" primitive.
-  reseed(): void;
+  // 这里曾有一个 `reseed(): void` 钩子，2026-08-08 删除。它的说明词（「上下文
+  // 丢失后屏上状态不可信，掉的帧永远到不了新渲染器」）是错的：xterm 的解析与
+  // 渲染完全解耦，上下文死掉的只是渲染器，字节照常进 core buffer；而
+  // WebglAddon.dispose() 内部会 setRenderer(_createRenderer())，xterm 的
+  // setRenderer 末尾就是 _fullRefresh() —— 从 buffer 出发的全量重画已经做完了。
   // Diagnostics. Real losses are rare and only observable on a phone, so the
   // console trail is the only forensic evidence we get.
   log?(message: string): void;
@@ -152,16 +152,21 @@ export function installWebgl(
       // rebuilding and let the DOM renderer (slower, but it cannot lose a
       // context) carry the session.
       log(`[webgl] context lost ${rebuilds + 1}x, giving up on WebGL — DOM renderer from here`);
-      host.reseed();
       return;
     }
 
     rebuilds++;
     if (attach()) log(`[webgl] context lost, rebuilt renderer (attempt ${rebuilds})`);
     else log(`[webgl] context lost and rebuild failed — DOM renderer from here`);
-    // Reseed either way: whatever renders now, it renders a screen whose
-    // contents were frozen at the moment the context died.
-    host.reseed();
+    // 这里**不**重灌历史（2026-08-08 订正）。曾经的注释说「现在渲染的是一块在
+    // 上下文死亡那一刻就冻结的画面」——那是错的：xterm 的解析与渲染完全解耦，
+    // 上下文死掉的只是渲染器，字节照常进 core buffer。而 WebglAddon.dispose()
+    // 内部会 setRenderer(_createRenderer())，xterm 的 setRenderer 末尾就是
+    // _fullRefresh() —— 上面那句 dispose 已经完成了从 buffer 出发的全量重画。
+    //
+    // 换言之，之前这里是拿一次跨网络的破坏性重灌，去修一个纯本地的 GPU 问题。
+    // 同文件 resume() 的注释（"The buffer lives in xterm's core, not in the
+    // renderer"）说的才是对的，两处此前自相矛盾。
   };
 
   // A terminal that mounts hidden marks itself suspended without ever taking a

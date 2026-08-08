@@ -218,9 +218,10 @@
     // 构造异常，返回一个 active:false 的句柄即可。
     //
     // GPU 上下文丢失（手机长时间使用后系统回收显存）的恢复规则见
-    // lib/webgl-renderer.ts。这里只提供两个钩子：怎么造一个新 addon，以及
-    // 恢复后拿什么重画屏幕（reloadHistory —— 上下文死掉期间到达的字节没有任何
-    // 渲染器接住，屏上内容不可信，必须从 tmux 重灌）。
+    // lib/webgl-renderer.ts。这里只提供一个钩子：怎么造一个新 addon。
+    // 上下文丢失后**不**重灌历史（2026-08-08 订正）——xterm 的解析与渲染完全
+    // 解耦，死掉的只是渲染器，字节照常进 core buffer，而 addon.dispose() 内部
+    // 已经 setRenderer + _fullRefresh 从 buffer 重画过了。
     //
     // 注意：webglHandle 在 onMount 里赋值，但 teardown 在下面才组装，两者都在
     // 同一个闭包里，所以这里用 let + 后面 dispose 即可。
@@ -234,9 +235,6 @@
         webglAddon = addon;
         return addon;
       },
-      // reloadHistory 声明在下面（const 提升到同一函数作用域内的 TDZ 之后才被
-      // 调用——上下文丢失最早也要等 3 秒，早已越过 onMount 同步段）。
-      reseed: () => { void reloadHistory(); },
       log: (m) => console.warn(m),
       // 隐藏挂载的终端一开始就不拿上下文：已经开着几个 tab 时再开一个新会话，
       // 若隐藏挂载也建上下文，几下就能顶到上限。可见性由下面的 $effect 接管。
@@ -366,9 +364,8 @@
     });
 
     // Seed tmux history into the shell's normal buffer, replacing what xterm
-    // holds. Called once when the pane (re)enters shell mode and on a cols change
-    // (xterm wraps history to the current width, so a resize invalidates it).
-    let lastCols = term.cols;
+    // holds. Called when the pane (re)enters shell mode, when the hidden stash
+    // overflowed, and when the server says bytes were dropped (resync).
     // 重灌历史：清空后按当前宽度重灌整份 tmux 快照。
     //
     // 【2026-08-08 重写】此前用 term.reset() 清屏，那是错的 —— xterm 的 write()
@@ -568,8 +565,11 @@
       if (resizeDebounce) clearTimeout(resizeDebounce);
       resizeDebounce = setTimeout(() => {
         resizeDebounce = undefined;
+        // 宽度变化后**不**重灌历史（2026-08-08）：capture-pane -J 灌进来的是
+        // 软折行（isWrapped），xterm 自带的 reflow 对软折行有效（实测：40 列
+        // 写 75 字符折成 2 行，resize 到 80 列合并回 1 行、内容完整）。
+        // 见 lib/term/reseed.xterm.test.ts 的 reflow 断言。
         refit();
-        if (term.cols !== lastCols) { lastCols = term.cols; void reloadHistory(); }
       }, 150);
     };
     window.addEventListener("resize", onResize);

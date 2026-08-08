@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { installWebgl, MAX_WEBGL_REBUILDS, type WebglAddonLike, type WebglHost } from "./webgl-renderer";
 
 // Fake addon + host. Each create() hands back a fresh addon carrying its own
@@ -7,7 +7,6 @@ import { installWebgl, MAX_WEBGL_REBUILDS, type WebglAddonLike, type WebglHost }
 function harness(opts: { failCreateFrom?: number; noLoseExtension?: boolean } = {}) {
   const addons: Array<WebglAddonLike & { lose(): void; disposed: boolean; contextLost: boolean }> = [];
   const logs: string[] = [];
-  const reseed = vi.fn();
   const host: WebglHost = {
     create() {
       if (opts.failCreateFrom !== undefined && addons.length >= opts.failCreateFrom) {
@@ -35,10 +34,9 @@ function harness(opts: { failCreateFrom?: number; noLoseExtension?: boolean } = 
       addons.push(addon);
       return addon;
     },
-    reseed,
     log: (m) => logs.push(m),
   };
-  return { host, addons, logs, reseed };
+  return { host, addons, logs };
 }
 
 describe("installWebgl", () => {
@@ -54,7 +52,6 @@ describe("installWebgl", () => {
     const h = harness({ failCreateFrom: 0 });
     const handle = installWebgl(h.host);
     expect(handle.active()).toBe(false);
-    expect(h.reseed).not.toHaveBeenCalled(); // nothing was ever rendered by us
   });
 
   // The regression this module exists for: the old handler was
@@ -70,11 +67,14 @@ describe("installWebgl", () => {
     expect(handle.rebuilds()).toBe(1);
   });
 
-  it("reseeds history after a loss — the on-screen state is not trustworthy", () => {
+  it("上下文丢失后不再重灌历史——dispose 已经完成了全量重画", () => {
     const h = harness();
+    // WebglAddon.dispose() 内部会 setRenderer(_createRenderer())，而 xterm 的
+    // setRenderer 末尾就是 _fullRefresh() —— 从 core buffer 重画。buffer 本身
+    // 从未受损（解析与渲染解耦），所以这里既不需要重灌、也不需要 refresh。
     installWebgl(h.host);
     h.addons[0].lose();
-    expect(h.reseed).toHaveBeenCalledTimes(1);
+    expect(h.addons[0].disposed).toBe(true);
   });
 
   it("disposes the dead addon before rebuilding (releases the shared atlas)", () => {
@@ -107,7 +107,6 @@ describe("installWebgl", () => {
     expect(h.addons).toHaveLength(3); // no 4th addon
     expect(handle.active()).toBe(false); // DOM renderer from here
     expect(h.addons[2].disposed).toBe(true);
-    expect(h.reseed).toHaveBeenCalledTimes(3); // still repainted on the way down
   });
 
   it("falls back to the DOM renderer when the REBUILD itself throws", () => {
@@ -115,7 +114,6 @@ describe("installWebgl", () => {
     const handle = installWebgl(h.host);
     h.addons[0].lose();
     expect(handle.active()).toBe(false);
-    expect(h.reseed).toHaveBeenCalledTimes(1); // repaint under the DOM renderer
     expect(h.logs.join("\n")).toContain("DOM renderer");
   });
 
@@ -135,7 +133,6 @@ describe("installWebgl", () => {
     expect(h.addons[0].disposed).toBe(true);
     h.addons[0].lose();
     expect(h.addons).toHaveLength(1);
-    expect(h.reseed).not.toHaveBeenCalled();
   });
 
   it("survives an addon whose dispose() throws", () => {
@@ -231,8 +228,8 @@ describe("suspend/resume for background tabs", () => {
     // Must NOT reseed: the buffer lives in xterm's core and survives the addon
     // swap, so attaching repaints from it. A tmux round-trip on every tab
     // switch would be pure cost — and it would clobber the R1 stash flush,
-    // which is exactly what test/terminal.test.ts caught.
-    expect(h.reseed).not.toHaveBeenCalled();
+    // which is exactly what test/terminal.test.ts caught. (2026-08-08: the
+    // reseed hook is gone entirely, so this now holds structurally.)
   });
 
   // The whole point of the fix: flipping between tabs must not accumulate
@@ -295,7 +292,6 @@ describe("suspend/resume for background tabs", () => {
     // the DOM renderer, not throw into the caller. No reseed here either — the
     // DOM renderer paints from the same core buffer.
     expect(handle.active()).toBe(false);
-    expect(h.reseed).not.toHaveBeenCalled();
   });
 
   // Opening a session while several tabs are already open mounts the new
