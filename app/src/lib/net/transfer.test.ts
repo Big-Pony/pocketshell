@@ -1,5 +1,6 @@
 import { test, expect, vi, beforeAll, describe } from "vitest";
 import { humanSize, chunkOffsets, childPath, uploadFiles, uploadChunksWindowed, UPLOAD_WINDOW, baseName, downloadFileBlob, downloadFolder, fetchChunksWindowed, DOWNLOAD_WINDOW, CHUNK_BYTES, type RpcLike } from "./transfer";
+import { toB64 } from "../bytes";
 
 beforeAll(() => {
   // jsdom does not implement Blob.prototype.arrayBuffer; polyfill it via
@@ -344,6 +345,24 @@ test("下载读 r.bytes，不再 fromB64", async () => {
     rpc: async (_m: string, p: any) => {
       if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: EVIL.length };
       return { bytes: EVIL, eof: true, size: EVIL.length };
+    },
+  };
+  const blob = await downloadFileBlob(conn as any, "/a");
+  const got = new Uint8Array(await blob.arrayBuffer());
+  expect(Array.from(got)).toEqual(Array.from(EVIL));
+});
+
+test("fs.downloadChunk 回落到 dataB64（单帧装不下或客户端没声明 bin 时 sendRpcBinary 的形状）也能拼出正确字节", async () => {
+  // 回归用例：sendRpcBinary 在两种情况下不发二进制帧，改走 sendRpcResult 把
+  // 字节 base64 进 result.dataB64（没有 bytes 字段）——见 agent/src/server.ts。
+  // 今天的 downloadFileBlob 硬编码 45KiB 分片，帧预算绰绰有余，永远走不到这条
+  // 路径，但只要有人调大 chunkBytes 就会撞上；之前 transfer.ts 只读 r.bytes，
+  // 这种回复会静默产出空字节而不是报错。
+  const EVIL = new Uint8Array([0xed, 0xa0, 0x80, 0xff, 0xfe, 0x00]);
+  const conn = {
+    rpc: async (_m: string, p: any) => {
+      if (p.len === 0) return { dataB64: toB64(new Uint8Array(0)), eof: false, size: EVIL.length };
+      return { dataB64: toB64(EVIL), eof: true, size: EVIL.length };
     },
   };
   const blob = await downloadFileBlob(conn as any, "/a");

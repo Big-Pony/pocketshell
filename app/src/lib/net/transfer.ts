@@ -2,6 +2,7 @@
 // download half). All bytes travel the encrypted WS via conn.rpc/conn.rpcBin —
 // chunked to stay well under the WS payload cap.
 import { tr } from "../i18n";
+import { fromB64 } from "../bytes";
 
 export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
 
@@ -140,13 +141,25 @@ export function baseName(path: string): string {
   return (i < 0 ? path : path.slice(i + 1)) || "root";
 }
 
+// fs.downloadChunk 正常回复走 rpcBin，result.bytes 是裸字节。但 agent 的
+// sendRpcBinary 在两种情况下回落到一阶段的形状——单帧装不下（frameBytes >
+// RPC_FIT_SAFE_BYTES，len 无客户端可控的独立上限）、或客户端没声明 "bin"
+// 能力——把字节 base64 塞进 result.dataB64，走既有的压缩/分片 JSON 链路
+// （见 server.ts 的 sendRpcBinary）。今天的 UI 走不到这条路径（downloadFileBlob
+// 把 CHUNK_BYTES 硬编码在 45KiB，帧预算绰绰有余），但它是会大声失败的死
+// 代码、调大 chunkBytes 即触发，两种形状都要认得。
+type DownloadChunkResult = { bytes?: Uint8Array; dataB64?: string; eof: boolean; size: number };
+function downloadChunkBytes(r: DownloadChunkResult): Uint8Array {
+  return r.bytes ?? fromB64(r.dataB64 ?? "");
+}
+
 export async function downloadFileBlob(
   conn: RpcLike, path: string,
   opts: { chunkBytes?: number; windowSize?: number; onProgress?: (downloaded: number, total: number) => void } = {},
 ): Promise<Blob> {
   const chunk = opts.chunkBytes ?? CHUNK_BYTES;
   // Pre-check size so the user gets a localized error before any real bytes flow.
-  const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as { bytes: Uint8Array; eof: boolean; size: number };
+  const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as DownloadChunkResult;
   if (probe.size > MAX_TRANSFER_BYTES) throw new Error(tr("errors.transfer.tooBig"));
   if (probe.eof) return new Blob([]);
   let downloaded = 0;
@@ -176,13 +189,15 @@ export async function fetchChunksWindowed(
     while (next < windows.length) {
       const i = next++;
       const [offset, len] = windows[i];
-      const r = (await conn.rpc("fs.downloadChunk", { path, offset, len })) as { bytes: Uint8Array; eof: boolean; size: number };
+      const r = (await conn.rpc("fs.downloadChunk", { path, offset, len })) as DownloadChunkResult;
       // 不需要在这里 slice：handleRpcBin 在 resolve 前已经 slice 过一次真拷贝
       // （因为 blob 要跨帧存活到整个文件下载完）。这里再 slice 是白拷一遍。
       // 若哪天有人「优化」掉 handleRpcBin 里那次 slice，这些 parts 会各自钉住
       // 一整帧的底层 buffer —— 4552 个分片 × 整帧，那才是问题。
-      parts[i] = r.bytes;
-      onChunkDone?.(r.bytes.length);
+      // dataB64 回落分支没有这个顾虑：fromB64 本来就产出一份新分配的字节。
+      const bytes = downloadChunkBytes(r);
+      parts[i] = bytes;
+      onChunkDone?.(bytes.length);
     }
   };
   const lanes = Math.min(windowSize, windows.length);
