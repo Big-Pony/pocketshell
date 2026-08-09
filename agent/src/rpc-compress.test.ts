@@ -47,12 +47,27 @@ test("incompressible payload falls back to plain (gzip made it bigger)", () => {
 test("an ALREADY-gzipped payload (term.history) is refused a second pass", () => {
   // 这条守的是设计里最容易搞错的一点：外层 gzip 对 term.history 的信封其实
   // **很有效**（裸字节 -24.5%），但 base64 的 4/3 回膨胀刚好把增益吃干，
-  // 净剩 +0.7%，所以被尺寸判据拒绝。
+  // 净剩 +0.6%，所以被尺寸判据拒绝。
   //
   // 判据必须比【最终上线字节】。若改成比 gzip 的裸字节，这条会翻转成
   // "该压"，term.history 就会被白白压两遍。
-  const scrollback = Buffer.from("[32m$ ls -la[0m\n".repeat(4000));
+  //
+  // fixture 必须是**高熵**的：早先用 4000 行相同文本，gzip 后只剩 552 字节、
+  // 套信封 632 字节，低于 RPC_COMPRESS_MIN_BYTES(8192)，函数在阈值那行就返回
+  // plain，压根走不到判据分支——测试假绿。同样的坑在 rpc-fit.test.ts 发生过
+  // 一次（见那里 noisyScrollbackTmux 的注释）。
+  let s = 0x9e3779b9;
+  const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
+  const CH = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const line = () => "\x1b[32m$\x1b[0m " + Array.from({ length: 40 }, () => CH[rnd() % 36]).join("") + "\n";
+  const scrollback = Buffer.from(Array.from({ length: 2000 }, line).join(""));
+
   const inner = Buffer.from(Bun.gzipSync(scrollback)).toString("base64");
   const big = envelope({ data: inner, seq: 7, enc: "gzip" });
+
+  // 前提必须成立，否则这条测试又会变成假绿：payload 要真的越过阈值，
+  // 逼函数走到 gzip + encodedBytes 比较那一步。
+  expect(Buffer.byteLength(big, "utf8")).toBeGreaterThan(RPC_COMPRESS_MIN_BYTES);
+
   expect(compressRpcPayload(big, "term.history", ["gzip"])).toEqual({ kind: "plain" });
 });
