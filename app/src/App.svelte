@@ -933,6 +933,7 @@
         closed={s.closed ?? false}
         fontSize={settings.fontSize}
         fontFamily={settings.fontFamily}
+        historyLines={settings.historyLines}
         onReady={(id, t) => terms.set(id, t)}
         onReseedReady={(id, fn) => reseeders.set(id, fn)}
       />

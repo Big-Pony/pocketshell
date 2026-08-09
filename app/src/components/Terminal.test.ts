@@ -4,7 +4,9 @@ import { Terminal } from "@xterm/xterm";
 import TerminalView from "./Terminal.svelte";
 import { PendingBuffer } from "../lib/term/pending-buffer";
 import { FitAddon } from "@xterm/addon-fit";
+import { gzipSync } from "node:zlib";
 import { toB64 } from "../lib/bytes";
+import { DEFAULT_SETTINGS } from "../lib/settings";
 import type { Connection } from "../lib/net/connection";
 
 // The two merged suites need different xterm implementations: the buffering /
@@ -126,7 +128,9 @@ function propsFor(conn: ReturnType<typeof stubConn>, active: boolean, closed = f
 // 快照写入，再用快照的 seq 做 attach(seq, {seed:true}) 只订阅增量（旧流程是
 // 先 attach 重放、再被首次 paneInfo 触发的 reloadHistory 全量覆盖）。
 async function settleMount(conn: ReturnType<typeof stubConn>) {
-  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith("term.history", { session: "s1" }));
+  // lines 是 2026-08-09 加的：首屏只拉最近 N 行（默认取 DEFAULT_SETTINGS.historyLines
+  // = 1000）。全量 scrollback 在真机上要七秒，见 lib/term/history-decode.ts 的注释。
+  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith("term.history", { session: "s1", lines: DEFAULT_SETTINGS.historyLines }));
   await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("s1", 0, { seed: true }));
 }
 
@@ -155,6 +159,40 @@ test("PendingBuffer over the limit drops everything and goes dirty", () => {
   b.clearDirty();
   b.push(enc("HI"));
   expect(dec(b.take())).toBe("HI"); // usable again after reseed
+});
+
+// ──────────────────────────────────────────────────────────────
+// 2026-08-09 提速：首屏只拉设置里的行数，且认得 gzip 载荷
+// ──────────────────────────────────────────────────────────────
+test("historyLines 设置值透传到 term.history 的 lines 参数", async () => {
+  // 设置面板改了行数却没生效，是这条链路最容易断的一环（prop 加了但没往下传）。
+  const conn = stubConn();
+  render(TerminalView, { props: { ...propsFor(conn, true), historyLines: 200 } });
+  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith("term.history", { session: "s1", lines: 200 }));
+});
+
+test("首屏 seed 认得 enc=gzip 的压缩载荷", async () => {
+  const conn = stubConn();
+  conn.rpc.mockImplementation(async (method: string) => {
+    if (method === "term.paneInfo") return { currentCommand: "zsh", alternateOn: false, isShell: true };
+    if (method === "term.history") {
+      return { data: toB64(gzipSync(Buffer.from("GZIPPED\n"))), seq: 0, enc: "gzip" };
+    }
+    return {};
+  });
+  render(TerminalView, { props: propsFor(conn, true) });
+  const term = await waitFor(() => {
+    const t = termInstances().at(-1);
+    if (!t) throw new Error("no term yet");
+    return t;
+  });
+  // seed 路径写进去的是字符串（不是字节），所以这里不能用 dec()。
+  // 首屏路径**不带 RIS**（终端本就是空的），只做换行规范化 —— 与重灌路径不同。
+  await waitFor(() => {
+    const all = term.written.map((w) => (typeof w === "string" ? w : dec(w))).join("");
+    expect(all).toContain("GZIPPED\r\n");
+    expect(all).not.toContain("\x1bc"); // RIS 只属于重灌路径
+  });
 });
 
 // ──────────────────────────────────────────────────────────────

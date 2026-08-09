@@ -85,7 +85,8 @@
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
   import { buildReseedPayload, buildReseedReport, ReseedGate, type ReseedTrigger } from "../lib/term/reseed";
   import { Connection } from "../lib/net/connection";
-  import { fromB64 } from "../lib/bytes";
+  import { decodeHistoryData } from "../lib/term/history-decode";
+  import { DEFAULT_SETTINGS } from "../lib/settings";
   import type { TermHistoryResult } from "../lib/net/protocol";
   import { familyOf, termFontFamily, type FontId } from "../lib/font";
 
@@ -96,6 +97,7 @@
     closed = false,
     fontSize = 14,
     fontFamily = "maple-mono",
+    historyLines = DEFAULT_SETTINGS.historyLines,
     onReady,
     onReseedReady,
   }: {
@@ -105,6 +107,8 @@
     closed?: boolean;
     fontSize?: number;
     fontFamily?: FontId;
+    /** 重灌历史拉多少行。全量 2000 行在真机上要七秒，见 lib/term/history-decode.ts。 */
+    historyLines?: number;
     onReady?: (sessionId: string, term: Terminal) => void;
     onReseedReady?: (sessionId: string, reseed: (t: ReseedTrigger) => void) => void;
   } = $props();
@@ -425,10 +429,10 @@
       const bytesAtStart = probeBytes;
       const lenBefore = term.buffer.active.length;
       try {
-        const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
+        const h = (await conn.rpc("term.history", { session: sessionId, lines: historyLines })) as TermHistoryResult;
         // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
         const stale = reseedGate.isStale(gen);
-        const data = stale ? "" : new TextDecoder().decode(fromB64(h?.data ?? ""));
+        const data = stale ? "" : await decodeHistoryData(h?.data ?? "", h?.enc);
         // await 期间组件可能已卸载，或 pane 已切进 alt buffer（那里 capture-pane
         // 拿到的东西没有意义）。两者都不该再写。
         //
@@ -466,9 +470,12 @@
     // attach(0)（不带 seed），走原来的 replay 重放路径兜底。
     const seedFromHistory = async () => {
       try {
-        const h = (await conn.rpc("term.history", { session: sessionId })) as TermHistoryResult;
+        const h = (await conn.rpc("term.history", { session: sessionId, lines: historyLines })) as TermHistoryResult;
         if (h?.data) {
-          term.write(new TextDecoder().decode(fromB64(h.data)).replace(/\n/g, "\r\n"));
+          // 保持首屏语义不变：**不带 RIS**（终端此刻本就是空的，见上方注释），
+          // 只做换行规范化。这里刻意不走 buildReseedPayload —— 那是重灌路径的
+          // 载荷，会多一个 RIS 前缀。变的只有解码这一段。
+          term.write((await decodeHistoryData(h.data, h.enc)).replace(/\n/g, "\r\n"));
         }
         conn.attach(sessionId, h?.seq ?? 0, { seed: true });
       } catch {
