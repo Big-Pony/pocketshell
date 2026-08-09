@@ -8,6 +8,8 @@ import { ChunkReassembler } from "./rpc-chunks";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
 import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
 import { tr } from "../i18n";
+import { decodeZipFrame } from "./rpc-decompress";
+import { gunzip } from "../gunzip";
 
 export interface WebSocketLike {
   binaryType?: string;
@@ -277,7 +279,10 @@ export class Connection {
 
   rpc(method: string, params?: unknown): Promise<unknown> {
     const id = String(++this.rpcSeq);
-    const raw = encode({ type: "rpc", id, method, params } as ClientMsg);
+    // acceptEnc: 声明本端认得 gzip 压缩的响应。agent 只在看到这个字段时才压，
+    // 所以老 agent（忽略未知字段）与新 agent 都能正确工作。
+    const msg = { type: "rpc", id, method, params, acceptEnc: ["gzip"] } as ClientMsg;
+    const raw = encode(msg);
     const bytes = raw.length; // UTF-8 ≈ length here; payloads are base64/ASCII
     return new Promise<unknown>((resolve, reject) => {
       // The deadline covers everything queued AHEAD of this call too: on a
@@ -294,7 +299,7 @@ export class Connection {
       }, rpcDeadlineMs(budgetFor));
       this.inflightBytes += bytes;
       this.pending.set(id, { resolve, reject, timer, bytes });
-      this.send({ type: "rpc", id, method, params });
+      this.send(msg);
     });
   }
 
@@ -489,6 +494,8 @@ export class Connection {
         if (msg.ok) p.resolve(msg.result);
         else { const e = new Error(msg.error.message) as Error & { code?: string }; e.code = msg.error.code; p.reject(e); }
       }
+    } else if (msg.type === "rpcZip") {
+      this.handleRpcZip(msg);
     } else if (msg.type === "rpcChunk") {
       this.handleRpcChunk(msg);
     } else if (msg.type === "pong") {
@@ -520,12 +527,48 @@ export class Connection {
     }
   }
 
+  // 压缩响应：解压后把原始 response 帧文本回喂 dispatch —— 与 rpcChunk 重组
+  // 后的回喂是同一个招式，所以 resolve/reject/未知 id 丢弃全都免费复用。
+  //
+  // 三条纪律（少一条就是 bug）：
+  //  1. fromB64 的同步抛与 gunzip 的 rejection 都要接住（decodeZipFrame 是
+  //     async，两者统一成 rejection）。裸奔的同步异常会冒泡到没有 try/catch
+  //     的 onmessage，杀掉整帧处理。
+  //  2. 回喂前必须重新检查 socket —— 异步路径绕过了 onmessage 的
+  //     `if (socket !== this.ws) return`，重连/dispose 后旧 promise 落地时
+  //     那层保护已经不在了。
+  //  3. 这条路径除 dispatch() 外**不得触碰任何连接状态**（pending / chunks /
+  //     inflightBytes）。想"提前退出省点 CPU"就会重复释放。
+  private handleRpcZip(msg: { id: string; data: string }): void {
+    const socket = this.ws;
+    decodeZipFrame(msg.data).then(
+      (text) => {
+        if (socket !== this.ws) return; // 纪律 2
+        this.dispatch(text);            // 纪律 3：只做这一件事
+      },
+      () => {
+        if (socket !== this.ws) return;
+        const p = this.pending.get(msg.id);
+        if (!p) return; // 已超时/已断线结算过，什么都不做
+        // 与 handleRpcChunk 的 error 分支逐行同构 —— 少任何一步都是
+        // inflightBytes 泄漏（后续 rpc 拿到虚高死线，把真故障掩盖成"偶发变慢"）。
+        this.pending.delete(msg.id);
+        this.releaseRpc(p);
+        this.chunks.drop(msg.id);
+        this.sched.clearTimeout(p.timer);
+        const e = new Error("rpc_zip_invalid") as Error & { code?: string };
+        e.code = "rpc_zip_invalid";
+        p.reject(e);
+      },
+    );
+  }
+
   // WP-6: collect rpcChunk frames per rpc id; once all slices are in, the
   // concatenated bytes ARE the original `response` frame's JSON, so feeding
   // the decoded text back through dispatch makes a chunked response behave
   // byte-for-byte like the single-frame path (resolve/reject, unknown-id
   // drop included).
-  private handleRpcChunk(msg: { id: string; index: number; total: number; data: string }): void {
+  private handleRpcChunk(msg: { id: string; index: number; total: number; data: string; enc?: "gzip" }): void {
     // Late chunks for an unknown id (rpc already settled/timed out) are
     // dropped silently — the buffer can only exist alongside a pending rpc.
     if (!this.pending.has(msg.id)) return;
@@ -542,6 +585,31 @@ export class Connection {
         e.code = "rpc_chunk_invalid";
         p.reject(e);
       }
+      return;
+    }
+    // 带 enc 的分片：重组出来的是 gzip 字节，还要解压一次才是 response JSON。
+    // 与 handleRpcZip 同样的三条纪律。
+    if (msg.enc === "gzip") {
+      const socket = this.ws;
+      const id = msg.id;
+      gunzip(r.bytes).then(
+        (raw) => {
+          if (socket !== this.ws) return;
+          this.dispatch(new TextDecoder().decode(raw));
+        },
+        () => {
+          if (socket !== this.ws) return;
+          const p = this.pending.get(id);
+          if (!p) return;
+          this.pending.delete(id);
+          this.releaseRpc(p);
+          this.chunks.drop(id);
+          this.sched.clearTimeout(p.timer);
+          const e = new Error("rpc_zip_invalid") as Error & { code?: string };
+          e.code = "rpc_zip_invalid";
+          p.reject(e);
+        },
+      );
       return;
     }
     this.dispatch(new TextDecoder().decode(r.bytes));

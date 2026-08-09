@@ -1196,3 +1196,61 @@ describe("dropConnection", () => {
     expect(sched.pending().length).toBe(1);   // handleDown() scheduled the reconnect
   });
 });
+
+// ---- rpcZip：压缩响应 ----
+import { gzipSync } from "node:zlib";
+
+/** 把一个 response 帧压成 rpcZip 帧，与 agent 的 sendRpcResult 同构。 */
+function zipFrame(id: string, result: unknown): ServerMsg {
+  const payload = encode({ type: "response", id, ok: true, result } as ServerMsg);
+  return { type: "rpcZip", id, data: gzipSync(Buffer.from(payload, "utf8")).toString("base64") } as ServerMsg;
+}
+
+test("rpcZip response is decompressed and resolves the rpc", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.read", { path: "/big" });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  h.deliver(zipFrame(id, { content: "hello".repeat(3000) }));
+  await expect(p).resolves.toEqual({ content: "hello".repeat(3000) });
+});
+
+test("rpcZip with corrupt payload rejects as rpc_zip_invalid", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.read", { path: "/x" });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  h.deliver({ type: "rpcZip", id, data: "!!!not base64!!!" } as ServerMsg);
+  await expect(p).rejects.toMatchObject({ code: "rpc_zip_invalid" });
+});
+
+test("rpc requests advertise acceptEnc gzip", () => {
+  const h = harness();
+  h.conn.rpc("fs.read", { path: "/x" });
+  const req = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(req.acceptEnc).toEqual(["gzip"]);
+});
+
+test("GUARD: an rpcZip arriving after disconnect does not touch the new socket", async () => {
+  // 异步回喂绕过了 onmessage 的 stale-socket 守卫（connection.ts:372 的
+  // `if (socket !== this.ws) return`）。没有等价检查的话，重连后旧 promise
+  // 回喂会往已关闭的 socket 发帧。
+  const h = harness();
+  const p = h.conn.rpc("fs.read", { path: "/x" });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  h.deliver(zipFrame(id, { content: "x".repeat(9000) }));
+  h.sock.onclose();                       // 解压还在 await 中就断线
+  await expect(p).rejects.toBeTruthy();   // rejectAllPending 已经结算了它
+  await new Promise((r) => setTimeout(r, 5)); // 让悬空的解压 promise 落地
+  // 没有抛异常、没有往新 socket 发东西即为通过
+});
+
+test("GUARD: a compressed rpcChunk sequence reassembles and decompresses", async () => {
+  const h = harness();
+  const p = h.conn.rpc("git.log", { cwd: "/" });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  const payload = encode({ type: "response", id, ok: true, result: { entries: "e".repeat(50000) } } as ServerMsg);
+  const gz = gzipSync(Buffer.from(payload, "utf8"));
+  const half = Math.ceil(gz.length / 2);
+  h.deliver({ type: "rpcChunk", id, index: 0, total: 2, data: gz.subarray(0, half).toString("base64"), enc: "gzip" } as ServerMsg);
+  h.deliver({ type: "rpcChunk", id, index: 1, total: 2, data: gz.subarray(half).toString("base64"), enc: "gzip" } as ServerMsg);
+  await expect(p).resolves.toEqual({ entries: "e".repeat(50000) });
+});
