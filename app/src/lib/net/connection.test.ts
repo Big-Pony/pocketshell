@@ -1382,3 +1382,88 @@ test("m1: rpcZip 解压失败后 inflightBytes 精确回落到 reject 之前的�
 
   void p2.catch(() => {}); // harness 拆除时 p2 仍是 pending，避免未处理 rejection 噪音
 });
+
+// ──────────────────────────────────────────────────────────────
+// Task 8: 客户端入站二进制帧（rpcZip/rpcChunk 仍可能以 JSON 帧到达——agent 侧
+// 对「未压缩但超单帧预算」的响应仍走 chunkRpcPayload + sendSecure 这条纯
+// JSON 老路径，dispatch() 的 rpcZip/rpcChunk 分支因此保留、只是内部转成字节
+// 喂给同一套 bytes-only 的 handler；rpcBin 与压缩后的 rpcZip/rpcChunk 则
+// 只走二进制帧）。
+// ──────────────────────────────────────────────────────────────
+import { packBinFrame } from "./binframe";
+
+/** 喂裸字节（二进制帧）：passthroughChannel 是恒等函数，onmessage 收到的
+ *  bytes 就是 channel.receive() 返回的 plaintext，不用额外包装。 */
+function feedBytes(h: ReturnType<typeof harness>, bytes: Uint8Array): void {
+  h.sock.onmessage({ data: bytes.buffer as ArrayBuffer });
+}
+
+/** 已发出的 rpc 请求帧的 method 列表，按发出顺序。 */
+function sentMethods(h: ReturnType<typeof harness>): string[] {
+  return h.sent
+    .map((b) => { try { return JSON.parse(new TextDecoder().decode(b)); } catch { return null; } })
+    .filter((m): m is { type: string; method?: string } => !!m && m.type === "rpc")
+    .map((m) => m.method as string);
+}
+
+test("收到二进制 rpcZip 帧，rpc 正常 resolve，内容完好", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.read", { path: "/a" });
+  const id = lastRpcId(h);
+  const inner = JSON.stringify({ type: "response", id, ok: true, result: { content: "hello" } });
+  feedBytes(h, packBinFrame({ type: "rpcZip", id }, gzipSync(Buffer.from(inner, "utf8"))));
+  await expect(p).resolves.toEqual({ content: "hello" });
+});
+
+test("收到 rpcBin 帧，resolve 出的 bytes 逐字节正确（非法 UTF-8）", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.downloadChunk", { path: "/a", offset: 0, len: 100 });
+  const id = lastRpcId(h);
+  const EVIL = new Uint8Array([0xed, 0xa0, 0x80, 0x80, 0xff, 0xfe]);
+  feedBytes(h, packBinFrame({ type: "rpcBin", id, result: { eof: true, size: 6 } }, EVIL));
+  const r = (await p) as { bytes: Uint8Array; eof: boolean; size: number };
+  expect(Array.from(r.bytes)).toEqual(Array.from(EVIL));
+  expect(r.eof).toBe(true);
+  expect(r.size).toBe(6);
+});
+
+test("rpcBin 结算干净：pending 清空、inflightBytes 归零、无重复释放", async () => {
+  const h = harness();
+  const p = h.conn.rpc("fs.downloadChunk", { path: "/a", offset: 0, len: 100 });
+  const id = lastRpcId(h);
+  feedBytes(h, packBinFrame({ type: "rpcBin", id, result: { eof: true, size: 3 } }, new Uint8Array([1, 2, 3])));
+  await p;
+  expect((h.conn as any).pending.size).toBe(0);
+  expect((h.conn as any).inflightBytes).toBe(0);
+  // 重复投递同一帧不得二次释放（会把 inflightBytes 推成负数或误伤后续 rpc）
+  feedBytes(h, packBinFrame({ type: "rpcBin", id, result: { eof: true, size: 3 } }, new Uint8Array([1, 2, 3])));
+  expect((h.conn as any).inflightBytes).toBe(0);
+});
+
+test("rpcBin 不触发 diag 埋点 —— 它没压缩任何东西", async () => {
+  // 一阶段的 C1：仅按字节门槛采样时，fs.downloadChunk 的响应恒为 61531 字节、
+  // 必然越过门槛，200MB 下载 = 4552 次白打的 diag rpc + 778KB 上行，且信息量
+  // 为零。第二条判据（wireBytes < rawBytes）是唯一屏障。
+  //
+  // rpcBin 是新的 rpcWireOverride 生产者：若按直觉记 rawBytes = 原 JSON 大小，
+  // 判据会从恒假变**恒真**，那条 Critical 原地复活。所以必须 rawBytes = wireBytes。
+  //
+  // 注意这条测试不能靠"删掉 wireBytes < rawBytes 那行"来 mutation 验证——
+  // 守卫行还在，变的是喂进去的值。只能直接断言 diag rpc 数为 0。
+  const h = harness();
+  const p = h.conn.rpc("fs.downloadChunk", { path: "/a", offset: 0, len: 46000 });
+  const id = lastRpcId(h);
+  const big = new Uint8Array(46000).fill(0x41);
+  feedBytes(h, packBinFrame({ type: "rpcBin", id, result: { eof: false, size: 200000 } }, big));
+  await p;
+  expect(sentMethods(h).filter((m) => m === "diag.report").length).toBe(0);
+});
+
+test("坏的二进制帧被静默丢弃，不关连接、不杀掉后续帧处理", async () => {
+  const h = harness();
+  feedBytes(h, new Uint8Array([0x00, 0xff, 0xff, 0x7b])); // 坏帧
+  const p = h.conn.rpc("fs.read", { path: "/a" });
+  const id = lastRpcId(h);
+  feedBytes(h, new TextEncoder().encode(JSON.stringify({ type: "response", id, ok: true, result: 42 })));
+  await expect(p).resolves.toBe(42);
+});

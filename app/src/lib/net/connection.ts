@@ -8,9 +8,9 @@ import { ChunkReassembler } from "./rpc-chunks";
 import { createInitiatorChannel, type SecureChannel } from "./secure-channel";
 import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair } from "./keystore";
 import { tr } from "../i18n";
-import { decodeZipFrame } from "./rpc-decompress";
 import { gunzip } from "../gunzip";
 import { buildRpcReport } from "../term/reseed";
+import { BIN_FRAME_MAGIC, packBinFrame, unpackBinFrame } from "./binframe";
 
 export interface WebSocketLike {
   binaryType?: string;
@@ -413,7 +413,17 @@ export class Connection {
         if (r.established) { this.clearHsTimer(); this.onEstablished(socket); }
         return;
       }
-      this.dispatch(new TextDecoder().decode(r.plaintext));
+      // rpc 二进制帧编码：明文的第一个字节区分二进制帧（0x00 magic）与 JSON
+      // 文本（'{' = 0x7B）。TextDecoder 之前判断——二进制帧里的 blob 可能不是
+      // 合法 UTF-8，先解码文本会把它损坏。
+      const plain = r.plaintext;
+      if (plain.length > 0 && plain[0] === BIN_FRAME_MAGIC) {
+        const bf = unpackBinFrame(plain);
+        if (bf) this.dispatchBin(bf.header as { type?: string }, bf.blob);
+        // 坏帧（unpackBinFrame 返回 null）静默丢弃：不关连接、不杀掉后续帧处理。
+        return;
+      }
+      this.dispatch(new TextDecoder().decode(plain));
     };
     socket.onclose = () => {
       if (socket !== this.ws) return;
@@ -534,9 +544,22 @@ export class Connection {
         else { const e = new Error(msg.error.message) as Error & { code?: string }; e.code = msg.error.code; p.reject(e); }
       }
     } else if (msg.type === "rpcZip") {
-      this.handleRpcZip(msg);
+      // 兼容旧 JSON 帧：agent 侧「未压缩但超单帧预算」的响应仍走纯 JSON 老路径
+      // （chunkRpcPayload + sendSecure），只有压缩后的 rpcZip/rpcChunk 才走
+      // 二进制帧。handleRpcZip 已改成 bytes-only，这里把 base64 转好再喂进去；
+      // fromB64 同步抛时按坏帧处理（走与二进制路径一致的清理顺序），不让异常
+      // 冒泡到没有 try/catch 的 onmessage。
+      try {
+        this.handleRpcZip({ id: msg.id, bytes: fromB64(msg.data) });
+      } catch {
+        this.rejectPendingRpc(msg.id, "rpc_zip_invalid");
+      }
     } else if (msg.type === "rpcChunk") {
-      this.handleRpcChunk(msg);
+      try {
+        this.handleRpcChunk({ id: msg.id, index: msg.index, total: msg.total, bytes: fromB64(msg.data), enc: msg.enc });
+      } catch {
+        this.rejectPendingRpc(msg.id, "rpc_chunk_invalid", "rpc_chunk_invalid:bad_data");
+      }
     } else if (msg.type === "pong") {
       // 恰好一个未回应的 ping 时，这个 pong 必然是它的回应，RTT 可信。
       // 多于一个说明有 pong 迟到，无法判断这个 pong 对应哪次 ping，样本作废
@@ -566,46 +589,83 @@ export class Connection {
     }
   }
 
+  // 二进制帧分流：header.type 决定走哪条结算路径。rpcZip/rpcChunk 与 JSON 帧
+  // 到达时走同一套 bytes-only handler（dispatch() 里的 fromB64 兼容垫层负责
+  // 把旧 JSON 帧的 base64 先转好）；rpcBin 是纯二进制专属的新结算路径，因为
+  // 它的 result 里带裸字节，没法回喂 dispatch() 的 JSON 解析。
+  private dispatchBin(header: { type?: string }, blob: Uint8Array): void {
+    if (header.type === "rpcZip") {
+      this.handleRpcZip({ id: (header as { id: string }).id, bytes: blob });
+    } else if (header.type === "rpcChunk") {
+      this.handleRpcChunk({ ...(header as { id: string; index: number; total: number; enc?: "gzip" }), bytes: blob });
+    } else if (header.type === "rpcBin") {
+      this.handleRpcBin(header as { id: string; result: unknown }, blob);
+    }
+    // 未知 type：静默丢弃（对称于 dispatch() 对未知 JSON 消息类型的处理）。
+  }
+
+  // 统一的「拒绝一个 pending rpc」清理顺序：先取 p，无条件 drop chunks（哪怕
+  // p 已不在也要做——防御性地清掉可能残留的重组缓冲），再判断要不要走
+  // pending 的完整清理。与 handleRpcZip/handleRpcChunk 原有 error 分支的顺序
+  // 逐字一致，抽出来给 dispatch() 的兼容垫层复用。
+  private rejectPendingRpc(id: string, code: string, message = code): void {
+    const p = this.pending.get(id);
+    this.chunks.drop(id);
+    if (!p) return; // 已超时/已断线结算过，什么都不做
+    this.pending.delete(id);
+    this.releaseRpc(p);
+    this.sched.clearTimeout(p.timer);
+    const e = new Error(message) as Error & { code?: string };
+    e.code = code;
+    p.reject(e);
+  }
+
+  // rpcBin 独立结算路径：result 里带裸字节（下载分片等），不能像 rpcZip/
+  // rpcChunk 那样回喂 dispatch() 的 JSON 解析（JSON 装不下任意字节）。手写
+  // 结算：resolve 出 {...result, bytes}，bytes 是 unpackBinFrame 零拷贝视图
+  // 的真拷贝（resolve 后调用方可能跨多帧持有它，不能钉住整帧 buffer）。
+  // 不产生 rawBytes<wireBytes 的压缩埋点——rpcBin 没压缩任何东西，wireBytes
+  // 就是 rawBytes，reportRpcIfBig 的 `wireBytes >= rawBytes` 门槛天然拦截。
+  private handleRpcBin(header: { id: string; result: unknown }, blob: Uint8Array): void {
+    const p = this.pending.get(header.id);
+    if (!p) return; // 未知/已结算的 id：静默丢弃
+    this.pending.delete(header.id);
+    this.releaseRpc(p);
+    this.chunks.drop(header.id);
+    this.sched.clearTimeout(p.timer);
+    const bytes = blob.slice();
+    p.resolve({ ...(header.result as object), bytes });
+    this.reportRpcIfBig(p.method, this.sched.now() - p.startedAt, bytes.length, bytes.length, 1);
+  }
+
   // 压缩响应：解压后把原始 response 帧文本回喂 dispatch —— 与 rpcChunk 重组
   // 后的回喂是同一个招式，所以 resolve/reject/未知 id 丢弃全都免费复用。
   //
   // 三条纪律（少一条就是 bug）：
-  //  1. fromB64 的同步抛与 gunzip 的 rejection 都要接住（decodeZipFrame 是
-  //     async，两者统一成 rejection）。裸奔的同步异常会冒泡到没有 try/catch
-  //     的 onmessage，杀掉整帧处理。
+  //  1. gunzip 的 rejection 要接住。裸奔的同步异常会冒泡到没有 try/catch
+  //     的 onmessage，杀掉整帧处理（bytes 已经是裸字节，不会再有 fromB64
+  //     那种同步抛——调用方若来自 JSON 兼容垫层，抛的地方已经在 dispatch()
+  //     自己的 try/catch 里处理过了）。
   //  2. 回喂前必须重新检查 socket —— 异步路径绕过了 onmessage 的
   //     `if (socket !== this.ws) return`，重连/dispose 后旧 promise 落地时
   //     那层保护已经不在了。
   //  3. 这条路径除 dispatch() 外**不得触碰任何连接状态**（pending / chunks /
   //     inflightBytes）。想"提前退出省点 CPU"就会重复释放。
-  private handleRpcZip(msg: { id: string; data: string }): void {
+  private handleRpcZip(msg: { id: string; bytes: Uint8Array }): void {
     const socket = this.ws;
-    decodeZipFrame(msg.data).then(
-      (text) => {
+    const wireBytes = msg.bytes.length;
+    gunzip(msg.bytes).then(
+      (raw) => {
         if (socket !== this.ws) return; // 纪律 2
-        // 埋点：msg.data 解出的字节数就是本次响应实际上线的字节（压缩后），
-        // 解压出的 text 编码回字节数就是压缩前的大小。仅供 dispatch() 里
-        // response 分支读一次，不算作纪律 3 触碰连接状态（这是只读诊断）。
-        this.rpcWireOverride = {
-          wireBytes: fromB64(msg.data).length,
-          rawBytes: new TextEncoder().encode(text).length,
-          chunks: 1,
-        };
-        this.dispatch(text);            // 纪律 3：只做这一件事
+        // 埋点：wireBytes 是本次响应实际上线的字节（压缩后），raw 的长度是
+        // 压缩前的大小。仅供 dispatch() 里 response 分支读一次，不算作
+        // 纪律 3 触碰连接状态（这是只读诊断）。
+        this.rpcWireOverride = { wireBytes, rawBytes: raw.length, chunks: 1 };
+        this.dispatch(new TextDecoder().decode(raw)); // 纪律 3：只做这一件事
       },
       () => {
         if (socket !== this.ws) return;
-        // 与 handleRpcChunk 的既有 error 分支同序：先取 p，再无条件 drop
-        // chunks（哪怕 p 已不在也要做），最后才判断要不要走 pending 的清理。
-        const p = this.pending.get(msg.id);
-        this.chunks.drop(msg.id);
-        if (!p) return; // 已超时/已断线结算过，什么都不做
-        this.pending.delete(msg.id);
-        this.releaseRpc(p);
-        this.sched.clearTimeout(p.timer);
-        const e = new Error("rpc_zip_invalid") as Error & { code?: string };
-        e.code = "rpc_zip_invalid";
-        p.reject(e);
+        this.rejectPendingRpc(msg.id, "rpc_zip_invalid");
       },
     );
   }
@@ -615,23 +675,14 @@ export class Connection {
   // the decoded text back through dispatch makes a chunked response behave
   // byte-for-byte like the single-frame path (resolve/reject, unknown-id
   // drop included).
-  private handleRpcChunk(msg: { id: string; index: number; total: number; data: string; enc?: "gzip" }): void {
+  private handleRpcChunk(msg: { id: string; index: number; total: number; bytes: Uint8Array; enc?: "gzip" }): void {
     // Late chunks for an unknown id (rpc already settled/timed out) are
     // dropped silently — the buffer can only exist alongside a pending rpc.
     if (!this.pending.has(msg.id)) return;
     const r = this.chunks.feed(msg);
     if (r.status === "pending") return;
     if (r.status === "error") {
-      const p = this.pending.get(msg.id);
-      this.chunks.drop(msg.id);
-      if (p) {
-        this.pending.delete(msg.id);
-        this.releaseRpc(p);
-        this.sched.clearTimeout(p.timer);
-        const e = new Error(`rpc_chunk_invalid:${r.reason}`) as Error & { code?: string };
-        e.code = "rpc_chunk_invalid";
-        p.reject(e);
-      }
+      this.rejectPendingRpc(msg.id, "rpc_chunk_invalid", `rpc_chunk_invalid:${r.reason}`);
       return;
     }
     // 带 enc 的分片：重组出来的是 gzip 字节，还要解压一次才是 response JSON。
@@ -650,16 +701,7 @@ export class Connection {
         },
         () => {
           if (socket !== this.ws) return;
-          // 同上：先取 p，无条件 drop chunks，再判断要不要清理 pending。
-          const p = this.pending.get(id);
-          this.chunks.drop(id);
-          if (!p) return;
-          this.pending.delete(id);
-          this.releaseRpc(p);
-          this.sched.clearTimeout(p.timer);
-          const e = new Error("rpc_zip_invalid") as Error & { code?: string };
-          e.code = "rpc_zip_invalid";
-          p.reject(e);
+          this.rejectPendingRpc(id, "rpc_zip_invalid");
         },
       );
       return;

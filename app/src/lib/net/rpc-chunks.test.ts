@@ -1,9 +1,8 @@
 import { test, expect } from "vitest";
 import { ChunkReassembler, MAX_CHUNKS, type ChunkFrame } from "./rpc-chunks";
-import { toB64 } from "../bytes";
 
 const frame = (id: string, index: number, total: number, bytes: Uint8Array): ChunkFrame =>
-  ({ id, index, total, data: toB64(bytes) });
+  ({ id, index, total, bytes });
 const bytes = (s: string) => new TextEncoder().encode(s);
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
 
@@ -59,13 +58,6 @@ test("total changing mid-stream is rejected", () => {
   expect((res as any).reason).toBe("total_mismatch");
 });
 
-test("undecodable base64 data is rejected", () => {
-  const r = new ChunkReassembler();
-  const res = r.feed({ id: "1", index: 0, total: 1, data: "!!!" });
-  expect(res.status).toBe("error");
-  expect((res as any).reason).toBe("bad_data");
-});
-
 test("a duplicate chunk is ignored, assembly still completes once", () => {
   const r = new ChunkReassembler();
   expect(r.feed(frame("1", 0, 2, bytes("abc"))).status).toBe("pending");
@@ -104,4 +96,29 @@ test("independent ids assemble independently", () => {
   expect(r.has("1")).toBe(true); // id 1 untouched
   const res1 = r.feed(frame("1", 1, 2, bytes("B")));
   expect(text((res1 as any).bytes)).toBe("AB");
+});
+
+test("feed 吃字节，重组结果逐字节正确（含非法 UTF-8）", () => {
+  const r = new ChunkReassembler();
+  const a = new Uint8Array([0xed, 0xa0, 0x80]);
+  const b = new Uint8Array([0xff, 0xfe, 0x00]);
+  expect(r.feed({ id: "1", index: 0, total: 2, bytes: a }).status).toBe("pending");
+  const done = r.feed({ id: "1", index: 1, total: 2, bytes: b });
+  expect(done.status).toBe("done");
+  if (done.status === "done") {
+    expect(Array.from(done.bytes)).toEqual([0xed, 0xa0, 0x80, 0xff, 0xfe, 0x00]);
+  }
+});
+
+test("存进 buffer 的分片必须是真拷贝，不与来帧共享底层 buffer", () => {
+  // blob 是 unpackBinFrame 返回的零拷贝视图，持有**整帧**的底层 buffer。
+  // 分片要驻留到全部到齐才重组——不 slice 的话 10 个分片各钉住一整帧，
+  // 内存放大 10 倍。这条没法用普通断言测（内容是对的），只能查 .buffer 身份。
+  const r = new ChunkReassembler();
+  const backing = new Uint8Array(1000);
+  const view = backing.subarray(100, 110);
+  r.feed({ id: "x", index: 0, total: 2, bytes: view });
+  const stored = (r as any).buffers.get("x").parts[0] as Uint8Array;
+  expect(stored.buffer).not.toBe(backing.buffer);
+  expect(Array.from(stored)).toEqual(Array.from(view));
 });
