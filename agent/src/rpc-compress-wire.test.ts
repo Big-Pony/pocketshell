@@ -2,9 +2,11 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { startServer } from "./server";
 import type { SecureChannel } from "./secure-channel";
 import { decodeServer, encode } from "./protocol";
+import { unpackBinFrame } from "./binframe";
 
 const utf8 = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
 const M1 = new Uint8Array([1]);
@@ -43,13 +45,31 @@ function rpcFramesWith(
   return ws.sent;
 }
 
+/** 解一个二进制帧回复：返回 {header, blob}[]。非二进制帧（任意一帧解不出）返回 null。 */
+function decodeBinReply(frames: Uint8Array[]): { header: any; blob: Uint8Array }[] | null {
+  const out: { header: any; blob: Uint8Array }[] = [];
+  for (const f of frames) {
+    const r = unpackBinFrame(f);
+    if (!r) return null;
+    out.push({ header: r.header as any, blob: r.blob });
+  }
+  return out;
+}
+
 /** 客户端解压镜像：把 rpcZip / 带 enc 的 rpcChunk 还原成原始 response 对象。 */
 function decodeReply(frames: Uint8Array[]): any {
-  const msgs = frames.map((f) => decodeServer(Buffer.from(f).toString("utf8")));
-  if (msgs.length === 1 && msgs[0].type === "rpcZip") {
-    const raw = Bun.gunzipSync(Buffer.from((msgs[0] as any).data, "base64"));
-    return JSON.parse(Buffer.from(raw).toString("utf8"));
+  // 二进制帧优先（二阶段后 rpcZip/rpcChunk 都走这条）；JSON 帧是老路径。
+  const bins = frames.map((f) => unpackBinFrame(f));
+  if (bins.every((b) => b !== null)) {
+    const heads = bins.map((b) => b!.header as any);
+    if (heads.length === 1 && heads[0].type === "rpcZip") {
+      return JSON.parse(gunzipSync(Buffer.from(bins[0]!.blob)).toString("utf8"));
+    }
+    const joined = Buffer.concat(bins.map((b) => Buffer.from(b!.blob)));
+    const raw = heads[0].enc === "gzip" ? gunzipSync(joined) : joined;
+    return JSON.parse(raw.toString("utf8"));
   }
+  const msgs = frames.map((f) => decodeServer(Buffer.from(f).toString("utf8")));
   if (msgs.length === 1 && msgs[0].type === "response") return msgs[0];
   const parts = msgs.map((m) => {
     if (m.type !== "rpcChunk") throw new Error(`expected rpcChunk, got ${m.type}`);
@@ -57,7 +77,7 @@ function decodeReply(frames: Uint8Array[]): any {
   });
   const joined = Buffer.concat(parts.map((p) => p.bytes));
   const enc = (parts[0].m as any).enc;
-  const raw = enc === "gzip" ? Buffer.from(Bun.gunzipSync(joined)) : joined;
+  const raw = enc === "gzip" ? gunzipSync(joined) : joined;
   return JSON.parse(raw.toString("utf8"));
 }
 
@@ -70,7 +90,10 @@ test("a large fs.read with acceptEnc arrives as ONE rpcZip frame, content intact
 
   const frames = rpcFramesWith(srv, "z1", "fs.read", { path: file }, ["gzip"]);
   expect(frames).toHaveLength(1);
-  expect(decodeServer(Buffer.from(frames[0]).toString("utf8")).type).toBe("rpcZip");
+  // rpcZip 现在走二进制帧（不论 acceptEnc 是否含 "bin"——那个开关只管 rpcBin）。
+  const bin = decodeBinReply(frames);
+  expect(bin).not.toBeNull();
+  expect(bin![0].header.type).toBe("rpcZip");
 
   const reply = decodeReply(frames);
   expect(reply.ok).toBe(true);
@@ -112,6 +135,93 @@ test("PROTECTION: a small response stays a plain single `response` frame", () =>
   const frames = rpcFramesWith(srv, "s1", "fs.read", { path: file }, ["gzip"]);
   expect(frames).toHaveLength(1);
   expect(decodeServer(Buffer.from(frames[0]).toString("utf8")).type).toBe("response");
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("大 fs.read 带 acceptEnc:['gzip'] 时走二进制 rpcZip 帧，内容完好", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
+  const file = join(dir, "big.txt");
+  // 高熵内容：低熵会被压到阈值以下，函数在阈值那行就短路，测不到压缩分支。
+  // 行数（1400）经实测校准：3000 行的高熵文本 gzip 后 122232B，远超单帧预算
+  // 61440B，会走 rpcChunk 分片而非本用例要测的单帧 rpcZip 路径；1400 行 gzip
+  // 后 57064B，落在阈值内且留有余量。
+  let s = 0x12345678;
+  const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
+  const CH = "abcdefghijklmnopqrstuvwxyz0123456789 ";
+  const text = Array.from({ length: 1400 }, () =>
+    Array.from({ length: 60 }, () => CH[rnd() % 37]).join("")).join("\n");
+  writeFileSync(file, text);
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const frames = rpcFramesWith(srv, "zb1", "fs.read", { path: file }, ["gzip", "bin"]);
+  const bins = decodeBinReply(frames);
+  expect(bins).not.toBeNull();
+  expect(bins!.length).toBe(1);
+  expect(bins![0].header.type).toBe("rpcZip");
+  // blob 是 gzip 字节，解开后就是原样的 response JSON 文本
+  const inner = JSON.parse(gunzipSync(Buffer.from(bins![0].blob)).toString("utf8"));
+  expect(inner.type).toBe("response");
+  expect(inner.ok).toBe(true);
+  expect(inner.result.content).toBe(text);
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("fs.downloadChunk 走 rpcBin 单帧，blob 逐字节等于文件内容", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-dlbin-"));
+  const file = join(dir, "f.bin");
+  // 含非法 UTF-8：任何 toString("utf8") 往返都会毁掉它们。
+  const content = Buffer.concat([
+    Buffer.from([0xed, 0xa0, 0x80, 0x80, 0xff, 0xfe]),
+    Buffer.alloc(10000, 0x41),
+  ]);
+  writeFileSync(file, content);
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const frames = rpcFramesWith(srv, "db1", "fs.downloadChunk", { path: file, offset: 0, len: 65536 }, ["gzip", "bin"]);
+  const bins = decodeBinReply(frames);
+  expect(bins).not.toBeNull();
+  expect(bins!.length).toBe(1);
+  expect(bins![0].header.type).toBe("rpcBin");
+  expect(bins![0].header.result.eof).toBe(true);
+  expect(bins![0].header.result.size).toBe(content.length);
+  expect(Array.from(bins![0].blob)).toEqual(Array.from(content));
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("rpcBin 超单帧预算时回落到分片，不是抛异常", () => {
+  // fsDownloadChunk 的 len 完全来自线上参数、服务端不校验上限。今天靠
+  // chunkRpcPayload 自动切片兜住；rpcBin 撤掉了那张网，必须自己判。
+  // 不判的话：单帧明文 204868 B > Noise 65519 上限 → cipher.js 抛 → 退化成
+  // 一个与原因毫无关系的 rpc_error，一条本能工作的下载路径永久失败。
+  const dir = mkdtempSync(join(tmpdir(), "ps-dlbig-"));
+  const file = join(dir, "big.bin");
+  writeFileSync(file, Buffer.alloc(200 * 1024, 0x5a));
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const frames = rpcFramesWith(srv, "db2", "fs.downloadChunk", { path: file, offset: 0, len: 200 * 1024 }, ["gzip", "bin"]);
+  // 每一帧的明文都不得超过 Noise 上限
+  for (const f of frames) expect(f.length).toBeLessThanOrEqual(65519);
+  expect(frames.length).toBeGreaterThan(1);
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("老客户端（acceptEnc 不含 'bin'）仍收到纯 JSON 帧", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-old-"));
+  const file = join(dir, "f.bin");
+  writeFileSync(file, Buffer.alloc(1000, 0x41));
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const frames = rpcFramesWith(srv, "db3", "fs.downloadChunk", { path: file, offset: 0, len: 65536 }, ["gzip"]);
+  // 首字节必须是 '{' —— 一个二进制帧都不许发给没声明 bin 的客户端
+  for (const f of frames) expect(f[0]).toBe(0x7b);
 
   srv.stop();
   rmSync(dir, { recursive: true, force: true });

@@ -62,6 +62,8 @@ export interface RpcCall {
   /** Chunk-aware success reply (server.ts owns the framing). */
   sendResult(result: unknown): void;
   sendError(code: string, message: string): void;
+  /** 含裸字节的成功回复（server.ts owns the framing，含单帧预算与分片回落）。 */
+  sendBinary(meta: unknown, blob: Uint8Array): void;
 }
 
 export type RpcContext = RpcServices & RpcCall;
@@ -69,11 +71,21 @@ export type RpcContext = RpcServices & RpcCall;
 export type RpcOutcome =
   | { kind: "result"; result: unknown }
   /** The handler already answered; the caller must not send anything. */
-  | { kind: "sent" };
+  | { kind: "sent" }
+  /**
+   * 结果里含**裸字节**：meta 走 JSON 头，blob 走二进制帧尾。
+   *
+   * 用判别联合而不是「看返回值有没有 bytes 字段」猜：漏判的代价是静默数据
+   * 损坏——JSON.stringify 会把 Uint8Array 序列化成 {"0":1,"1":2,…}（45KiB
+   * 放大到 541930 字符），客户端拿到下标对象而非字节，Blob 出来的文件是坏的，
+   * 全程无人报错。
+   */
+  | { kind: "binary"; meta: unknown; blob: Uint8Array };
 
 export type RpcHandler = (ctx: RpcContext, p: RpcParams) => RpcOutcome | Promise<RpcOutcome>;
 
 const ok = (result: unknown): RpcOutcome => ({ kind: "result", result });
+const okBin = (meta: unknown, blob: Uint8Array): RpcOutcome => ({ kind: "binary", meta, blob });
 const SENT: RpcOutcome = { kind: "sent" };
 
 // 历史载荷压缩。终端文本的 SGR 转义码高度重复，实测 134KB → 33KB（gzip 1ms），
@@ -206,7 +218,11 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   "fs.resolveName": (_ctx, p) => { const a = parse.fsResolveName(p); return ok(fsResolveName(a.dir, a.name)); },
   "fs.uploadChunk": (ctx, p) => { const a = parse.fsUploadChunk(p); return ok(fsUploadChunk(ctx.config.tmpDir, a.uploadId, a.dataB64, a.opts)); },
   "fs.write": (ctx, p) => { const a = parse.fsWrite(p); return ok(fsWrite(ctx.config.tmpDir, a.writeId, a.dataB64, a.opts)); },
-  "fs.downloadChunk": (_ctx, p) => { const a = parse.fsDownloadChunk(p); return ok(fsDownloadChunk(a.path, a.offset, a.len)); },
+  "fs.downloadChunk": (_ctx, p) => {
+    const a = parse.fsDownloadChunk(p);
+    const r = fsDownloadChunk(a.path, a.offset, a.len);
+    return okBin({ eof: r.eof, size: r.size }, r.bytes);
+  },
   "fs.archive": (ctx, p) => ok(fsArchive(ctx.config.tmpDir, parse.path(p).path)),
 
   "git.log": (_ctx, p) => { const a = parse.gitLog(p); return ok(gitLog(a.cwd, a.limit, a.query)); },
@@ -391,10 +407,14 @@ export function dispatchRpc(ctx: RpcContext, method: string, params: unknown): v
       // .then(ok).catch(err) — not .then(ok, err) — so a throw from the send
       // path lands in the same error reply the old inline try/catch produced.
       return outcome
-        .then((o) => { if (o.kind === "result") ctx.sendResult(o.result); })
+        .then((o) => {
+          if (o.kind === "result") ctx.sendResult(o.result);
+          else if (o.kind === "binary") ctx.sendBinary(o.meta, o.blob);
+        })
         .catch((e) => { ctx.sendError(rpcErrorCode(e), String(e)); });
     }
     if (outcome.kind === "result") ctx.sendResult(outcome.result);
+    else if (outcome.kind === "binary") ctx.sendBinary(outcome.meta, outcome.blob);
   } catch (e) {
     ctx.sendError(rpcErrorCode(e), String(e));
   }

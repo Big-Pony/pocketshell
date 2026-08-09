@@ -7,6 +7,7 @@ import type { SecureChannel } from "./secure-channel";
 import { encode, decodeServer } from "./protocol";
 import { TerminalService } from "./terminal";
 import { fsDiff } from "./fs-service";
+import { unpackBinFrame } from "./binframe";
 import {
   RPC_FIT_SAFE_BYTES,
   NOISE_MAX_PLAINTEXT_BYTES,
@@ -390,16 +391,23 @@ test("a compressed response too big for one frame is chunked with enc markers", 
     type: "rpc", id: "cz", method: "fs.read", params: { path: file }, acceptEnc: ["gzip"],
   } as any)));
 
-  const msgs = ws.sent.map((f) => decodeServer(Buffer.from(f).toString("utf8")) as any);
+  // 压完仍超单帧预算的 zip-chunk 分支现在走二进制帧（sendBinSecure），不再是
+  // JSON + base64 的 rpcChunk——meta 在帧头（JSON），载荷字节在帧尾（裸字节）。
+  // 语义没变：仍是多片、每片带 enc:"gzip"、重组后逐字节还原；只是解帧方式变了。
+  const msgs = ws.sent.map((f) => {
+    const r = unpackBinFrame(f);
+    if (!r) throw new Error("expected a binary frame");
+    return { header: r.header as any, blob: r.blob };
+  });
   expect(msgs.length).toBeGreaterThan(1);          // 压完仍要分片
   for (const m of msgs) {
-    expect(m.type).toBe("rpcChunk");
-    expect(m.enc).toBe("gzip");                     // 每片都带标记
+    expect(m.header.type).toBe("rpcChunk");
+    expect(m.header.enc).toBe("gzip");               // 每片都带标记
   }
   for (const f of ws.sent) expect(f.length).toBeLessThanOrEqual(RPC_CHUNK_FRAME_MAX_BYTES);
 
   // 重组 + 解压后必须逐字节还原 —— 压缩是纯优化，语义不能变。
-  const joined = Buffer.concat(msgs.map((m) => Buffer.from(m.data, "base64")));
+  const joined = Buffer.concat(msgs.map((m) => Buffer.from(m.blob)));
   const reply = JSON.parse(Buffer.from(Bun.gunzipSync(joined)).toString("utf8"));
   expect(reply.ok).toBe(true);
   expect(reply.id).toBe("cz");

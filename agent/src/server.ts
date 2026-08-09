@@ -12,6 +12,7 @@ import { OutputBatcher } from "./output-batcher";
 import { sweepTmp } from "./fs-service";
 import { RPC_FIT_SAFE_BYTES, RPC_CHUNK_PAYLOAD_BYTES, chunkRpcPayload } from "./rpc-fit";
 import { compressRpcPayload, zipFitsOneFrame } from "./rpc-compress";
+import { packBinFrame, BIN_FRAME_PREFIX_BYTES } from "./binframe";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
 import { sessionListsEqual } from "./sessions-diff";
 import { isSaneSize } from "./sane-size";
@@ -178,6 +179,13 @@ export function startServer(deps: Deps = {}) {
   const sendSecure = (conn: Conn, msg: ServerMsg) => {
     if (!conn.ready) return;
     conn.ws.send(conn.channel.send(new Uint8Array(Buffer.from(encode(msg), "utf8"))));
+  };
+
+  // 二进制帧的出站口。与 sendSecure 并列而非替代：JSON 帧路径一个字节不动。
+  // 返回值 = 本帧明文字节数，供调用方做单帧预算判断后再决定发不发。
+  const sendBinSecure = (conn: Conn, header: object, blob: Uint8Array) => {
+    if (!conn.ready) return;
+    conn.ws.send(conn.channel.send(packBinFrame(header, blob)));
   };
 
   // Fan a message out to every connected device (mirrors the sessions/snippets
@@ -498,25 +506,22 @@ export function startServer(deps: Deps = {}) {
     const out = compressRpcPayload(payload, method, acceptEnc);
     if (out.kind === "zip") {
       if (zipFitsOneFrame(id, out.data)) {
-        sendSecure(conn, { type: "rpcZip", id, data: out.data });
+        sendBinSecure(conn, { type: "rpcZip", id }, out.data);
         return;
       }
       // 压完仍超单帧预算：切成带 enc 标记的分片，客户端重组后再解压。
       //
       // 这里不能复用 chunkRpcPayload —— 它收字符串并在内部 Buffer.from(s,"utf8")，
       // 而 gzip 出来的是任意字节，先转 utf8 字符串会把非法序列替换成 U+FFFD，
-      // 解压必炸。所以直接对字节切片。
-      const gzBytes = Buffer.from(out.data, "base64");
+      // 解压必炸。所以直接对字节切片。（这是刻意分岔，不要抽 helper 合并。）
+      const gzBytes = out.data;
       const total = Math.max(1, Math.ceil(gzBytes.length / RPC_CHUNK_PAYLOAD_BYTES));
       for (let index = 0; index < total; index++) {
         const slice = gzBytes.subarray(
           index * RPC_CHUNK_PAYLOAD_BYTES,
           (index + 1) * RPC_CHUNK_PAYLOAD_BYTES,
         );
-        sendSecure(conn, {
-          type: "rpcChunk", id, index, total,
-          data: slice.toString("base64"), enc: "gzip",
-        });
+        sendBinSecure(conn, { type: "rpcChunk", id, index, total, enc: "gzip" }, slice);
       }
       return;
     }
@@ -530,6 +535,34 @@ export function startServer(deps: Deps = {}) {
     // lost mid-sequence. They go out back-to-back in index order with no extra
     // flow control; the client's rpc timeout is the backstop.
     for (const chunk of chunkRpcPayload(id, payload)) sendSecure(conn, chunk);
+  };
+
+  // 含裸字节的成功回复。今天唯一的来源是 fs.downloadChunk。
+  //
+  // 必须自己做单帧预算判断：fsDownloadChunk 的 len 完全来自线上参数、服务端
+  // 不校验上限。此前这条路径靠 chunkRpcPayload 自动切片兜住任意大的响应，
+  // rpcBin 把那张网撤了——超了 Noise 65519 上限 cipher.js 会抛，退化成一个
+  // 与原因毫无关系的 rpc_error，而不是崩溃，所以极难排查。
+  const sendRpcBinary = (
+    conn: Conn, id: string, meta: unknown, blob: Uint8Array, acceptEnc?: string[],
+  ) => {
+    const wantsBin = Array.isArray(acceptEnc) && acceptEnc.includes("bin");
+    if (wantsBin) {
+      const header = { type: "rpcBin" as const, id, result: meta };
+      const frameBytes =
+        BIN_FRAME_PREFIX_BYTES + Buffer.byteLength(JSON.stringify(header), "utf8") + blob.length;
+      if (frameBytes <= RPC_FIT_SAFE_BYTES) {
+        sendBinSecure(conn, header, blob);
+        return;
+      }
+    }
+    // 回落：装不下单帧，或客户端没声明 bin（老客户端）。退回一阶段的行为——
+    // 把字节 base64 塞回 result，交给既有的压缩/分片链路。
+    sendRpcResult(
+      conn, id,
+      { ...(meta as object), dataB64: Buffer.from(blob).toString("base64") },
+      acceptEnc, "fs.downloadChunk",
+    );
   };
 
   const handleClient = async (conn: Conn, raw: string) => {
@@ -721,6 +754,7 @@ export function startServer(deps: Deps = {}) {
             id,
             devicePub: conn.remoteStatic,
             sendResult: (result) => sendRpcResult(conn, id, result, acceptEnc, method),
+            sendBinary: (meta, blob) => sendRpcBinary(conn, id, meta, blob, acceptEnc),
             sendError: (code, message) => sendSecure(conn, { type: "response", id, ok: false, error: { code, message } }),
           },
           method,
