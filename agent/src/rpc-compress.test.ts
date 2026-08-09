@@ -19,6 +19,20 @@ test("acceptEnc without gzip means never compress", () => {
   expect(compressRpcPayload(big, "fs.read", ["br"])).toEqual({ kind: "plain" });
 });
 
+test("I1: non-array acceptEnc falls back to plain instead of throwing", () => {
+  // acceptEnc 是外部协议输入，decodeClient 是裸 JSON.parse，不做类型校验。
+  // `acceptEnc?.includes("gzip")` 在非数组值上会直接抛 TypeError，炸穿整条
+  // rpc；字符串更阴险——"gzip".includes 恰好存在，会被误判成"客户端接受gzip"。
+  const big = envelope({ content: "hello world ".repeat(5000) });
+  // number/object 在旧实现下会抛 TypeError，rpc 整条失败
+  expect(() => compressRpcPayload(big, "fs.read", 5 as unknown as string[])).not.toThrow();
+  expect(compressRpcPayload(big, "fs.read", 5 as unknown as string[])).toEqual({ kind: "plain" });
+  expect(() => compressRpcPayload(big, "fs.read", {} as unknown as string[])).not.toThrow();
+  expect(compressRpcPayload(big, "fs.read", {} as unknown as string[])).toEqual({ kind: "plain" });
+  // 字符串 "gzip" 在旧实现下会被 .includes 误判为已声明支持，被收紧后必须拒绝
+  expect(compressRpcPayload(big, "fs.read", "gzip" as unknown as string[])).toEqual({ kind: "plain" });
+});
+
 test("a large compressible payload is compressed", () => {
   const big = envelope({ content: "hello world ".repeat(5000) });
   const out = compressRpcPayload(big, "fs.read", ["gzip"]);

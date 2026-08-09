@@ -40,7 +40,10 @@ export function compressRpcPayload(
   method: string,
   acceptEnc: string[] | undefined,
 ): CompressOutcome {
-  if (!acceptEnc?.includes("gzip")) return { kind: "plain" };
+  // acceptEnc 是外部输入（协议顶层字段，decodeClient 是裸 JSON.parse 不做类型
+  // 校验）：非数组值（数字/对象/字符串）必须安全回落到 plain，不能假设它是数组
+  // 就直接调 .includes——字符串恰好也有 .includes，会被误当成数组接受。
+  if (!Array.isArray(acceptEnc) || !acceptEnc.includes("gzip")) return { kind: "plain" };
   if (RPC_COMPRESS_SKIP_METHODS.has(method)) return { kind: "plain" };
 
   const rawBytes = Buffer.byteLength(payload, "utf8");
@@ -50,7 +53,7 @@ export function compressRpcPayload(
     const data = Buffer.from(Bun.gzipSync(Buffer.from(payload, "utf8"))).toString("base64");
     // 判据比的是【最终上线字节】——base64 的 4/3 回膨胀必须算进去。
     // 若改成比 gzip 的裸字节，对任何已压内容（term.history）都会判定"该压"，
-    // 白白压两遍：实测那种情况裸字节 -24.5%，而真正上线的字节是 +0.7%。
+    // 白白压两遍：实测那种情况裸字节 -24.5%，而真正上线的字节是 +0.6%。
     if (encodedBytes({ type: "rpcZip", id: ID_PLACEHOLDER, data }) >= rawBytes) {
       return { kind: "plain" };
     }
