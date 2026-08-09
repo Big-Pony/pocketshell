@@ -89,6 +89,27 @@ test("after marker handshake, client business frame is dispatched and reply is e
   srv.stop();
 });
 
+// Regression for the wave-5 review finding: the listSessions reply is the
+// ONLY place a fresh connection learns the agent's upload/save capability
+// (connection.ts sets `this.features` from this exact frame). Missing it
+// silently sends every fs.uploadChunk/fs.write as old-shape JSON, which
+// rpc-router.ts's blobOf() now unconditionally rejects — a real agent that
+// forgot this field bricks 100% of uploads and saves, not an edge case.
+test("listSessions reply carries features:['bin'] so a fresh client knows uploads can go binary", async () => {
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({ type: "listSessions" })));
+  const start = Date.now();
+  while (ws.sent.length === 0 && Date.now() - start < 2000) await Bun.sleep(10);
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8")) as any;
+  expect(reply.type).toBe("sessions");
+  expect(reply.features).toEqual(["bin"]);
+  srv.stop();
+});
+
 test("pending connection: pair with correct code registers device + replies paired", () => {
   const file = tmpRegFile();
   const registry = loadDeviceRegistry(file);
@@ -456,6 +477,9 @@ test("periodicPush broadcasts the merged roster (incl. foreign idle sessions)", 
   expect(s.state).toBe("idle");
   expect(s.attached).toBe(false);
   expect(s.lastLine).toBe("$ vim");
+  // Same regression as the listSessions test above, for the OTHER sessions
+  // send site (the periodic broadcast) — the two must not drift apart.
+  expect(reply.features).toEqual(["bin"]);
   srv.stop();
 });
 

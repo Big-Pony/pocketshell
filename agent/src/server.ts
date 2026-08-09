@@ -87,6 +87,13 @@ interface Deps {
   assets?: Record<string, string>;
 }
 
+// agent 在每个 sessions 帧里声明的可选能力位。见 protocol.ts 的 ServerMsg.sessions
+// 注释：客户端见到 "bin" 才会对 fs.uploadChunk/fs.write 发二进制上行帧，agent 侧
+// 这两个方法已经改成非二进制帧必抛（rpc-router.ts 的 blobOf），所以这个字段
+// **不是可选装饰，是让上传/保存不失败的必要前提**。两个 sessions 发送点
+// （广播 + listSessions 回复）共用同一个常量，防止两处各自维护漂移出偏差。
+const AGENT_FEATURES: string[] = ["bin"];
+
 export function startServer(deps: Deps = {}) {
   const config = deps.config ?? loadConfig();
   const terminal = deps.terminal ?? new TerminalService();
@@ -293,7 +300,7 @@ export function startServer(deps: Deps = {}) {
           const sessions = contextStore.decorate([...(await terminal.list()), ...shell.list()]);
           if (lastPushed && sessionListsEqual(lastPushed, sessions)) continue;
           lastPushed = sessions;
-          for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions });
+          for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions, features: AGENT_FEATURES });
         } while (pushAgain);
       } catch {
         // A failed probe round must not reject callers or kill the interval;
@@ -605,7 +612,7 @@ export function startServer(deps: Deps = {}) {
         // gated by the push diff cache.
         void terminal
           .list()
-          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: contextStore.decorate([...sessions, ...shell.list()]) }))
+          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: contextStore.decorate([...sessions, ...shell.list()]), features: AGENT_FEATURES }))
           .catch(() => { /* runners are fail-safe; never crash the handler */ });
         break;
       case "renameSession":
