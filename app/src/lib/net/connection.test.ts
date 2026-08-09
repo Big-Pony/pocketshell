@@ -1222,11 +1222,11 @@ test("rpcZip with corrupt payload rejects as rpc_zip_invalid", async () => {
   await expect(p).rejects.toMatchObject({ code: "rpc_zip_invalid" });
 });
 
-test("rpc requests advertise acceptEnc gzip", () => {
+test("rpc requests advertise acceptEnc gzip and bin", () => {
   const h = harness();
   h.conn.rpc("fs.read", { path: "/x" });
   const req = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
-  expect(req.acceptEnc).toEqual(["gzip"]);
+  expect(req.acceptEnc).toEqual(["gzip", "bin"]);
 });
 
 test("GUARD: an rpcZip decoded after a reconnect does not re-enter dispatch on the stale socket", async () => {
@@ -1466,4 +1466,71 @@ test("坏的二进制帧被静默丢弃，不关连接、不杀掉后续帧处�
   const id = lastRpcId(h);
   feedBytes(h, new TextEncoder().encode(JSON.stringify({ type: "response", id, ok: true, result: 42 })));
   await expect(p).resolves.toBe(42);
+});
+
+// ──────────────────────────────────────────────────────────────
+// Task 9: 客户端出站 —— rpcBin()、字节记账、队列类型。
+// disconnectedHarness 镜像 harness()，但不调用 sock.onopen()/握手 onmessage，
+// 连接停在 "connecting"、this.channel 未设置 —— 用于测 transport 未就绪时
+// rpcBin 的门控（与既有 send() 的判断逐字一致）。
+// ──────────────────────────────────────────────────────────────
+function disconnectedHarness() {
+  const sched = fakeScheduler();
+  let sock: any;
+  const sent: Uint8Array[] = [];
+  const wsFactory = (): WebSocketLike => {
+    sock = { binaryType: "", onopen: null, onmessage: null, onclose: null,
+      send: (d: Uint8Array) => sent.push(d), close: () => sock.onclose?.() };
+    return sock;
+  };
+  const conn = new Connection({
+    url: "ws://x", wsFactory, scheduler: sched,
+    channelFactory: passthroughChannel, getPairing: () => null,
+  });
+  return { conn, sched, sent, sock };
+}
+
+test("rpcBin 的死线按 header + blob 全长计算，不是只按 header", async () => {
+  // blob 移出 JSON 后若只记账 header，inflightBytes 从 ~61583 掉到 ~120，
+  // 4 片窗口的死线从 39413ms 塌回 10000ms 下限；而 150kbps 下排空 4×46080 B
+  // 实际需要 9830ms——健康上传会在几百 KB 处整体失败。
+  // 这类 bug 回环测不出来（本地零延迟），只能用记账断言钉住。
+  const h = harness();
+  (h.conn as any).features = new Set(["bin"]);
+  const blob = new Uint8Array(46000).fill(0x41);
+  void h.conn.rpcBin("fs.uploadChunk", { uploadId: "u", first: true }, blob);
+  expect((h.conn as any).inflightBytes).toBeGreaterThan(46000);
+});
+
+test("未声明 bin 能力时，rpcBin 回落到 base64 的普通 rpc", async () => {
+  const h = harness();
+  // features 未设置 = 老 agent
+  void h.conn.rpcBin("fs.uploadChunk", { uploadId: "u", first: true }, new Uint8Array([1, 2, 3]));
+  const last = h.sent[h.sent.length - 1];
+  expect(last[0]).toBe(0x7b); // '{' —— 是 JSON 帧
+  const msg = JSON.parse(new TextDecoder().decode(last));
+  expect(msg.params.dataB64).toBe("AQID");
+});
+
+test("信道未 transport 时 rpcBin 不抛异常，帧进队列", () => {
+  // SecureChannel.send 在非 transport 状态同步 throw；既有 send() 用
+  // `this.open && state === "transport"` 挡住，rpcBin 必须复刻这个判断。
+  const h = disconnectedHarness();
+  (h.conn as any).features = new Set(["bin"]);
+  expect(() => void h.conn.rpcBin("fs.uploadChunk", { uploadId: "u" }, new Uint8Array([1]))).not.toThrow();
+  expect((h.conn as any).queue.length).toBeGreaterThan(0);
+});
+
+test("二进制出站计入 txBytes（分割条的上行吞吐依赖它）", () => {
+  const h = harness();
+  (h.conn as any).features = new Set(["bin"]);
+  const before = (h.conn as any).txBytes;
+  void h.conn.rpcBin("fs.uploadChunk", { uploadId: "u" }, new Uint8Array(1000));
+  expect((h.conn as any).txBytes).toBeGreaterThan(before + 1000);
+});
+
+test("sessions 帧的 features 字段被记录，驱动 rpcBin 的能力位回落判断", () => {
+  const h = harness();
+  h.deliver({ type: "sessions", sessions: [], features: ["bin"] } as unknown as ServerMsg);
+  expect((h.conn as any).features.has("bin")).toBe(true);
 });

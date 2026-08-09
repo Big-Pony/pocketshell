@@ -116,7 +116,11 @@ const RPC_DIAG_SAMPLE_MIN_BYTES = 8192;
 export class Connection {
   private ws!: WebSocketLike;
   private open = false;
-  private queue: string[] = [];
+  // 离线队列。二进制帧塞不进 string[]，所以元素是「已编码的 JSON 文本」或
+  // 「已打包的二进制帧字节」二选一，flushAndRestore 按类型分发。
+  private queue: (string | Uint8Array)[] = [];
+  /** agent 声明的可选能力（sessions.features）。见到 "bin" 才发二进制上行。 */
+  private features = new Set<string>();
   private outputCbs: OutputCb[] = [];
   private inputCbs: InputCb[] = [];
   private sessionsCbs: SessionsCb[] = [];
@@ -288,9 +292,9 @@ export class Connection {
 
   rpc(method: string, params?: unknown): Promise<unknown> {
     const id = String(++this.rpcSeq);
-    // acceptEnc: 声明本端认得 gzip 压缩的响应。agent 只在看到这个字段时才压，
-    // 所以老 agent（忽略未知字段）与新 agent 都能正确工作。
-    const msg = { type: "rpc", id, method, params, acceptEnc: ["gzip"] } as ClientMsg;
+    // acceptEnc: 声明本端认得 gzip 压缩的响应与二进制帧承载。agent 只在看到
+    // 对应值时才用，所以老 agent（忽略未知字段）与新 agent 都能正确工作。
+    const msg = { type: "rpc", id, method, params, acceptEnc: ["gzip", "bin"] } as ClientMsg;
     const raw = encode(msg);
     const bytes = raw.length; // UTF-8 ≈ length here; payloads are base64/ASCII
     const startedAt = this.sched.now();
@@ -310,6 +314,48 @@ export class Connection {
       this.inflightBytes += bytes;
       this.pending.set(id, { resolve, reject, timer, bytes, method, startedAt });
       this.send(msg);
+    });
+  }
+
+  /**
+   * 带裸字节载荷的 rpc。blob 走二进制帧尾，不进 JSON。
+   *
+   * 老 agent（没在 sessions 里声明 "bin"）自动回落到 base64 —— 上行方向无法
+   * 从自身版本推断对端版本，而"旧 app 撞新 agent"可达：shouldReloadAfterUpdate
+   * 只在亲眼看着 OTA 发生的那个页面才 reload，后台标签页与手工重启都不会。
+   */
+  rpcBin(method: string, params: unknown, blob: Uint8Array): Promise<unknown> {
+    if (!this.features.has("bin")) {
+      // 回落：与一阶段完全一致的普通 rpc。
+      return this.rpc(method, { ...(params as object), dataB64: toB64(blob) });
+    }
+    const id = String(++this.rpcSeq);
+    const header = { type: "rpc", id, method, params, acceptEnc: ["gzip", "bin"] };
+    const frame = packBinFrame(header, blob);
+    // 记账用**整帧**字节，不是 header 字节。死线按 inflightBytes 放大，只记
+    // header 会让 4 片窗口的死线从 39413ms 塌回 10000ms 下限，慢上行上健康的
+    // 上传会整体失败。这条回环下复现不出来。
+    const bytes = frame.byteLength;
+    const startedAt = this.sched.now();
+    return new Promise<unknown>((resolve, reject) => {
+      const budgetFor = this.inflightBytes + bytes;
+      const timer = this.sched.setTimeout(() => {
+        this.releaseRpc({ bytes });
+        this.pending.delete(id);
+        this.chunks.drop(id);
+        const e = new Error("rpc_timeout") as Error & { code?: string };
+        e.code = "rpc_timeout";
+        reject(e);
+      }, rpcDeadlineMs(budgetFor));
+      this.inflightBytes += bytes;
+      this.pending.set(id, { resolve, reject, timer, bytes, method, startedAt });
+      // transport 门控：SecureChannel.send 在非 transport 状态**同步 throw**。
+      // 与既有 send() 的判断逐字一致。
+      if (this.open && this.channel && this.channel.state === "transport") {
+        this.sendRawBytes(this.ws, frame);
+      } else {
+        this.queue.push(frame);
+      }
     });
   }
 
@@ -433,7 +479,10 @@ export class Connection {
 
   private flushAndRestore(socket: WebSocketLike): void {
     const pending = this.queue; this.queue = [];
-    for (const raw of pending) this.sendRaw(socket, raw);
+    for (const raw of pending) {
+      if (typeof raw === "string") this.sendRaw(socket, raw);
+      else this.sendRawBytes(socket, raw);
+    }
     for (const id of this.attached) {
       this.sendRaw(socket, encode({ type: "attach", sessionId: id, lastSeq: this.seen.get(id) ?? 0 }));
     }
@@ -510,6 +559,7 @@ export class Connection {
     } else if (msg.type === "resync") {
       for (const cb of this.resyncCbs) cb({ sessionId: msg.sessionId, from: msg.from });
     } else if (msg.type === "sessions") {
+      if (Array.isArray(msg.features)) this.features = new Set(msg.features);
       for (const cb of this.sessionsCbs) cb(msg.sessions);
     } else if (msg.type === "exit") {
       for (const cb of this.exitCbs) cb({ sessionId: msg.sessionId, code: msg.code });
@@ -737,6 +787,18 @@ export class Connection {
     const frame = this.channel.send(new Uint8Array(new TextEncoder().encode(raw)));
     this.txBytes += frame.byteLength;
     socket.send(frame);
+  }
+
+  /**
+   * 二进制帧的出站口。与 sendRaw 并列，**同样负责上行记账** —— sendRaw 的
+   * 注释自称"唯一的出站口……免得日后新增一条消息路径时又漏了记账"，这就是
+   * 那条新路径，漏了 txBytes 分割条的上行吞吐会在上传期间显示为 0，而上传
+   * 恰恰是唯一在意上行数字的场景。
+   */
+  private sendRawBytes(socket: WebSocketLike, frame: Uint8Array): void {
+    const enc = this.channel.send(frame);
+    this.txBytes += enc.byteLength;
+    socket.send(enc);
   }
 
   // 新建会话时捎上本机上次的可信尺寸（recallDims）。目的不是省一次 resize，而是
