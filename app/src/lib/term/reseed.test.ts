@@ -74,3 +74,16 @@ describe("buildReseedReport", () => {
     expect(buildReseedReport({ ...base, discarded: true }).discarded).toBe(true);
   });
 });
+
+import { buildRpcReport } from "./reseed";
+
+describe("buildRpcReport", () => {
+  it("kind 固定为 rpc —— agent 侧按它路由白名单", () => {
+    expect(buildRpcReport({ method: "fs.read", rttMs: 1, wireBytes: 2, rawBytes: 3, chunks: 1 }).kind).toBe("rpc");
+  });
+
+  it("字段名与 agent 白名单逐字对应", () => {
+    const r = buildRpcReport({ method: "git.log", rttMs: 820, wireBytes: 116636, rawBytes: 184859, chunks: 3 });
+    expect(Object.keys(r).sort()).toEqual(["chunks", "kind", "method", "rawBytes", "rttMs", "wireBytes"]);
+  });
+});

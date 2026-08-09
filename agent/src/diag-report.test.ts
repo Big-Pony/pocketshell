@@ -173,3 +173,27 @@ test("reseed 诊断：trigger 里的换行被抹平，不能伪造第二行日�
   const line = formatDiagReport({ kind: "reseed", trigger: "a\nFAKE" });
   expect(line.split("\n").length).toBe(1);
 });
+
+test("kind rpc keeps the five wire counters and drops everything else", () => {
+  const line = formatDiagReport({
+    kind: "rpc", tag: "t", method: "fs.read", rttMs: 820,
+    wireBytes: 34188, rawBytes: 65695, chunks: 1,
+    secret: "should not appear", content: "neither should this",
+  }, () => 0);
+  const obj = JSON.parse(line.slice(DIAG_PREFIX.length).trim());
+  expect(obj.kind).toBe("rpc");
+  expect(obj.method).toBe("fs.read");
+  expect(obj.rttMs).toBe(820);
+  expect(obj.wireBytes).toBe(34188);
+  expect(obj.rawBytes).toBe(65695);
+  expect(obj.chunks).toBe(1);
+  expect(obj.secret).toBeUndefined();
+  expect(obj.content).toBeUndefined();
+});
+
+test("kind rpc method is sanitised to one line and bounded", () => {
+  const line = formatDiagReport({ kind: "rpc", method: "a\nb\tc" + "x".repeat(200) }, () => 0);
+  const obj = JSON.parse(line.slice(DIAG_PREFIX.length).trim());
+  expect(obj.method).not.toContain("\n");
+  expect(obj.method.length).toBeLessThanOrEqual(64);
+});

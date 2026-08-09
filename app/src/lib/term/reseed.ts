@@ -86,3 +86,31 @@ export function buildReseedReport(input: ReseedReportInput): Record<string, unkn
     bufferLenAfter: input.bufferLenAfter,
   };
 }
+
+export interface RpcReportInput {
+  method: string;
+  rttMs: number;
+  /** 实际上线字节（压缩后）。 */
+  wireBytes: number;
+  /** 压缩前字节；未压缩时与 wireBytes 相等。 */
+  rawBytes: number;
+  /** 分片数，1 = 单帧。 */
+  chunks: number;
+}
+
+/**
+ * 组装一次 rpc 的传输埋点。
+ *
+ * 只放计数与方法名，不放任何载荷内容 —— 这条日志用户可能直接贴进公开 issue。
+ * agent 侧 diag-report.ts 是白名单制，字段名两边必须逐字对应，漂移是静默的。
+ */
+export function buildRpcReport(input: RpcReportInput): Record<string, unknown> {
+  return {
+    kind: "rpc",
+    method: input.method,
+    rttMs: input.rttMs,
+    wireBytes: input.wireBytes,
+    rawBytes: input.rawBytes,
+    chunks: input.chunks,
+  };
+}

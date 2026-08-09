@@ -10,6 +10,7 @@ import { loadOrCreateIdentity, getAgentPubKey, getPendingPair, clearPendingPair 
 import { tr } from "../i18n";
 import { decodeZipFrame } from "./rpc-decompress";
 import { gunzip } from "../gunzip";
+import { buildRpcReport } from "../term/reseed";
 
 export interface WebSocketLike {
   binaryType?: string;
@@ -109,6 +110,9 @@ export function rpcDeadlineMs(queuedBytes: number): number {
   return Math.min(RPC_MAX_TIMEOUT_MS, RPC_BASE_TIMEOUT_MS + drainMs);
 }
 
+// 12 期 rpc 压缩埋点：只上报明显大的 rpc，小 rpc 高频且不关心，全报会刷屏日志。
+const RPC_DIAG_SAMPLE_MIN_BYTES = 8192;
+
 export class Connection {
   private ws!: WebSocketLike;
   private open = false;
@@ -130,12 +134,17 @@ export class Connection {
   private establishedThisSocket = false;
   private pairFailStreak = 0;
   private rpcSeq = 0;
-  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number; bytes?: number }>();
+  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number; bytes?: number; method: string; startedAt: number }>();
   // 已发出但未结算的 rpc 字节总量，用于把死线按排队量放大（见 rpcDeadlineMs）。
   private inflightBytes = 0;
   // WP-6: rpcChunk reassembly buffers share the pending rpc's exact lifetime —
   // dropped on settle/timeout, cleared on disconnect.
   private chunks = new ChunkReassembler();
+  // 12 期 rpc 压缩埋点：handleRpcZip/handleRpcChunk 在回喂 dispatch() 之前把
+  // 「这次响应实际走了多少线上字节 / 压缩前多少字节 / 几片」记在这里，
+  // dispatch() 的 response 分支读一次就清空。未设置（明帧 response 直接
+  // 到达）时 response 分支自己用 raw 的字节数当 wireBytes=rawBytes、chunks=1。
+  private rpcWireOverride: { wireBytes: number; rawBytes: number; chunks: number } | null = null;
 
   private sched: Scheduler;
   private statusCbs: ((s: ConnStatus) => void)[] = [];
@@ -284,6 +293,7 @@ export class Connection {
     const msg = { type: "rpc", id, method, params, acceptEnc: ["gzip"] } as ClientMsg;
     const raw = encode(msg);
     const bytes = raw.length; // UTF-8 ≈ length here; payloads are base64/ASCII
+    const startedAt = this.sched.now();
     return new Promise<unknown>((resolve, reject) => {
       // The deadline covers everything queued AHEAD of this call too: on a
       // slow uplink those bytes must drain before this rpc's own bytes even
@@ -298,9 +308,18 @@ export class Connection {
         reject(e);
       }, rpcDeadlineMs(budgetFor));
       this.inflightBytes += bytes;
-      this.pending.set(id, { resolve, reject, timer, bytes });
+      this.pending.set(id, { resolve, reject, timer, bytes, method, startedAt });
       this.send(msg);
     });
+  }
+
+  // 12 期 rpc 压缩埋点：这轮压缩到底省了多少、哪条路径值得下一轮上 brotli 或
+  // 二进制帧。只放计数与方法名，不放任何载荷内容——这条日志用户可能直接贴进
+  // 公开 issue。字段名与 agent 侧 diag-report.ts 的白名单逐字对应，漂移是
+  // 静默的。只上报 wireBytes 明显大的一批，小 rpc 高频且不关心。
+  private reportRpcIfBig(method: string, rttMs: number, wireBytes: number, rawBytes: number, chunks: number): void {
+    if (wireBytes <= RPC_DIAG_SAMPLE_MIN_BYTES) return;
+    void this.rpc("diag.report", buildRpcReport({ method, rttMs, wireBytes, rawBytes, chunks })).catch(() => {});
   }
 
   /** Release an rpc's queued-byte reservation once it settles (any outcome). */
@@ -454,6 +473,10 @@ export class Connection {
   }
 
   private dispatch(raw: string): void {
+    // 见 rpcWireOverride 字段注释：读一次即清空，只在 handleRpcZip/
+    // handleRpcChunk 紧邻的回喂里才非空，其它消息类型永远拿到 null。
+    const wireOverride = this.rpcWireOverride;
+    this.rpcWireOverride = null;
     let msg;
     try {
       msg = decodeServer(raw);
@@ -491,7 +514,15 @@ export class Connection {
         this.releaseRpc(p);
         this.chunks.drop(msg.id); // defensive: single frame after partial chunks
         this.sched.clearTimeout(p.timer);
-        if (msg.ok) p.resolve(msg.result);
+        if (msg.ok) {
+          p.resolve(msg.result);
+          // 未走 rpcZip/rpcChunk 的明帧：wireBytes = rawBytes = 这一帧的字节数。
+          const wire = wireOverride ?? (() => {
+            const n = new TextEncoder().encode(raw).length;
+            return { wireBytes: n, rawBytes: n, chunks: 1 };
+          })();
+          this.reportRpcIfBig(p.method, this.sched.now() - p.startedAt, wire.wireBytes, wire.rawBytes, wire.chunks);
+        }
         else { const e = new Error(msg.error.message) as Error & { code?: string }; e.code = msg.error.code; p.reject(e); }
       }
     } else if (msg.type === "rpcZip") {
@@ -544,6 +575,14 @@ export class Connection {
     decodeZipFrame(msg.data).then(
       (text) => {
         if (socket !== this.ws) return; // 纪律 2
+        // 埋点：msg.data 解出的字节数就是本次响应实际上线的字节（压缩后），
+        // 解压出的 text 编码回字节数就是压缩前的大小。仅供 dispatch() 里
+        // response 分支读一次，不算作纪律 3 触碰连接状态（这是只读诊断）。
+        this.rpcWireOverride = {
+          wireBytes: fromB64(msg.data).length,
+          rawBytes: new TextEncoder().encode(text).length,
+          chunks: 1,
+        };
         this.dispatch(text);            // 纪律 3：只做这一件事
       },
       () => {
@@ -592,9 +631,13 @@ export class Connection {
     if (msg.enc === "gzip") {
       const socket = this.ws;
       const id = msg.id;
+      const total = msg.total;
       gunzip(r.bytes).then(
         (raw) => {
           if (socket !== this.ws) return;
+          // 埋点：r.bytes 是分片重组出的 gzip 字节（本次响应实际上线的字节），
+          // 解压后的 raw 是压缩前的大小；total 是分片数。
+          this.rpcWireOverride = { wireBytes: r.bytes.length, rawBytes: raw.length, chunks: total };
           this.dispatch(new TextDecoder().decode(raw));
         },
         () => {
@@ -613,6 +656,8 @@ export class Connection {
       );
       return;
     }
+    // 未压缩的分片：wireBytes = rawBytes = 重组出的字节数（本来就没压过）。
+    this.rpcWireOverride = { wireBytes: r.bytes.length, rawBytes: r.bytes.length, chunks: msg.total };
     this.dispatch(new TextDecoder().decode(r.bytes));
   }
 

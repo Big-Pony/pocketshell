@@ -24,7 +24,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -99,6 +99,19 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
       if (v !== undefined) out[k] = v;
     }
     if (typeof p.error === "string") out.error = oneLine(p.error, MAX_ERROR);
+    // 12 期 rpc 压缩埋点。只放计数与方法名，绝不放载荷内容——这条日志用户
+    // 可能直接贴进公开 issue。method 与 tag 同样过 oneLine + 长度上限。
+    // 字段名与 app/src/lib/term/reseed.ts 的 buildRpcReport 逐字对应，漂移是
+    // 静默的（字段被丢掉，日志里只少几个数，什么都不报错）。
+    if (typeof p.method === "string") out.method = oneLine(p.method, MAX_TAG);
+    const rtt = num(p.rttMs);
+    if (rtt !== undefined) out.rttMs = rtt;
+    const wire = num(p.wireBytes);
+    if (wire !== undefined) out.wireBytes = wire;
+    const rawB = num(p.rawBytes);
+    if (rawB !== undefined) out.rawBytes = rawB;
+    const chunks = num(p.chunks);
+    if (chunks !== undefined) out.chunks = chunks;
   } catch {
     out.kind = "unknown";
   }
