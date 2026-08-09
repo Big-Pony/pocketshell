@@ -67,7 +67,15 @@ export type ClientMsg =
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }
-  | { type: "sessions"; sessions: SessionMeta[] }
+  // features: agent 支持的可选能力。客户端见到 "bin" 才开启二进制**上行**。
+  //
+  // 为什么上行需要它：下行由客户端的 acceptEnc 门控（老客户端不发就永不收到
+  // 二进制帧）。但上行方向反过来——客户端无法从自身版本推断对端版本，而
+  // 「旧 app 撞新 agent」是可达的：shouldReloadAfterUpdate（app/src/lib/
+  // update.ts:47）第一行是 `if (!phase) return false`，只有亲眼看着 OTA 发生
+  // 的那个页面才 reload；后台第二个标签页、或用户手工重启 agent，旧 app 都会
+  // 活着撞上去。所以上行必须由**服务端先声明**、客户端见到才用。
+  | { type: "sessions"; sessions: SessionMeta[]; features?: string[] }
   | { type: "exit"; sessionId: string; code: number }
   | { type: "error"; code: string; message: string }
   | { type: "pong" }
@@ -87,6 +95,18 @@ export type ServerMsg =
   // rpcZip: 一个压缩后仍装得下单帧的 rpc 成功响应。data 是 base64(gzip(完整
   // response 帧的 UTF-8 JSON))，客户端解压后得到的就是原样的 response 帧文本。
   | { type: "rpcZip"; id: string; data: string }
+  // rpcBin: 响应里含**裸字节**的成功回复（今天只有 fs.downloadChunk）。
+  // 头里是 {type,id,result}，result 中不含字节；字节走帧尾的 blob。
+  //
+  // 为什么不复用 rpcZip：rpcZip 的语义是「整帧 gzip 后回喂 dispatch」，
+  // 解出来就是一段 response JSON 文本；rpcBin 的 result 含字节，**无法表示成
+  // JSON 文本**，因此根本没法回喂 dispatch，结算路径完全不同。两种语义共用
+  // 一个帧型会让客户端先判标志再分岔，将来加第三种更乱。
+  //
+  // 注意：这个成员只用于**二进制帧的头**，永远不会被 encode() 序列化上线
+  // （真正上线的是 packBinFrame 拼出来的字节）。声明在这里是为了让两侧共享
+  // 头部的字段名与类型。
+  | { type: "rpcBin"; id: string; result: unknown }
   // OTA progress broadcast — one per phase transition during update.apply.
   // Purely additive; old clients ignore the unknown type. `pct` present only
   // during downloading when content-length is known.

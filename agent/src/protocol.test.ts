@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { encode, decodeClient, decodeServer } from "./protocol";
+import { encode, decodeClient, decodeServer, type ServerMsg, type ClientMsg } from "./protocol";
 
 test("pair round-trips through encode/decodeClient", () => {
   const raw = encode({ type: "pair", code: "ABCD1234", deviceName: "iPhone" });
@@ -142,4 +142,28 @@ test("rpcChunk carries an optional enc marker", () => {
   const msg = decodeServer(raw);
   if (msg.type !== "rpcChunk") throw new Error("wrong type");
   expect(msg.enc).toBe("gzip");
+});
+
+test("encode() 的首字节恒为 '{' —— 二进制帧判别赖以成立的不变量", () => {
+  // 二进制帧用 0x00 开头与 JSON 帧区分（binframe.ts）。这条不变量是隐式的：
+  // encode 是 JSON.stringify 且 msg 恒为对象，所以首字节必为 '{'。
+  // 若哪天有人让 encode 返回数组或裸字符串，判别就会静默失效——这条测试是唯一的哨兵。
+  const samples: (ServerMsg | ClientMsg)[] = [
+    { type: "output", sessionId: "s", seq: 1, data: "x" },
+    { type: "sessions", sessions: [] },
+    { type: "error", code: "c", message: "m" },
+    { type: "pong" },
+    { type: "response", id: "1", ok: true, result: { a: 1 } },
+    { type: "response", id: "1", ok: false, error: { code: "c", message: "m" } },
+    { type: "rpcChunk", id: "1", index: 0, total: 2, data: "AA==" },
+    { type: "rpcZip", id: "1", data: "AA==" },
+    { type: "rpcBin", id: "1", result: { eof: false, size: 10 } },
+    { type: "rpc", id: "1", method: "fs.read", params: { path: "/a" }, acceptEnc: ["gzip", "bin"] },
+    { type: "input", sessionId: "s", data: "ls" },
+    { type: "ping" },
+  ];
+  for (const m of samples) {
+    const first = Buffer.from(encode(m), "utf8")[0];
+    expect(first).toBe(0x7b); // '{'
+  }
 });
