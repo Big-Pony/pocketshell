@@ -81,7 +81,12 @@ function decodeReply(frames: Uint8Array[]): any {
   return JSON.parse(raw.toString("utf8"));
 }
 
-test("a large fs.read with acceptEnc arrives as ONE rpcZip frame, content intact", () => {
+test("大 fs.read 只带 acceptEnc:['gzip']（不含 'bin'——真实 v1.16.0 客户端的形状）时，rpcZip 走 JSON 帧而非二进制帧", () => {
+  // 回归用例：wantsBin 门只看 acceptEnc 是否含 "bin"，跟载荷压没压是两码事。
+  // v1.16.0 客户端只发 acceptEnc:["gzip"]，它的 onmessage 末尾是无条件
+  // TextDecoder().decode() 回 dispatch，没有首字节嗅探——撞上 0x00 开头的
+  // 二进制帧会 decodeServer 抛、丢帧、rpc 挂到 10 秒超时（term.history 每次
+  // 挂载终端都会跑），等于老客户端被新 agent 砖化而不是降级。
   const dir = mkdtempSync(join(tmpdir(), "ps-zip-"));
   const file = join(dir, "big.txt");
   const text = "export const value = 42;\n".repeat(3000); // ~72KB，高度可压
@@ -90,15 +95,16 @@ test("a large fs.read with acceptEnc arrives as ONE rpcZip frame, content intact
 
   const frames = rpcFramesWith(srv, "z1", "fs.read", { path: file }, ["gzip"]);
   expect(frames).toHaveLength(1);
-  // rpcZip 现在走二进制帧（不论 acceptEnc 是否含 "bin"——那个开关只管 rpcBin）。
-  const bin = decodeBinReply(frames);
-  expect(bin).not.toBeNull();
-  expect(bin![0].header.type).toBe("rpcZip");
+  // 首字节必须是 '{'：一个二进制帧都不许发给没声明 "bin" 的客户端。
+  expect(frames[0][0]).toBe(0x7b);
+  expect(decodeBinReply(frames)).toBeNull();
 
-  const reply = decodeReply(frames);
-  expect(reply.ok).toBe(true);
-  expect(reply.id).toBe("z1");
-  expect(reply.result.content).toBe(text); // 逐字节相同，压缩是纯优化
+  const msg = decodeServer(Buffer.from(frames[0]).toString("utf8")) as any;
+  expect(msg.type).toBe("rpcZip");
+  const inner = JSON.parse(gunzipSync(Buffer.from(msg.data, "base64")).toString("utf8"));
+  expect(inner.ok).toBe(true);
+  expect(inner.id).toBe("z1");
+  expect(inner.result.content).toBe(text); // 逐字节相同，压缩是纯优化
 
   srv.stop();
   rmSync(dir, { recursive: true, force: true });
@@ -140,7 +146,7 @@ test("PROTECTION: a small response stays a plain single `response` frame", () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("大 fs.read 带 acceptEnc:['gzip'] 时走二进制 rpcZip 帧，内容完好", () => {
+test("大 fs.read 带 acceptEnc:['gzip','bin'] 时走二进制 rpcZip 帧，内容完好", () => {
   const dir = mkdtempSync(join(tmpdir(), "ps-bin-"));
   const file = join(dir, "big.txt");
   // 高熵内容：低熵会被压到阈值以下，函数在阈值那行就短路，测不到压缩分支。

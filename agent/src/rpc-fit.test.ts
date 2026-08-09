@@ -355,30 +355,34 @@ test("rpc error replies stay single-frame (ok:false, never chunked)", () => {
   srv.stop();
 });
 
-test("a compressed response too big for one frame is chunked with enc markers", () => {
-  // 中等熵的类源码内容：能压（不像 term.history 已被 compressHistory 压过），
-  // 但压完仍远超单帧预算，所以走 rpcChunk + enc:"gzip"。
-  //
-  // 为什么不用 term.history 当载体：它的 handler 里已经调了 compressHistory 做
-  // 字段级压缩，出来的 data 是 gzip 后的 base64（近乎最大熵），外层判据必然
-  // 拒绝、永远走不到压缩分片这条路。实测 payload 407341 → outcome=plain。
-  //
-  // 也不能用纯随机字母：那种内容 gzip 省下的约 25% 被 base64 的 4/3 回膨胀
-  // 抵消，同样落回 plain。要的是"真能压缩但压完仍很大"。
-  // 4900 行、每行 5 个词元：踩在 fs.read 默认 DEFAULT_MAX_LINES=5000 /
-  // DEFAULT_MAX_BYTES=512KiB 之下（不然会被截断，content 逐字节比对必炸），
-  // 同时字节数够大——实测 332849B 原始 -> 压完 115504B，超过 RPC_FIT_SAFE_BYTES
-  // (61440B) 必须分片，又比只有 3 词元/行（179536B 原始）时压完的 58832B 大，
-  // 后者仍会落进单帧 rpcZip，测不到分片路径。
+// 4900 行、每行 5 个词元的中等熵类源码内容，两个测试共用：能压（不像
+// term.history 已被 compressHistory 压过），但压完仍远超单帧预算，所以走
+// rpcChunk + enc:"gzip"。
+//
+// 为什么不用 term.history 当载体：它的 handler 里已经调了 compressHistory 做
+// 字段级压缩，出来的 data 是 gzip 后的 base64（近乎最大熵），外层判据必然
+// 拒绝、永远走不到压缩分片这条路。实测 payload 407341 → outcome=plain。
+//
+// 也不能用纯随机字母：那种内容 gzip 省下的约 25% 被 base64 的 4/3 回膨胀
+// 抵消，同样落回 plain。要的是"真能压缩但压完仍很大"。
+// 踩在 fs.read 默认 DEFAULT_MAX_LINES=5000 / DEFAULT_MAX_BYTES=512KiB 之下
+// （不然会被截断，content 逐字节比对必炸），同时字节数够大——实测 332849B
+// 原始 -> 压完 115504B，超过 RPC_FIT_SAFE_BYTES (61440B) 必须分片，又比只有
+// 3 词元/行（179536B 原始）时压完的 58832B 大，后者仍会落进单帧 rpcZip，
+// 测不到分片路径。
+function bigCompressibleSrc(): string {
   let s = 0x9e3779b9;
   const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
   const W = ["const", "function", "return", "export", "import", "value",
              "result", "config", "handler", "session", "buffer", "index"];
-  const src = Array.from({ length: 4900 }, (_, i) =>
+  return Array.from({ length: 4900 }, (_, i) =>
     `  ${W[rnd() % 12]} ${W[rnd() % 12]}${i} = ${W[rnd() % 12]}(${rnd() % 9999}, ${W[rnd() % 12]}, ${W[rnd() % 12]}${rnd() % 99}, ${W[rnd() % 12]}(${rnd() % 9999}));`,
   ).join("\n");
+}
 
-  const dir = mkdtempSync(join(tmpdir(), "ps-zipchunk-"));
+test("a compressed response too big for one frame, with acceptEnc:['gzip','bin'], is chunked as binary frames", () => {
+  const src = bigCompressibleSrc();
+  const dir = mkdtempSync(join(tmpdir(), "ps-zipchunk-bin-"));
   const file = join(dir, "big.ts");
   writeFileSync(file, src);
   const srv = startServer({ port: 0, channelFactory: passthroughResponder });
@@ -388,12 +392,11 @@ test("a compressed response too big for one frame is chunked with enc markers", 
   srv.__test.message(ws as any, M1);
   ws.sent.length = 0;
   srv.__test.message(ws as any, utf8(encode({
-    type: "rpc", id: "cz", method: "fs.read", params: { path: file }, acceptEnc: ["gzip"],
+    type: "rpc", id: "cz", method: "fs.read", params: { path: file }, acceptEnc: ["gzip", "bin"],
   } as any)));
 
-  // 压完仍超单帧预算的 zip-chunk 分支现在走二进制帧（sendBinSecure），不再是
-  // JSON + base64 的 rpcChunk——meta 在帧头（JSON），载荷字节在帧尾（裸字节）。
-  // 语义没变：仍是多片、每片带 enc:"gzip"、重组后逐字节还原；只是解帧方式变了。
+  // 压完仍超单帧预算的 zip-chunk 分支只有在客户端声明了 "bin" 时才走二进制
+  // 帧（sendBinSecure）——meta 在帧头（JSON），载荷字节在帧尾（裸字节）。
   const msgs = ws.sent.map((f) => {
     const r = unpackBinFrame(f);
     if (!r) throw new Error("expected a binary frame");
@@ -408,6 +411,50 @@ test("a compressed response too big for one frame is chunked with enc markers", 
 
   // 重组 + 解压后必须逐字节还原 —— 压缩是纯优化，语义不能变。
   const joined = Buffer.concat(msgs.map((m) => Buffer.from(m.blob)));
+  const reply = JSON.parse(Buffer.from(Bun.gunzipSync(joined)).toString("utf8"));
+  expect(reply.ok).toBe(true);
+  expect(reply.id).toBe("cz");
+  expect(reply.result.content).toBe(src);
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a compressed response too big for one frame, with acceptEnc:['gzip'] only (no 'bin'), falls back to JSON rpcChunk", () => {
+  // 回归用例：真实 v1.16.0 客户端只发 acceptEnc:["gzip"]，从不发 "bin"。它的
+  // onmessage 末尾是无条件 TextDecoder().decode() 回 JSON dispatch，没有首
+  // 字节嗅探——撞上 0x00 开头的二进制帧会 decodeServer 抛、丢帧、rpc 挂到
+  // 10 秒超时。term.history 这类会被压缩又常常超单帧预算的方法，每次挂载
+  // 终端都要走一次这条路径，等于老客户端被新 agent 砖化而不是降级。
+  const src = bigCompressibleSrc();
+  const dir = mkdtempSync(join(tmpdir(), "ps-zipchunk-json-"));
+  const file = join(dir, "big.ts");
+  writeFileSync(file, src);
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({
+    type: "rpc", id: "cz", method: "fs.read", params: { path: file }, acceptEnc: ["gzip"],
+  } as any)));
+
+  expect(ws.sent.length).toBeGreaterThan(1); // 压完仍要分片
+  // 首字节必须是 '{' 且能被 unpackBinFrame 判定为非二进制帧：一个二进制帧
+  // 都不许发给没声明 "bin" 的客户端。
+  for (const f of ws.sent) {
+    expect(f[0]).toBe(0x7b);
+    expect(unpackBinFrame(f)).toBeNull();
+  }
+  const msgs = ws.sent.map((f) => decodeServer(Buffer.from(f).toString("utf8")) as any);
+  for (const m of msgs) {
+    expect(m.type).toBe("rpcChunk");
+    expect(m.enc).toBe("gzip"); // 每片都带标记
+  }
+
+  // 重组 + 解压后必须逐字节还原 —— 压缩是纯优化，语义不能变。
+  const joined = Buffer.concat(msgs.map((m) => Buffer.from(m.data, "base64")));
   const reply = JSON.parse(Buffer.from(Bun.gunzipSync(joined)).toString("utf8"));
   expect(reply.ok).toBe(true);
   expect(reply.id).toBe("cz");

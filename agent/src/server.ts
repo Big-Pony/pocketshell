@@ -512,8 +512,19 @@ export function startServer(deps: Deps = {}) {
     // 省下的不只是字节，还有一整轮分片往返。
     const out = compressRpcPayload(payload, method, acceptEnc);
     if (out.kind === "zip") {
+      // rpcZip/rpcChunk 的二进制帧同样要过 wantsBin 门——门控的是"客户端认不
+      // 认识 0x00 开头的帧"，不是"载荷压没压"。acceptEnc 只含 "gzip" 时
+      // （真实 v1.16.0 客户端的形状：只发 gzip，不发 bin）客户端的 onmessage
+      // 末尾是无条件 TextDecoder().decode() 回 dispatch，没有首字节嗅探——
+      // 撞上二进制帧会 decodeServer 抛、丢帧、rpc 挂到 10 秒超时，term.history
+      // 每次挂载终端都会跑，等于老客户端被新 agent 砖化而不是降级。
+      const wantsBin = Array.isArray(acceptEnc) && acceptEnc.includes("bin");
       if (zipFitsOneFrame(id, out.data)) {
-        sendBinSecure(conn, { type: "rpcZip", id }, out.data);
+        if (wantsBin) {
+          sendBinSecure(conn, { type: "rpcZip", id }, out.data);
+        } else {
+          sendSecure(conn, { type: "rpcZip", id, data: Buffer.from(out.data).toString("base64") });
+        }
         return;
       }
       // 压完仍超单帧预算：切成带 enc 标记的分片，客户端重组后再解压。
@@ -528,7 +539,11 @@ export function startServer(deps: Deps = {}) {
           index * RPC_CHUNK_PAYLOAD_BYTES,
           (index + 1) * RPC_CHUNK_PAYLOAD_BYTES,
         );
-        sendBinSecure(conn, { type: "rpcChunk", id, index, total, enc: "gzip" }, slice);
+        if (wantsBin) {
+          sendBinSecure(conn, { type: "rpcChunk", id, index, total, enc: "gzip" }, slice);
+        } else {
+          sendSecure(conn, { type: "rpcChunk", id, index, total, data: Buffer.from(slice).toString("base64"), enc: "gzip" });
+        }
       }
       return;
     }
