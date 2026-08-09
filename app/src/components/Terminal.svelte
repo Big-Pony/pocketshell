@@ -135,6 +135,9 @@
   // device's xterm dims are unchanged (需求2 — re-assert THIS device's size on a
   // shared tmux session another device resized), then redraws to fill it.
   let activateRefit: () => void = () => {};
+  // 切 tab 时拍一份滚动/尺寸快照（2026-08-09 取证）。onMount 里赋值，由下面
+  // 跟随 active 的 $effect 调用，所以要活过 onMount 的闭包。
+  let reportScroll: (why: string) => void = () => {};
 
   // Which tmux buffer the pane is in, driven by tmux's real alternate_on state.
   // Shells AND classic-renderer Claude Code live in the normal buffer (native
@@ -279,6 +282,23 @@
       } catch { /* 同上 */ }
     };
     document.addEventListener("visibilitychange", onVisible);
+    // 2026-08-09：同一份滚动快照，改成也能在**切 tab** 时拍。
+    //
+    // 真机报告的两个现象都发生在 tab 之间切换时：（1）终端只用左侧约 1/4 宽度
+    // （列数塌陷）；（2）部分 tab 滑不动，且**宽度正常的 tab 也会滑不动**——
+    // 后一句排除了「滚动问题只是列数问题的副作用」这个省事的解释，两条得分开查。
+    //
+    // 上面那个 onVisible 只监听 document 的 visibilitychange（切到别的 App /
+    // 锁屏），tab 之间切换根本不触发它，所以现场一直没被拍到。这里把同一份探针
+    // 挂到激活路径上，快照字段一个不改（cols 看塌陷、cellHeight/scrollHeight 看
+    // 滚动塌陷），agent 侧白名单也无需改动。
+    reportScroll = (why: string) => {
+      try {
+        const s = snapshotScroll(term);
+        console.warn(formatScrollSnapshot(`${sessionId}/${why}`, s));
+        void conn.rpc("diag.report", { tag: `${sessionId}/${why}`, kind: "scroll", ...s }).catch(() => {});
+      } catch { /* 诊断绝不能影响任何东西 */ }
+    };
     // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays
     // editable the phone keyboard pops up (and, because our on-screen keys
     // preventDefault focus-steal, never leaves). xterm is display-only here
@@ -300,7 +320,16 @@
     // reliably worked around, so it's done by the copy-mode overlay
     // (TermCopyOverlay) which selects a listener-free clone of the rows instead.
     host.addEventListener("mousedown", (e) => { e.stopPropagation(); }, true);
-    fit.fit();
+    // 这里**不**调 fit.fit()（2026-08-09）。它内部直接 term.resize(proposeDimensions())，
+    // 绕过下面 refit() 的 isMeasurable / isPlausible 两道门 —— 而新建 tab 是**隐藏挂载**
+    // 的（display:none），此刻量出来正是 9~12 列的塌陷值。塌陷的列数会被 conn.resize
+    // 上报给 tmux，Claude Code 按错误宽度把硬换行打进历史，**不可逆**（详见
+    // lib/term/fit-guard.ts）。真机症状：新开的 tab 只用左侧约 1/4 宽度。
+    //
+    // 首屏尺寸由下面这些路径负责，它们都走 refit() 的守卫：`if (active) refit()`
+    // （本函数末尾，此时 refit 已被赋值）、变为可测量时 ResizeObserver 的那一跳、
+    // 以及切成活动 tab 时的 activateRefit()。这里不能补调 refit —— 它此刻还是
+    // 顶部那个 no-op stub（真正的实现在下面才赋值），调了等于没调。
 
     // Buffer the pane is in; gates history seeding (only in the normal buffer).
     let currentBuffer: BufferType = "normal";
@@ -674,7 +703,13 @@
   $effect(() => {
     if (mounted && active && !closed && term && fit) {
       flushPending();
-      queueMicrotask(() => { activateRefit(); startPoll(); });
+      queueMicrotask(() => {
+        activateRefit();
+        startPoll();
+        // 取证（2026-08-09）：在 refit **之后**拍，量到的才是这个 tab 稳定下来的
+        // 真实尺寸。列数塌陷与滑不动都只在切 tab 时复现，而这里是唯一必经之路。
+        reportScroll("activate");
+      });
     } else if (term) {
       stopPoll();
     }

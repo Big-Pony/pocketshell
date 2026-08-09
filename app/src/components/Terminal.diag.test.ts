@@ -79,8 +79,14 @@ test("a failing report never propagates — diagnostics must not break the sessi
   await new Promise((r) => setTimeout(r, 10));
   window.removeEventListener("unhandledrejection", onRejection);
 
-  // 两条上报（atlas + scroll）都失败也不能互相牵连、更不能抛出未捕获拒绝。
-  expect(diagCalls(rpc).length).toBe(2);
+  // 三条上报都失败也不能互相牵连、更不能抛出未捕获拒绝：
+  //   - 激活时的 scroll 快照（tag 带 /activate，2026-08-09 加的切 tab 取证）
+  //   - visibilitychange 的 atlas 与 scroll 两条
+  const calls = diagCalls(rpc);
+  expect(calls.length).toBe(3);
+  const tags = calls.map((c) => (c[1] as { tag?: string })?.tag);
+  expect(tags.filter((t) => t === "s-diag2/activate").length).toBe(1);
+  expect(tags.filter((t) => t === "s-diag2").length).toBe(2);
   expect(onRejection).not.toHaveBeenCalled();
 });
 
