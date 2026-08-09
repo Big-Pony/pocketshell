@@ -2,6 +2,7 @@
 import { test, expect, vi } from "vitest";
 import { identityChannel, HELLO, HELLO_ACK } from "./identity-channel";
 import { DemoSocket } from "./socket";
+import { packBinFrame } from "../lib/net/binframe";
 
 test("恒等通道：start 回 HELLO，收到 HELLO_ACK 即 established", () => {
   const ch = identityChannel();
@@ -154,6 +155,26 @@ test("DemoSocket：close 幂等，onclose 只触发一次", () => {
   s.close();
   s.close();
   expect(closed).toHaveBeenCalledTimes(1);
+});
+
+test("演示 socket 收到二进制帧仍能解出 rpc，不静默吞掉", () => {
+  // 演示的 DemoAgent 不实现写操作，但编辑按钮与上传菜单在演示里可达且无门控。
+  // 帧被吞掉 = 没有 response = 面板转圈到 10 秒 rpc 超时，比明确报错糟得多
+  // （demo/agent.ts:241 的注释）。
+  const { sched } = makeSched();
+  const frames: unknown[] = [];
+  const s = new DemoSocket({ onFrame: (m) => frames.push(m), isReconnect: false, scheduler: sched });
+  s.onmessage = () => {};
+  s.start();
+  s.send(HELLO);
+  frames.length = 0;
+  s.send(packBinFrame(
+    { type: "rpc", id: "7", method: "fs.write", params: { writeId: "w", first: true, last: true, path: "/a" } },
+    new Uint8Array([1, 2, 3]),
+  ));
+  expect(frames.length).toBe(1);
+  expect((frames[0] as any).type).toBe("rpc");
+  expect((frames[0] as any).method).toBe("fs.write");
 });
 
 test("DemoSocket：close 之后即使定时器到点也不 open（重连中途被关掉）", () => {

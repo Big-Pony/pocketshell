@@ -5,6 +5,7 @@
 // DemoAgent；反向由 agent 调 push() 送回。
 import { HELLO, HELLO_ACK } from "./identity-channel";
 import type { WebSocketLike } from "../lib/net/connection";
+import { unpackBinFrame, BIN_FRAME_MAGIC } from "../lib/net/binframe";
 
 // Connection 首次重连退避约 500ms（connection.ts:446）。若立刻 open，
 // 「重连中」在访客眼里根本没出现过就没了——而那正是演示的题眼。
@@ -53,6 +54,16 @@ export class DemoSocket implements WebSocketLike {
       return;
     }
     let msg: unknown;
+    // 二进制帧（首字节 0x00）：演示态不实现写操作，但编辑/上传按钮可达，
+    // 真实客户端会把 fs.write / fs.uploadChunk 打包成二进制帧发过来。头里
+    // 就是完整的 rpc 消息，blob 丢掉即可 —— DemoAgent 的 default 分支会回
+    // demo_unsupported。**不能静默吞掉**：没有 response 就是转圈到超时。
+    if (data.length > 0 && data[0] === BIN_FRAME_MAGIC) {
+      const bf = unpackBinFrame(data);
+      if (!bf) return;
+      this.opts.onFrame(bf.header);
+      return;
+    }
     try { msg = JSON.parse(new TextDecoder().decode(data)); }
     catch { return; } // 演示里不该出现，出现了也不能崩
     this.opts.onFrame(msg);
