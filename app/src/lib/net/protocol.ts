@@ -103,9 +103,15 @@ export function decodeClient(raw: string): ClientMsg {
 // seq 是快照那一刻 replay 的 latestSeq：前端写完 data 后用 attach(seq) 只订阅
 // 之后的增量，从而不重不丢地接上实时流。取号必须在 capture 之前（见
 // terminal.ts 的 history 实现注释）。
+//
+// 请求参数：{ session: string; lines?: number }
+//   lines = 只取最近多少行（缺省 = 整份 scrollback，保持老调用方语义）。
 export interface TermHistoryResult {
-  data: string; // base64 的 capture-pane 原始字节（含 SGR）
+  data: string; // base64；enc="gzip" 时是 gzip 后再 base64
   seq: number; // 快照时的 replay latestSeq；无输出记录时为 0
+  // 载荷编码。缺省 = 未压缩原始字节。压缩在 Noise 加密**之前**做——帧内是密文，
+  // 密文不可压缩，WS 层的 perMessageDeflate 对它无效。
+  enc?: "gzip";
 }
 
 // term.capture 的 rpc 响应体。与 term.history 的区别是**给人看/给剪贴板**而不是

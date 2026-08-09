@@ -120,6 +120,38 @@ test("history() 透传调用方给的 seq，并保持 capture 参数不变", asy
   term.dispose();
 });
 
+test("history(lines) 只取最近 N 行 —— 走 capture 的 back 参数解析成 -S", async () => {
+  // 首屏拉全量 scrollback 在真机上要七秒（179KB），而手机屏一次只显示二十几行。
+  // back 的语义是「光标往上第几行」，由 tmux 自己的 #{cursor_y} 解析成 -S。
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args[0] === "display-message") return ok("20|1850\n"); // cursor_y|history_size
+      if (args.includes("capture-pane")) return ok("RECENT");
+      return ok();
+    },
+  });
+  const r = await term.history("work", 3, 1000);
+  expect(r.seq).toBe(3);
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("RECENT");
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  // -S = cursor_y - back = 20 - 1000
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-980", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
+test("history() 不给 lines 时保持全量 -S -（老调用方语义不变）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => { calls.push(args); return args.includes("capture-pane") ? ok("ALL") : ok(); },
+  });
+  await term.history("work", 0, undefined);
+  const cap = calls.find((a) => a.includes("capture-pane"))!;
+  expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-", "-E", "-", "-t", "work"]);
+  term.dispose();
+});
+
 test("history() 在 capture 失败时仍返回完整形状（seq 不丢）", async () => {
   // seq 丢了会让前端 attach(undefined) 退化成 attach(0)，把整个 replay 缓冲
   // 重放一遍——正是这次要消灭的双重渲染。所以失败路径也必须带上 seq。

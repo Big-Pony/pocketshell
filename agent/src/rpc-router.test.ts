@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parse } from "./rpc-router";
+import { parse, compressHistory } from "./rpc-router";
 
 test("parse.gitReview 解析 worktree 三档", () => {
   expect(parse.gitReview({ cwd: "/p", scope: { kind: "worktree", stage: "staged" } }))
@@ -30,4 +30,24 @@ test("parse.gitReview 对未知 kind 回落到 worktree/all（不 throw）", () 
   // 线上老客户端 / 手工构造的请求不该让 agent 500，回落到最安全的默认范围
   const r = parse.gitReview({ cwd: "/p", scope: { kind: "bogus" } });
   expect(r.scope).toEqual({ kind: "worktree", stage: "all" });
+});
+
+test("term.history 压缩后带 enc=gzip，且解压回原字节", () => {
+  const raw = Buffer.from("A".repeat(10000));
+  const h = { data: raw.toString("base64"), seq: 7 };
+  const out = compressHistory(h);
+  expect(out.enc).toBe("gzip");
+  expect(out.seq).toBe(7);
+  const back = Bun.gunzipSync(Buffer.from(out.data, "base64"));
+  expect(Buffer.from(back).toString()).toBe("A".repeat(10000));
+});
+
+test("压不小的短载荷原样返回，不带 enc", () => {
+  const h = { data: Buffer.from("hi").toString("base64"), seq: 1 };
+  expect(compressHistory(h).enc).toBeUndefined();
+});
+
+test("parse.termHistory 读 lines，缺省为 undefined（= 全量 scrollback）", () => {
+  expect(parse.termHistory({ session: "work", lines: 1000 })).toEqual({ session: "work", lines: 1000 });
+  expect(parse.termHistory({ session: "work" }).lines).toBeUndefined();
 });

@@ -20,6 +20,7 @@ import type { NotificationService } from "./notify-service";
 import type { PreviewTokens } from "./preview-service";
 import type { NotifyConfig } from "./notify-config";
 import type { WireResult } from "./notify-wire";
+import type { TermHistoryResult } from "./protocol";
 import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChunk, fsDownloadChunk, fsArchive, fsWrite } from "./fs-service";
 import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { gitReview, type ReviewScope } from "./git-review";
@@ -74,6 +75,27 @@ export type RpcHandler = (ctx: RpcContext, p: RpcParams) => RpcOutcome | Promise
 
 const ok = (result: unknown): RpcOutcome => ({ kind: "result", result });
 const SENT: RpcOutcome = { kind: "sent" };
+
+// 历史载荷压缩。终端文本的 SGR 转义码高度重复，实测 134KB → 33KB（gzip 1ms），
+// 上链路 179KB → 44KB。与「只取最近 N 行」正交：两招叠加后 179KB → 12KB。
+//
+// 必须在这里做而不是在 WS 层开 perMessageDeflate —— 帧里装的是 Noise 密文，
+// 密文不可压缩，那个开关对它完全无效。
+//
+// 压缩后反而更大时（极短的快照，gzip 头部开销）原样返回不带 enc ——
+// 客户端按未压缩处理，两边都不需要特判。
+export function compressHistory(h: TermHistoryResult): TermHistoryResult {
+  if (!h.data) return h;
+  try {
+    const raw = Buffer.from(h.data, "base64");
+    const gz = Buffer.from(Bun.gzipSync(raw));
+    if (gz.byteLength >= raw.byteLength) return h;
+    return { data: gz.toString("base64"), seq: h.seq, enc: "gzip" };
+  } catch {
+    // 压缩失败绝不能让重灌失败：原样回退。
+    return h;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Parameter parsing
@@ -139,6 +161,7 @@ export const parse = {
     }
     return { cwd: str(p, "cwd"), scope };
   },
+  termHistory: (p: RpcParams) => ({ session: str(p, "session"), lines: optNum(p, "lines") }),
   termCapture: (p: RpcParams) => ({
     session: str(p, "session"),
     opts: { colors: flag(p, "colors"), back: optNum(p, "back"), endBack: optNum(p, "endBack") },
@@ -194,9 +217,10 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   // 先取号、后快照：capture 期间新到的输出必然拿到 > seq 的序号，
   // 前端 attach(seq) 会把它们补上。顺序反过来会丢字节。
   "term.history": async (ctx, p) => {
-    const sid = parse.session(p).session;
-    const seq = ctx.replay.latestSeq(sid);
-    return ok(ctx.shell.has(sid) ? { data: "", seq } : await ctx.terminal.history(sid, seq));
+    const a = parse.termHistory(p);
+    const seq = ctx.replay.latestSeq(a.session);
+    if (ctx.shell.has(a.session)) return ok({ data: "", seq });
+    return ok(compressHistory(await ctx.terminal.history(a.session, seq, a.lines)));
   },
   // 复制路径专用：默认纯文本（无 SGR），可给 back（光标往上第几行）
   // 只取某一轮命令的输出，再给 endBack 就是一个闭区间（复制模式上翻

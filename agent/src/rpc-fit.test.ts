@@ -272,16 +272,53 @@ test("rpc fs.diff of a large diff delivers ALL hunks via chunking (no truncation
   rmSync(dir, { recursive: true, force: true });
 });
 
+// 高熵 scrollback。bigScrollbackTmux 那份是 2000 行一模一样的 "lll…"，2026-08-09
+// 起 term.history 的载荷会先过一遍 gzip，那种内容压到几百字节，就再也触发不了
+// 分片——测不到这条用例真正要测的东西（超大响应完整通过 rpcChunk）。
+// 这里用一个确定性的伪随机序列填行，gzip 之后仍然远超 RPC_CHUNK_FRAME_MAX_BYTES。
+function noisyScrollbackTmux(total: number) {
+  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  // xorshift32 而不是 LCG：LCG 取模 64 落在低位上，低位周期极短，造出来的是
+  // 周期性文本，gzip 一压就没了（实测 202KB → 21KB，仍进不了分片）。xorshift32
+  // 的每一位都在参与，实测同样 202KB 压完还有 152KB，稳稳超过分片阈值。
+  let s = 0x9e3779b9;
+  const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
+  const body = Array.from({ length: total }, () =>
+    Array.from({ length: 100 }, () => CHARS[rnd() % CHARS.length]).join(""),
+  ).join("\n") + "\n";
+  return (args: string[]) => (args.includes("capture-pane") ? ok(body) : ok());
+}
+
 test("rpc term.history with an oversize scrollback arrives COMPLETE via rpcChunk", async () => {
-  const terminal = new TerminalService({ tmux: bigScrollbackTmux(2000) });
+  const tmux = noisyScrollbackTmux(2000);
+  const expected = Buffer.from(tmux(["capture-pane"]).stdout).toString("utf8");
+  const terminal = new TerminalService({ tmux });
   const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
   const frames = await rpcFramesAsync(srv, "h1", "term.history", { session: "work" });
-  expect(frames.length).toBeGreaterThan(1); // ~270KB payload -> several shards
+  expect(frames.length).toBeGreaterThan(1); // 压缩后仍有 ~200KB -> several shards
   for (const f of frames) expect(f.length).toBeLessThanOrEqual(RPC_CHUNK_FRAME_MAX_BYTES);
   const reply = reassemble(frames);
   expect(reply.ok).toBe(true);
   // the full 2000-line scrollback, not a halved prefix
-  expect(Buffer.from(reply.result.data, "base64").toString("utf8")).toBe(("l".repeat(100) + "\n").repeat(2000));
+  expect(reply.result.enc).toBe("gzip");
+  const raw = Bun.gunzipSync(Buffer.from(reply.result.data, "base64"));
+  expect(Buffer.from(raw).toString("utf8")).toBe(expected);
+  srv.stop();
+});
+
+test("rpc term.history 的高重复 scrollback 被 gzip 压进单帧（不再需要分片）", async () => {
+  // 与上一条互为对照：真实终端输出是 SGR 高度重复的那一类，压缩率极好。
+  // 179KB → 12KB 正是这次提速的全部意义，用例把它钉住。
+  const terminal = new TerminalService({ tmux: bigScrollbackTmux(2000) });
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder, terminal });
+  const frames = await rpcFramesAsync(srv, "h2", "term.history", { session: "work" });
+  expect(frames).toHaveLength(1);
+  const reply = decodeServer(Buffer.from(frames[0]).toString("utf8"));
+  if (reply.type !== "response" || !reply.ok) throw new Error("expected ok response");
+  const r = reply.result as { data: string; enc?: string };
+  expect(r.enc).toBe("gzip");
+  const raw = Bun.gunzipSync(Buffer.from(r.data, "base64"));
+  expect(Buffer.from(raw).toString("utf8")).toBe(("l".repeat(100) + "\n").repeat(2000));
   srv.stop();
 });
 

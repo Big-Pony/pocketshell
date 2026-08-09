@@ -213,8 +213,14 @@ export class TerminalService {
   // It is echoed back unchanged, including on failure: dropping it would make
   // the frontend fall back to attach(0) and replay the whole ring buffer,
   // which is exactly the double-render this change removes.
-  async history(name: string, seq: number): Promise<TermHistoryResult> {
-    const { data } = await this.capture(name, { colors: true });
+  //
+  // `lines` = 只取最近多少行（缺省 = 整份 scrollback）。手机屏一次只显示二十几
+  // 行，而整份 2000 行带 SGR 是 134KB、base64 后 179KB，在真机链路上要七秒——
+  // 首屏拉全量是纯粹的浪费。capture() 的 back 参数本来就支持这件事（复制模式
+  // 在用）。压缩与否不在这里决定：那是 rpc 载荷层的事（见 rpc-router.ts 的
+  // compressHistory），这里只管产出原始快照。
+  async history(name: string, seq: number, lines?: number): Promise<TermHistoryResult> {
+    const { data } = await this.capture(name, { colors: true, back: lines });
     return { data, seq };
   }
 
