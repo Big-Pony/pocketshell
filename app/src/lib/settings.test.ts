@@ -1,6 +1,6 @@
 // app/src/lib/settings.test.ts
 import { test, expect } from "vitest";
-import { DEFAULT_SETTINGS, THEMES, loadSettings, saveSettings, detectLanguage, type Settings } from "./settings";
+import { DEFAULT_SETTINGS, THEMES, HISTORY_LINE_CHOICES, loadSettings, saveSettings, detectLanguage, type Settings } from "./settings";
 
 function memStore(): Storage {
   const data = new Map<string, string>();
@@ -21,8 +21,8 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", kbLayout: "layered", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", kbLayout: "layered", fontSize: 14, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" });
+  saveSettings({ layout: "win", kbLayout: "layered", fontSize: 14, historyLines: 500, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", kbLayout: "layered", fontSize: 14, historyLines: 500, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
@@ -286,4 +286,35 @@ test("旧版本存档没有 kbLayout 字段时也回落 classic", () => {
   const store = memStore();
   store.setItem("ps.settings", JSON.stringify({ theme: "nord", fontSize: 12 }));
   expect(loadSettings(store).kbLayout).toBe("classic");
+});
+
+// ---- historyLines：首屏重灌拉多少行 ----
+// 计划示意里写的是 `loadSettings('{"historyLines":...}')`，但本文件里 loadSettings
+// 的真实签名是 `loadSettings(store: Storage)`，故照同文件既有用例走 memStore()。
+
+test("historyLines 默认 1000", () => {
+  expect(DEFAULT_SETTINGS.historyLines).toBe(1000);
+});
+
+test("historyLines 非法值回落默认 —— localStorage 可能被手改", () => {
+  const load = (v: unknown) => {
+    const store = memStore();
+    store.setItem("ps.settings", JSON.stringify({ historyLines: v }));
+    return loadSettings(store).historyLines;
+  };
+  expect(load("abc")).toBe(1000);
+  expect(load(-5)).toBe(1000);
+  expect(load(999999)).toBe(1000);
+  expect(load(null)).toBe(1000);
+  // 档位之外的合法数字同样回落：面板只给四档，中间值只可能来自手改。
+  expect(load(750)).toBe(1000);
+});
+
+test("historyLines 合法档位原样保留", () => {
+  for (const n of HISTORY_LINE_CHOICES) {
+    const store = memStore();
+    store.setItem("ps.settings", JSON.stringify({ historyLines: n }));
+    expect(loadSettings(store).historyLines).toBe(n);
+  }
+  expect(HISTORY_LINE_CHOICES).toEqual([200, 500, 1000, 2000]);
 });

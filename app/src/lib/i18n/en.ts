@@ -194,6 +194,10 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       label: "Terminal font size",
       desc: "Pinch-to-zoom also works on the terminal",
     },
+    historyLines: {
+      label: "History lines",
+      desc: "How much scrollback to load when switching sessions. Fewer is faster",
+    },
     layout: {
       label: "Keyboard layout",
       desc: "The full-keyboard tab uses a laptop layout; default Mac",

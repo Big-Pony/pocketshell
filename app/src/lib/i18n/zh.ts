@@ -192,6 +192,10 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       label: "终端字号",
       desc: "也支持在终端区双指缩放",
     },
+    historyLines: {
+      label: "历史加载行数",
+      desc: "切换会话时加载多少行历史。越少越快",
+    },
     layout: {
       label: "键盘布局",
       desc: "全键盘 tab 采用笔记本布局，默认 Mac",

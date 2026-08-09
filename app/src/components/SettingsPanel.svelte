@@ -14,7 +14,7 @@
   import { listThemes, customThemeInfo, applyThemeAsync, type ThemeEntry } from "../lib/theme";
   import { customThemeName } from "../lib/theme-css";
   import { FONTS, applyFont } from "../lib/font";
-  import { KB_LAYOUTS } from "../lib/settings";
+  import { KB_LAYOUTS, HISTORY_LINE_CHOICES } from "../lib/settings";
   import { resetTutorial } from "../lib/term/kb-tutorial";
 
   let { conn, settings, onChange, currentVersion, onCheckUpdate }: {
@@ -484,6 +484,20 @@
     <input type="range" min="10" max="18" step="0.5" value={settings.fontSize}
       oninput={(e) => update("fontSize", Number((e.target as HTMLInputElement).value))} />
     <span class="val">{settings.fontSize}</span>
+  </div>
+
+  <!-- History lines：分段按钮而不是自由输入，避免用户填个 50000 把自己卡死 -->
+  <div class="set">
+    <div class="grow">
+      <div class="label">{$t('settings.historyLines.label')}</div>
+      <div class="desc">{$t('settings.historyLines.desc')}</div>
+    </div>
+    <div class="seg">
+      {#each HISTORY_LINE_CHOICES as n}
+        <button class:on={settings.historyLines === n}
+          onclick={() => update("historyLines", n)}>{n}</button>
+      {/each}
+    </div>
   </div>
 
   <!-- Keyboard layout -->

@@ -43,6 +43,12 @@ export interface Settings {
    */
   kbLayout: KbLayoutId;
   fontSize: number;
+  /**
+   * 首屏/重灌历史拉多少行。手机屏一次只显示二十几行，而整份 2000 行 scrollback
+   * 带 SGR 是 134KB、base64 后 179KB，实测真机上要七秒（服务端只占其中 0.3%，
+   * 全花在链路上传）。往上翻超出范围就是到顶，不做分页续拉。
+   */
+  historyLines: number;
   vibrate: VibrateLevel;
   theme: ThemePref;
   language: Language;
@@ -65,12 +71,28 @@ export const DEFAULT_SETTINGS: Settings = {
   layout: "mac",
   kbLayout: "classic",
   fontSize: 10,
+  historyLines: 1000,
   vibrate: "medium",
   theme: "cream-dark",
   language: "zh",
   groupTabsByType: false,     // 默认关闭，维持现状
   fontFamily: "maple-mono",
 };
+
+/**
+ * 历史加载行数的档位。给固定档位而不是自由输入 —— 避免用户填个 50000 把自己
+ * 卡死（那正是这次要修的病）。设置面板与下面的校验共用这一份，避免两处漂移。
+ *
+ * 上限 2000：与 tmux history-limit（实测环境全局默认 2000）和 xterm 的
+ * scrollback: 2000 对齐，拉更多也没有内容。
+ */
+export const HISTORY_LINE_CHOICES = [200, 500, 1000, 2000] as const;
+
+function coerceHistoryLines(v: unknown): number {
+  return (HISTORY_LINE_CHOICES as readonly number[]).includes(v as number)
+    ? (v as number)
+    : DEFAULT_SETTINGS.historyLines;
+}
 
 /** 菜单序：内置 7 套在前，"system" 收尾。自定义主题由 CSS 清单动态追加。 */
 export const THEMES: ThemePref[] = [
@@ -158,6 +180,7 @@ export function loadSettings(store: Storage = localStorage): Settings {
     const s: Settings = {
       layout: parsed.layout === "win" ? "win" : "mac",
       fontSize: typeof parsed.fontSize === "number" ? parsed.fontSize : DEFAULT_SETTINGS.fontSize,
+      historyLines: coerceHistoryLines(parsed.historyLines),
       vibrate: coerceVibrate(parsed.vibrate),
       theme: coerceTheme(parsed.theme),
       language: LANGS.includes(parsed.language) ? parsed.language : detectLanguage(),
