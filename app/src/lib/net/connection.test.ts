@@ -1229,18 +1229,36 @@ test("rpc requests advertise acceptEnc gzip", () => {
   expect(req.acceptEnc).toEqual(["gzip"]);
 });
 
-test("GUARD: an rpcZip arriving after disconnect does not touch the new socket", async () => {
-  // 异步回喂绕过了 onmessage 的 stale-socket 守卫（connection.ts:372 的
+test("GUARD: an rpcZip decoded after a reconnect does not re-enter dispatch on the stale socket", async () => {
+  // 异步回喂绕过了 onmessage 的 stale-socket 守卫（connection.ts 里
   // `if (socket !== this.ws) return`）。没有等价检查的话，重连后旧 promise
-  // 回喂会往已关闭的 socket 发帧。
+  // 落地会把过期帧再灌回 dispatch 一次。
+  //
+  // 早期版本的这条测试只 close() 不真正重连，`this.ws` 从头到尾没变过，
+  // `socket !== this.ws` 恒为 false——删掉守卫代码测试照样绿（评审用
+  // mutation 测试抓出的假绿）。这里必须真正走完退避让 this.ws 换成新
+  // socket 对象；断言也不能挑 pending/sent——断线已经把 pending 清空，
+  // response 帧砸在空 pending 上本来就是 no-op，看 pending/sent 测不出
+  // 差异。dispatch 的调用次数才是守卫是否生效的直接可观察量。
   const h = harness();
   const p = h.conn.rpc("fs.read", { path: "/x" });
   const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
-  h.deliver(zipFrame(id, { content: "x".repeat(9000) }));
-  h.sock.onclose();                       // 解压还在 await 中就断线
-  await expect(p).rejects.toBeTruthy();   // rejectAllPending 已经结算了它
+
+  const dispatchSpy = vi.spyOn(h.conn as any, "dispatch");
+
+  h.deliver(zipFrame(id, { content: "x".repeat(9000) })); // 外层 rpcZip 帧本身触发一次 dispatch；解压异步进行中
+  const callsAfterDelivery = dispatchSpy.mock.calls.length;
+
+  h.sock.onclose();                       // 解压还在 await 中就断线，pending 被 rejectAllPending 结算
+  await expect(p).rejects.toBeTruthy();
+
+  h.sched.advance(10_000);                // 走完重连退避 → this.ws 换成新 socket 实例
+
   await new Promise((r) => setTimeout(r, 5)); // 让悬空的解压 promise 落地
-  // 没有抛异常、没有往新 socket 发东西即为通过
+
+  // 有守卫：解压成功后发现 socket !== this.ws，直接 return，不会再调用 dispatch。
+  expect(dispatchSpy.mock.calls.length).toBe(callsAfterDelivery);
+  dispatchSpy.mockRestore();
 });
 
 test("GUARD: a compressed rpcChunk sequence reassembles and decompresses", async () => {
@@ -1253,4 +1271,35 @@ test("GUARD: a compressed rpcChunk sequence reassembles and decompresses", async
   h.deliver({ type: "rpcChunk", id, index: 0, total: 2, data: gz.subarray(0, half).toString("base64"), enc: "gzip" } as ServerMsg);
   h.deliver({ type: "rpcChunk", id, index: 1, total: 2, data: gz.subarray(half).toString("base64"), enc: "gzip" } as ServerMsg);
   await expect(p).resolves.toEqual({ entries: "e".repeat(50000) });
+});
+
+test("GUARD: a compressed rpcChunk decoded after a reconnect does not re-enter dispatch on the stale socket", async () => {
+  // 对称覆盖 handleRpcChunk 里 enc==="gzip" 分支的同款 stale-socket 守卫。
+  // 断言方式与上面的 rpcZip 版一致：数 dispatch 调用次数，而不是看
+  // pending/sent（断线已把 pending 清空，第二次 dispatch 即便发生也不会
+  // resolve/reject 任何东西，光看 promise 状态测不出差异）。
+  const h = harness();
+  const p = h.conn.rpc("git.log", { cwd: "/" });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  const payload = encode({ type: "response", id, ok: true, result: { entries: "e".repeat(50000) } } as ServerMsg);
+  const gz = gzipSync(Buffer.from(payload, "utf8"));
+  const half = Math.ceil(gz.length / 2);
+
+  const dispatchSpy = vi.spyOn(h.conn as any, "dispatch");
+
+  h.deliver({ type: "rpcChunk", id, index: 0, total: 2, data: gz.subarray(0, half).toString("base64"), enc: "gzip" } as ServerMsg);
+  h.deliver({ type: "rpcChunk", id, index: 1, total: 2, data: gz.subarray(half).toString("base64"), enc: "gzip" } as ServerMsg);
+  // 分片齐全触发同步 feed + 异步 gunzip；此刻 dispatch 只因这两次外层
+  // rpcChunk 帧的投递被调用过（onmessage → dispatch(raw) → handleRpcChunk）。
+  const callsAfterDelivery = dispatchSpy.mock.calls.length;
+
+  h.sock.onclose();                       // 解压还在 await 中就断线
+  await expect(p).rejects.toBeTruthy();
+
+  h.sched.advance(10_000);                // 走完重连退避 → this.ws 换成新 socket 实例
+
+  await new Promise((r) => setTimeout(r, 5)); // 让悬空的解压 promise 落地
+
+  expect(dispatchSpy.mock.calls.length).toBe(callsAfterDelivery);
+  dispatchSpy.mockRestore();
 });

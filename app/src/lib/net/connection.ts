@@ -548,13 +548,13 @@ export class Connection {
       },
       () => {
         if (socket !== this.ws) return;
+        // 与 handleRpcChunk 的既有 error 分支同序：先取 p，再无条件 drop
+        // chunks（哪怕 p 已不在也要做），最后才判断要不要走 pending 的清理。
         const p = this.pending.get(msg.id);
+        this.chunks.drop(msg.id);
         if (!p) return; // 已超时/已断线结算过，什么都不做
-        // 与 handleRpcChunk 的 error 分支逐行同构 —— 少任何一步都是
-        // inflightBytes 泄漏（后续 rpc 拿到虚高死线，把真故障掩盖成"偶发变慢"）。
         this.pending.delete(msg.id);
         this.releaseRpc(p);
-        this.chunks.drop(msg.id);
         this.sched.clearTimeout(p.timer);
         const e = new Error("rpc_zip_invalid") as Error & { code?: string };
         e.code = "rpc_zip_invalid";
@@ -599,11 +599,12 @@ export class Connection {
         },
         () => {
           if (socket !== this.ws) return;
+          // 同上：先取 p，无条件 drop chunks，再判断要不要清理 pending。
           const p = this.pending.get(id);
+          this.chunks.drop(id);
           if (!p) return;
           this.pending.delete(id);
           this.releaseRpc(p);
-          this.chunks.drop(id);
           this.sched.clearTimeout(p.timer);
           const e = new Error("rpc_zip_invalid") as Error & { code?: string };
           e.code = "rpc_zip_invalid";
