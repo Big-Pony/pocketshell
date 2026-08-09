@@ -5,10 +5,13 @@
 // 压缩只能在加密之前的 rpc 载荷层做。
 //
 // 为什么统一压信封而不是逐方法压字段：sendRpcResult 是方法无关的唯一出口，
-// 一处改动覆盖全部方法。代价是压 base64 文本比压原始字节差 6~9%（base64 把
-// 3 字节铺成 4 字符、破坏字节对齐），所以 term.history 现有的 compressHistory
-// 保留不拆——那条路径压的是原始字节，效率更高。
-import { encodedBytes, RPC_FIT_SAFE_BYTES } from "./rpc-fit";
+// 一处改动覆盖全部方法。二阶段（二进制承载）之后，外层压缩对已被
+// compressHistory 压过的载荷也真正生效——实测真实语料 inner-only 206245 →
+// inner+outer 155294（省 24.7%），双层叠加优于任一单层。compressHistory 保留
+// 的理由是改动最小（拆它要动两侧解码路径），而非收益：outer-only 158217，
+// 只比双层大 1.9%。
+import { RPC_FIT_SAFE_BYTES } from "./rpc-fit";
+import { BIN_FRAME_PREFIX_BYTES } from "./binframe";
 
 /** 低于这个字节数不压：gzip 头部开销 + 客户端一次异步跳转不值当。 */
 export const RPC_COMPRESS_MIN_BYTES = 8192;
@@ -22,7 +25,7 @@ export const RPC_COMPRESS_SKIP_METHODS: ReadonlySet<string> = new Set(["fs.downl
 
 export type CompressOutcome =
   | { kind: "plain" }
-  | { kind: "zip"; data: string };
+  | { kind: "zip"; data: Uint8Array };
 
 // 量信封时 id 还不知道，用一个够长的占位——宁可高估几十字节，也不要低估
 // 到让判据放行一个其实更大的帧。
@@ -50,11 +53,15 @@ export function compressRpcPayload(
   if (rawBytes < RPC_COMPRESS_MIN_BYTES) return { kind: "plain" };
 
   try {
-    const data = Buffer.from(Bun.gzipSync(Buffer.from(payload, "utf8"))).toString("base64");
-    // 判据比的是【最终上线字节】——base64 的 4/3 回膨胀必须算进去。
-    // 若改成比 gzip 的裸字节，对任何已压内容（term.history）都会判定"该压"，
-    // 白白压两遍：实测那种情况裸字节 -24.5%，而真正上线的字节是 +0.6%。
-    if (encodedBytes({ type: "rpcZip", id: ID_PLACEHOLDER, data }) >= rawBytes) {
+    const data = Bun.gzipSync(Buffer.from(payload, "utf8"));
+    // 判据比的是【最终上线字节】。二进制承载下 = 帧前缀 + JSON 头 + gzip 字节，
+    // **没有 base64 的 4/3 膨胀**。
+    //
+    // 一阶段这里用的是 encodedBytes({type:"rpcZip", id, data: base64})，算出来
+    // 比真实上线字节大 33%：落在 (binWire < raw ≤ b64Wire) 这个带里的载荷会被
+    // 错误拒绝，而那个带恰好就是"已压缩内容"（term.history 实测 raw=182156、
+    // b64 算式 183075 判不压、真实上线 137323 该压，白丢 24.6%）。
+    if (binFrameBytes(ID_PLACEHOLDER, data) >= rawBytes) {
       return { kind: "plain" };
     }
     return { kind: "zip", data };
@@ -64,7 +71,21 @@ export function compressRpcPayload(
   }
 }
 
-/** 压缩后的 data 是否还装得下单帧（否则要走 rpcChunk 分片）。 */
-export function zipFitsOneFrame(id: string, data: string): boolean {
-  return encodedBytes({ type: "rpcZip", id, data }) <= RPC_FIT_SAFE_BYTES;
+/** 一个 rpcZip 二进制帧的最终上线明文字节数。 */
+function binFrameBytes(id: string, data: Uint8Array): number {
+  return (
+    BIN_FRAME_PREFIX_BYTES +
+    Buffer.byteLength(JSON.stringify({ type: "rpcZip", id }), "utf8") +
+    data.length
+  );
+}
+
+/**
+ * 压缩后的 data 是否还装得下单帧（否则要走 rpcChunk 分片）。
+ *
+ * 同样改用二进制算式：base64 算式会把 45~61KB 的 gzip 结果全判成"装不下"
+ * （实测 gz=50000 在 b64 算式下算出 66704 > 61440），白白多走一轮分片往返。
+ */
+export function zipFitsOneFrame(id: string, data: Uint8Array): boolean {
+  return binFrameBytes(id, data) <= RPC_FIT_SAFE_BYTES;
 }

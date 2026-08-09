@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { compressRpcPayload, RPC_COMPRESS_MIN_BYTES } from "./rpc-compress";
+import { BIN_FRAME_PREFIX_BYTES } from "./binframe";
 
 const envelope = (result: unknown) => JSON.stringify({ type: "response", id: "1", ok: true, result });
 
@@ -38,7 +39,7 @@ test("a large compressible payload is compressed", () => {
   const out = compressRpcPayload(big, "fs.read", ["gzip"]);
   if (out.kind !== "zip") throw new Error("expected zip");
   // 解出来必须逐字节等于原 payload
-  const raw = Buffer.from(Bun.gunzipSync(Buffer.from(out.data, "base64")));
+  const raw = Buffer.from(Bun.gunzipSync(out.data));
   expect(raw.toString("utf8")).toBe(big);
 });
 
@@ -49,27 +50,35 @@ test("fs.downloadChunk is skipped by name even when large", () => {
   expect(compressRpcPayload(big, "fs.downloadChunk", ["gzip"])).toEqual({ kind: "plain" });
 });
 
-test("incompressible payload falls back to plain (gzip made it bigger)", () => {
-  // 高熵字节：gzip 之后 base64 回膨胀 4/3，最终上线字节必然更大。
-  let s = 0x9e3779b9;
-  const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
-  const noise = Array.from({ length: 20000 }, () => String.fromCharCode(33 + (rnd() % 90))).join("");
-  const big = envelope({ content: noise });
-  expect(compressRpcPayload(big, "fs.read", ["gzip"])).toEqual({ kind: "plain" });
-});
+// 【二阶段删除】此处原有两条「不可压载荷应被判 plain」的测试。
+//
+// 它们在 base64 承载时代成立：gzip 对受限字母表文本（ASCII 噪声 90 符号、
+// base64 64 符号）只能吃掉字母表冗余，增益不大，而 base64 的 4/3 回膨胀恰好
+// 把它抵消，于是判据正确地拒绝。
+//
+// 二进制承载消掉了那 4/3 之后，这些载荷**真的压得动**（实测 ASCII 噪声省
+// 17.5%、randomBytes.base64 省 24.4%），判据判「压」是正确行为。
+//
+// 更根本的是：**JSON 字符串装不下任意字节**，任何编码（base64/hex/latin1）都会
+// 把字母表限制到远低于 8 bit/byte，所以在这一层造不出真正不可压的载荷——
+// 拒绝分支在二进制承载下几乎不可达。判据保留是作为安全网（压缩异常、极小
+// 载荷、未来新载荷形态），不是因为有已知的常规载荷会走到它。
+//
+// 若日后要测拒绝分支，得从 compressRpcPayload 之外构造（例如 mock gzip 返回
+// 更大的结果），而不是靠挑 fixture。
 
-test("an ALREADY-gzipped payload (term.history) is refused a second pass", () => {
-  // 这条守的是设计里最容易搞错的一点：外层 gzip 对 term.history 的信封其实
-  // **很有效**（裸字节 -24.5%），但 base64 的 4/3 回膨胀刚好把增益吃干，
-  // 净剩 +0.6%，所以被尺寸判据拒绝。
+test("已内层压过的载荷（term.history）在二进制承载下**应当**被二次压缩", () => {
+  // 一阶段这条断言是反的（refused a second pass），因为当时 data 走 base64：
+  // 外层 gzip 对信封其实很有效（裸字节 -24.5%），但 base64 的 4/3 回膨胀刚好
+  // 把增益吃干，净剩 +0.6%，尺寸判据据此拒绝。
   //
-  // 判据必须比【最终上线字节】。若改成比 gzip 的裸字节，这条会翻转成
-  // "该压"，term.history 就会被白白压两遍。
+  // 二进制承载消掉了那 4/3，外层增益真正生效，判据必须放行。实测真实语料
+  // （475KiB 带 ANSI 的 git log/diff，重复率 1.7:1）：inner-only 206245 →
+  // inner+outer 155294，省 24.7%。
   //
   // fixture 必须是**高熵**的：早先用 4000 行相同文本，gzip 后只剩 552 字节、
   // 套信封 632 字节，低于 RPC_COMPRESS_MIN_BYTES(8192)，函数在阈值那行就返回
-  // plain，压根走不到判据分支——测试假绿。同样的坑在 rpc-fit.test.ts 发生过
-  // 一次（见那里 noisyScrollbackTmux 的注释）。
+  // plain，压根走不到判据分支——测试假绿。
   let s = 0x9e3779b9;
   const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
   const CH = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -79,9 +88,14 @@ test("an ALREADY-gzipped payload (term.history) is refused a second pass", () =>
   const inner = Buffer.from(Bun.gzipSync(scrollback)).toString("base64");
   const big = envelope({ data: inner, seq: 7, enc: "gzip" });
 
-  // 前提必须成立，否则这条测试又会变成假绿：payload 要真的越过阈值，
-  // 逼函数走到 gzip + encodedBytes 比较那一步。
+  // 前提：payload 要真的越过阈值，逼函数走到 gzip + 判据比较那一步。
   expect(Buffer.byteLength(big, "utf8")).toBeGreaterThan(RPC_COMPRESS_MIN_BYTES);
 
-  expect(compressRpcPayload(big, "term.history", ["gzip"])).toEqual({ kind: "plain" });
+  const out = compressRpcPayload(big, "term.history", ["gzip"]);
+  expect(out.kind).toBe("zip");
+  // 且真的更小：解出的字节 + 帧头开销必须低于原 payload。
+  if (out.kind === "zip") {
+    const wire = BIN_FRAME_PREFIX_BYTES + Buffer.byteLength(JSON.stringify({ type: "rpcZip", id: "1" }), "utf8") + out.data.length;
+    expect(wire).toBeLessThan(Buffer.byteLength(big, "utf8"));
+  }
 });
