@@ -130,3 +130,16 @@ test("mirrors resync server message with from seq", () => {
   if (msg.type !== "resync") throw new Error("wrong type");
   expect(msg.from).toBe(7);
 });
+
+test("rpcZip round-trips through decodeServer", () => {
+  const raw = encode({ type: "rpcZip", id: "9", data: "H4sIAA==" });
+  const msg = decodeServer(raw);
+  expect(msg).toEqual({ type: "rpcZip", id: "9", data: "H4sIAA==" });
+});
+
+test("rpcChunk carries an optional enc marker", () => {
+  const raw = encode({ type: "rpcChunk", id: "9", index: 0, total: 2, data: "QQ==", enc: "gzip" });
+  const msg = decodeServer(raw);
+  if (msg.type !== "rpcChunk") throw new Error("wrong type");
+  expect(msg.enc).toBe("gzip");
+});

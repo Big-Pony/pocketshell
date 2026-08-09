@@ -67,7 +67,12 @@ export type ClientMsg =
   | { type: "revokeDevice"; pubKey: string }
   // rpc methods: fs.* / git.* (log/branches/status/review) / term.* (history/capture/paneInfo/redraw) /
   // terminal.pwd / preview.mint / update.check / update.apply / hints.list
-  | { type: "rpc"; id: string; method: string; params?: unknown };
+  //
+  // acceptEnc: 客户端声明它认得哪些响应编码（目前只有 "gzip"）。**缺省 = 一律不压**，
+  // 这是向后兼容的全部机制：老客户端不发这个字段，新 agent 就永远给它发未压缩的
+  // response 帧。放顶层而非塞进 params 是安全的——decodeClient 是裸 JSON.parse
+  // 无字段校验，handleClient 的 case "rpc" 只解构它认识的字段。
+  | { type: "rpc"; id: string; method: string; params?: unknown; acceptEnc?: string[] };
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }
@@ -92,7 +97,19 @@ export type ServerMsg =
   // response from the concatenated bytes. Purely additive — an old client would
   // reject the unknown type, but app and agent ship as one versioned bundle
   // (the agent serves the app), so there is no version-skew surface.
-  | { type: "rpcChunk"; id: string; index: number; total: number; data: string }
+  //
+  // enc: 分片重组后的字节是否经过 gzip。缺省 = 未压缩（原 WP-6 行为）。
+  | { type: "rpcChunk"; id: string; index: number; total: number; data: string; enc?: "gzip" }
+  // rpcZip: 一个压缩后仍装得下单帧的 rpc 成功响应。data 是 base64(gzip(完整
+  // response 帧的 UTF-8 JSON))，客户端解压后得到的就是原样的 response 帧文本。
+  //
+  // 为什么是新帧类型而不是给 response 加字段：response 的形状一个字节不动，
+  // 老客户端的解析路径零风险；且客户端只有这一种帧需要走异步解压，异步分支
+  // 因此被物理隔离，同步快路径不受影响。
+  //
+  // 压缩必须在 Noise 加密**之前**做——WS 帧里装的是密文，密文不可压缩，
+  // Bun 的 perMessageDeflate 对本项目完全无效。
+  | { type: "rpcZip"; id: string; data: string }
   // OTA progress broadcast — one per phase transition during update.apply.
   // Purely additive; old clients ignore the unknown type. `pct` present only
   // during downloading when content-length is known.

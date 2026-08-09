@@ -53,3 +53,9 @@ test("mirrors rpcChunk server message (WP-6)", () => {
   expect(msg.total).toBe(5);
   expect(msg.data).toBe("QQ==");
 });
+
+test("mirrors rpcZip server message", () => {
+  const msg = decodeServer(encode({ type: "rpcZip", id: "9", data: "H4sIAA==" }));
+  if (msg.type !== "rpcZip") throw new Error("wrong type");
+  expect(msg.data).toBe("H4sIAA==");
+});

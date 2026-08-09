@@ -62,7 +62,8 @@ export type ClientMsg =
   | { type: "clearHints" }
   | { type: "revokeDevice"; pubKey: string }
   // rpc methods mirror agent/src/protocol.ts: fs.* / git.* (log/branches/status/review) / term.* / terminal.pwd / preview.mint / update.check / update.apply / hints.list
-  | { type: "rpc"; id: string; method: string; params?: unknown };
+  // acceptEnc: 客户端声明它认得哪些响应编码（目前只有 "gzip"）。缺省 = 一律不压。
+  | { type: "rpc"; id: string; method: string; params?: unknown; acceptEnc?: string[] };
 
 export type ServerMsg =
   | { type: "output"; sessionId: string; seq: number; data: string }
@@ -81,7 +82,11 @@ export type ServerMsg =
   | { type: "hintsChanged" }
   | { type: "response"; id: string; ok: true; result: unknown }
   | { type: "response"; id: string; ok: false; error: { code: string; message: string } }
-  | { type: "rpcChunk"; id: string; index: number; total: number; data: string }
+  // enc: 分片重组后的字节是否经过 gzip。缺省 = 未压缩（原 WP-6 行为）。
+  | { type: "rpcChunk"; id: string; index: number; total: number; data: string; enc?: "gzip" }
+  // rpcZip: 一个压缩后仍装得下单帧的 rpc 成功响应。data 是 base64(gzip(完整
+  // response 帧的 UTF-8 JSON))，客户端解压后得到的就是原样的 response 帧文本。
+  | { type: "rpcZip"; id: string; data: string }
   // OTA progress broadcast — one per phase transition during update.apply.
   // Purely additive; old clients ignore the unknown type. `pct` present only
   // during downloading when content-length is known.
