@@ -12,7 +12,7 @@ import { OutputBatcher } from "./output-batcher";
 import { sweepTmp } from "./fs-service";
 import { RPC_FIT_SAFE_BYTES, RPC_CHUNK_PAYLOAD_BYTES, chunkRpcPayload } from "./rpc-fit";
 import { compressRpcPayload, zipFitsOneFrame } from "./rpc-compress";
-import { packBinFrame, BIN_FRAME_PREFIX_BYTES } from "./binframe";
+import { packBinFrame, BIN_FRAME_PREFIX_BYTES, BIN_FRAME_MAGIC, unpackBinFrame } from "./binframe";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
 import { sessionListsEqual } from "./sessions-diff";
 import { isSaneSize } from "./sane-size";
@@ -565,7 +565,7 @@ export function startServer(deps: Deps = {}) {
     );
   };
 
-  const handleClient = async (conn: Conn, raw: string) => {
+  const handleClient = async (conn: Conn, raw: string, blob?: Uint8Array) => {
     let msg;
     try { msg = decodeClient(raw); }
     catch { sendSecure(conn, { type: "error", code: "bad_json", message: "malformed message" }); return; }
@@ -742,6 +742,11 @@ export function startServer(deps: Deps = {}) {
         break;
       case "rpc": {
         const { id, method, params, acceptEnc } = msg;
+        // 二进制帧带来的 blob 注入 params，让 parse.* 能像读普通字段一样读它。
+        // 用一个不可能与线上字段冲突的键，避免恶意的 JSON rpc 伪造它。
+        const p2 = blob === undefined
+          ? params
+          : { ...(params as object), __blob: blob };
         // Table-driven dispatch lives in rpc-router.ts. This stays the only
         // place that knows how to put bytes on this conn's channel: every
         // handler answers through sendResult/sendError below — including the
@@ -758,7 +763,7 @@ export function startServer(deps: Deps = {}) {
             sendError: (code, message) => sendSecure(conn, { type: "response", id, ok: false, error: { code, message } }),
           },
           method,
-          params,
+          p2,
         );
       }
       default: sendSecure(conn, { type: "error", code: "unknown_type", message: "unknown message type" }); break;
@@ -810,6 +815,25 @@ export function startServer(deps: Deps = {}) {
       return;
     }
     // r.status === "message"
+    //
+    // 明文有两种布局：JSON 帧（首字节 '{'）与二进制帧（首字节 0x00）。二进制帧
+    // 的判别必须在 toString("utf8") **之前**——那个转换会把 gzip/文件字节里的
+    // 非法序列替换成 U+FFFD，不可逆。
+    const plain = new Uint8Array(r.plaintext);
+    if (plain.length > 0 && plain[0] === BIN_FRAME_MAGIC) {
+      // 安全边界：判 !ready 而不是 pending。写盘发生在 dispatchRpc 里、早于
+      // sendResult，而 sendSecure 的 !ready 只是**出口**守卫，挡不住副作用。
+      // 用 !ready 对 pending 与任何未来的中间态都成立，不需要重新论证。
+      if (!conn.ready) { ws.close(); return; }
+      const bf = unpackBinFrame(plain);
+      // 坏帧一律关连接，与 decodeClient 失败的处置一致（不回错误帧，不给
+      // 探测者反馈）。
+      if (!bf) { ws.close(); return; }
+      void handleClient(conn, JSON.stringify(bf.header), bf.blob).catch((e) => {
+        try { sendSecure(conn, { type: "error", code: "internal", message: String(e) }); } catch {}
+      });
+      return;
+    }
     const text = Buffer.from(r.plaintext).toString("utf8");
     if (conn.pending) {
       let msg: ReturnType<typeof decodeClient>;

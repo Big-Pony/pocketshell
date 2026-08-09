@@ -128,6 +128,23 @@ export const optNum = (p: RpcParams, k: string): number | undefined => (p[k] == 
 export const flag = (p: RpcParams, k: string): boolean => !!p[k];
 export const strList = (p: RpcParams, k: string): string[] => (p[k] ?? []) as string[];
 
+/**
+ * 取二进制帧注入的 blob。缺席时抛 —— 这两个方法**必须**走二进制帧。
+ *
+ * 有意选择「抛」而不是回落到空字节：一个 JSON rpc 点名 fs.uploadChunk 却没带
+ * blob，只可能是伪造或客户端 bug，静默写入 0 字节会悄悄损坏用户文件。
+ * 抛出去会经 dispatchRpc 的 catch 变成一条明确的 rpc_error。
+ *
+ * （对照一阶段的行为：str(p,"dataB64") 在字段缺失时得到字符串 "undefined"，
+ * Buffer.from("undefined","base64") 不抛异常、静默产出 6 个垃圾字节追加进
+ * 用户文件——那才是真正危险的默认。）
+ */
+function blobOf(p: RpcParams): Uint8Array {
+  const b = (p as Record<string, unknown>).__blob;
+  if (!(b instanceof Uint8Array)) throw new Error("this method requires a binary frame");
+  return b;
+}
+
 /** Per-method parsers — pure, exported, unit-testable without a server. */
 export const parse = {
   path: (p: RpcParams) => ({ path: str(p, "path") }),
@@ -139,12 +156,12 @@ export const parse = {
   fsResolveName: (p: RpcParams) => ({ dir: str(p, "dir"), name: str(p, "name") }),
   fsUploadChunk: (p: RpcParams) => ({
     uploadId: str(p, "uploadId"),
-    dataB64: str(p, "dataB64"),
+    bytes: blobOf(p),
     opts: { first: flag(p, "first"), last: flag(p, "last"), destPath: optStr(p, "destPath") },
   }),
   fsWrite: (p: RpcParams) => ({
     writeId: str(p, "writeId"),
-    dataB64: str(p, "dataB64"),
+    bytes: blobOf(p),
     opts: { first: flag(p, "first"), last: flag(p, "last"), path: optStr(p, "path"), expectMtime: optNum(p, "expectMtime") },
   }),
   fsDownloadChunk: (p: RpcParams) => ({ path: str(p, "path"), offset: num(p, "offset"), len: num(p, "len") }),
@@ -216,8 +233,8 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   "fs.op": (_ctx, p) => { const a = parse.fsOp(p); return ok(fsOp(a.op, a.path, a.to)); },
   "fs.uploadCheck": (_ctx, p) => { const a = parse.fsUploadCheck(p); return ok(fsUploadCheck(a.dir, a.names)); },
   "fs.resolveName": (_ctx, p) => { const a = parse.fsResolveName(p); return ok(fsResolveName(a.dir, a.name)); },
-  "fs.uploadChunk": (ctx, p) => { const a = parse.fsUploadChunk(p); return ok(fsUploadChunk(ctx.config.tmpDir, a.uploadId, a.dataB64, a.opts)); },
-  "fs.write": (ctx, p) => { const a = parse.fsWrite(p); return ok(fsWrite(ctx.config.tmpDir, a.writeId, a.dataB64, a.opts)); },
+  "fs.uploadChunk": (ctx, p) => { const a = parse.fsUploadChunk(p); return ok(fsUploadChunk(ctx.config.tmpDir, a.uploadId, a.bytes, a.opts)); },
+  "fs.write": (ctx, p) => { const a = parse.fsWrite(p); return ok(fsWrite(ctx.config.tmpDir, a.writeId, a.bytes, a.opts)); },
   "fs.downloadChunk": (_ctx, p) => {
     const a = parse.fsDownloadChunk(p);
     const r = fsDownloadChunk(a.path, a.offset, a.len);

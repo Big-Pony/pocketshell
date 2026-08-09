@@ -8,11 +8,12 @@ import { createPairing } from "./pairing";
 import { createRateLimiter } from "./rate-limit";
 import { createAudit } from "./audit";
 import { TerminalService } from "./terminal";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { loadConfig } from "./config";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hasTmux, uniqueSessionName, killSession, waitFor } from "./test-support";
+import { packBinFrame } from "./binframe";
 
 const M1 = new Uint8Array([1]);
 const M2 = new Uint8Array([2]);
@@ -340,6 +341,77 @@ test("rpc handler error is wrapped as ok:false", () => {
   const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
   if (reply.type === "response" && !reply.ok) expect(reply.id).toBe("3");
   srv.stop();
+});
+
+// 入站二进制帧（fs.uploadChunk/fs.write 走 packBinFrame 而非 base64 JSON）：
+// 三条测试对齐三个关注点——未 ready 的连接不能触发副作用、坏帧要关连接而不是
+// 探测者能收到的错误帧、ready 连接下 blob 要逐字节落盘。安全边界判的是
+// `!conn.ready` 而不是 `conn.pending`：写盘发生在 dispatchRpc 里、早于
+// sendResult，pending 分支本身也是 !ready 的一种，用 ready 对它和任何未来的
+// 中间态都成立，不需要分别枚举。
+test("未 ready 的连接发来二进制帧 → 直接关连接，且不产生任何副作用", () => {
+  const file = tmpRegFile();
+  const registry = loadDeviceRegistry(file);
+  const pairing = createPairing({ code: "GOODCODE", now: () => 0 });
+  const cfg: any = {
+    identity: { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) },
+    authorizedKeys: [], replayBufferBytes: 4096,
+    registry, pairing, pairingMode: true,
+    listen: { host: "127.0.0.1", port: 0 }, workspaceRoot: ".", tls: { enabled: false },
+    rateLimiter: noopLimiter(), audit: noopAudit(), keyDir: tmpKeyDir(),
+    tmpDir: mkdtempSync(join(tmpdir(), "ps-inb-tmp-")),
+  };
+  let closed = false;
+  const srv = startServer({ port: 0, config: cfg, channelFactory: stubResponder("PHONEPUB", true) });
+  const ws: any = { sent: [] as Uint8Array[], send(d: any) { this.sent.push(d); }, close() { closed = true; } };
+  srv.__test.open(ws as any, "1.2.3.4");
+  srv.__test.message(ws as any, M1); // handshake -> pending (not ready, not yet paired)
+  const dir = mkdtempSync(join(tmpdir(), "ps-inb-"));
+  const dest = join(dir, "up.bin");
+  const frame = packBinFrame(
+    { type: "rpc", id: "1", method: "fs.uploadChunk", params: { uploadId: "x", first: true, last: true, destPath: dest } },
+    new Uint8Array([1, 2, 3]),
+  );
+  srv.__test.message(ws as any, frame);
+  expect(closed).toBe(true);
+  expect(existsSync(dest)).toBe(false);
+  srv.stop();
+  rmSync(file, { force: true });
+});
+
+test("坏的二进制帧 → 关连接（与 decodeClient 失败一致，不回错误帧）", () => {
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  let closed = false;
+  const ws: any = { sent: [] as Uint8Array[], send(d: any) { this.sent.push(d); }, close() { closed = true; } };
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1); // handshake -> ready
+  ws.sent.length = 0;
+  // 首字节是魔数 0x00，但声明的头长 (0xff, 0xff = 65535) 超出这四字节帧本身。
+  srv.__test.message(ws as any, new Uint8Array([0x00, 0xff, 0xff, 0x7b]));
+  expect(closed).toBe(true);
+  expect(ws.sent.length).toBe(0);
+  srv.stop();
+});
+
+test("ready 连接的二进制 fs.uploadChunk 正常写盘，内容逐字节正确", () => {
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1); // handshake -> ready
+  ws.sent.length = 0;
+  const dir = mkdtempSync(join(tmpdir(), "ps-inb-"));
+  const dest = join(dir, "up.bin");
+  // 非法 UTF-8 序列（孤立代理对 + 越界字节）：如果实现路上有任何一步误经过
+  // toString("utf8") 再编码回字节，这些字节就会被替换成 U+FFFD 而逐字节比对失败。
+  const EVIL = new Uint8Array([0xed, 0xa0, 0x80, 0x80, 0xff, 0xfe]);
+  const frame = packBinFrame(
+    { type: "rpc", id: "1", method: "fs.uploadChunk", params: { uploadId: "u9", first: true, last: true, destPath: dest } },
+    EVIL,
+  );
+  srv.__test.message(ws as any, frame);
+  expect(Array.from(readFileSync(dest))).toEqual(Array.from(EVIL));
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 import { runGit as rg } from "./git-service";
