@@ -380,6 +380,67 @@ function bigCompressibleSrc(): string {
   ).join("\n");
 }
 
+// 撞崩溃带的高熵 fixture：gzip 后落在 (~46KB, ~61KB] 这段——用 binFrameBytes
+// 算「装得下单帧」，但 data 走 base64 之后其实装不下。3150 行、5 词元/行，
+// 实测 raw=213456B -> gz=55633B：
+//   binFrameBytes  ≈ 3 + 29(header) + 55633 = 55665  <= RPC_FIT_SAFE_BYTES(61440) → 判"装得下"
+//   b64WireBytes   ≈ 40(header) + ceil(55633/3)*4 = 74220 >  RPC_FIT_SAFE_BYTES(61440) → 实际装不下
+// 用 binFrameBytes 单算式判定、又走 JSON 回落发送，会把 74220B 的明文塞进一个
+// "response" 帧——超过 NOISE_MAX_PLAINTEXT_BYTES(65519)，SecureChannel.send 在
+// 真实实现里直接抛，acceptEnc 只含 "gzip" 的老客户端收到的是一条 rpc_error
+// 而不是分片。比 bigCompressibleSrc()（gz=115504B，两种算式都判"装不下"，测不
+// 出这条 bug）更贴近崩溃带，行数刻意调小到这里就是为了卡在这段窄带里。
+function crashBandCompressibleSrc(): string {
+  let s = 0x2545f491;
+  const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
+  const W = ["const", "function", "return", "export", "import", "value",
+             "result", "config", "handler", "session", "buffer", "index"];
+  return Array.from({ length: 3150 }, (_, i) =>
+    `  ${W[rnd() % 12]} ${W[rnd() % 12]}${i} = ${W[rnd() % 12]}(${rnd() % 9999}, ${W[rnd() % 12]}, ${W[rnd() % 12]}${rnd() % 99}, ${W[rnd() % 12]}(${rnd() % 9999}));`,
+  ).join("\n");
+}
+
+test("崩溃带回归：gz 落在 (binFrameBytes 判装得下, b64WireBytes 判装不下] 时，acceptEnc:['gzip'] 只（不含 'bin'）仍正确分片，单帧不超 Noise 明文上限", () => {
+  const src = crashBandCompressibleSrc();
+  const dir = mkdtempSync(join(tmpdir(), "ps-zipchunk-crashband-"));
+  const file = join(dir, "big.ts");
+  writeFileSync(file, src);
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({
+    type: "rpc", id: "cb", method: "fs.read", params: { path: file }, acceptEnc: ["gzip"],
+  } as any)));
+
+  // 核心断言：zipFitsOneFrame 判据分岔生效 -> 这段本会被二进制算式误判"装得
+  // 下"的载荷，按 JSON 回落算式正确判"装不下"，走分片而不是单帧。
+  // 把 zipFitsOneFrame 改回"不分岔、永远用 binFrameBytes"重跑这条测试会挂：
+  // ws.sent.length 会变成 1，且那一帧的明文字节数会超过 NOISE_MAX_PLAINTEXT_BYTES。
+  expect(ws.sent.length).toBeGreaterThan(1);
+  for (const f of ws.sent) {
+    expect(f.length).toBeLessThanOrEqual(NOISE_MAX_PLAINTEXT_BYTES); // 硬性红线
+    expect(f[0]).toBe(0x7b); // 没声明 "bin"，一个二进制帧都不该收到
+    expect(unpackBinFrame(f)).toBeNull();
+  }
+  const msgs = ws.sent.map((f) => decodeServer(Buffer.from(f).toString("utf8")) as any);
+  for (const m of msgs) {
+    expect(m.type).toBe("rpcChunk");
+    expect(m.enc).toBe("gzip");
+  }
+
+  const joined = Buffer.concat(msgs.map((m) => Buffer.from(m.data, "base64")));
+  const reply = JSON.parse(Buffer.from(Bun.gunzipSync(joined)).toString("utf8"));
+  expect(reply.ok).toBe(true);
+  expect(reply.id).toBe("cb");
+  expect(reply.result.content).toBe(src); // 逐字节还原
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("a compressed response too big for one frame, with acceptEnc:['gzip','bin'], is chunked as binary frames", () => {
   const src = bigCompressibleSrc();
   const dir = mkdtempSync(join(tmpdir(), "ps-zipchunk-bin-"));

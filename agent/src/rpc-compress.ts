@@ -81,11 +81,33 @@ function binFrameBytes(id: string, data: Uint8Array): number {
 }
 
 /**
+ * 一个 rpcZip JSON 回落帧（老客户端，acceptEnc 不含 "bin"）的最终上线明文
+ * 字节数——data 字段是 base64 文本，4/3 膨胀（向上取整到 4 字节边界，对应
+ * base64 的 padding 规则：ceil(n/3)*4）。
+ */
+function b64WireBytes(id: string, data: Uint8Array): number {
+  const b64Len = Math.ceil(data.length / 3) * 4;
+  return (
+    Buffer.byteLength(JSON.stringify({ type: "rpcZip", id, data: "" }), "utf8") + b64Len
+  );
+}
+
+/**
  * 压缩后的 data 是否还装得下单帧（否则要走 rpcChunk 分片）。
  *
- * 同样改用二进制算式：base64 算式会把 45~61KB 的 gzip 结果全判成"装不下"
- * （实测 gz=50000 在 b64 算式下算出 66704 > 61440），白白多走一轮分片往返。
+ * wantsBin 必须跟调用方实际要发送的编码一致——binFrameBytes 算的是二进制帧
+ * 的上线字节（没有 base64 膨胀），b64WireBytes 算的是 JSON 回落帧（data 走
+ * base64）的上线字节，两者相差 4/3。二者不能共用一套算式：早先统一用
+ * binFrameBytes 时，JSON 回落路径会把"二进制帧装得下"误判成"JSON 帧也装得
+ * 下"——gz≈49~61KB 这段，base64 膨胀后的 JSON 帧明文超过 NOISE_MAX_PLAINTEXT_
+ * BYTES（65519），SecureChannel.send 直接抛，acceptEnc 只含 "gzip" 的老客户端
+ * 收到的不是分片而是一条 rpc_error。
+ *
+ * 二进制路径改用 base64 算式同样错——那是一阶段的算式，会把这段 gzip 结果
+ * 错判成"装不下"、白白多走一轮分片往返（当年改成二进制算式正是为了修这个）。
+ * 两条算式各管各的路径，缺一不可。
  */
-export function zipFitsOneFrame(id: string, data: Uint8Array): boolean {
-  return binFrameBytes(id, data) <= RPC_FIT_SAFE_BYTES;
+export function zipFitsOneFrame(id: string, data: Uint8Array, wantsBin: boolean): boolean {
+  const bytes = wantsBin ? binFrameBytes(id, data) : b64WireBytes(id, data);
+  return bytes <= RPC_FIT_SAFE_BYTES;
 }

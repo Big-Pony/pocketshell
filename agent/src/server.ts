@@ -519,7 +519,10 @@ export function startServer(deps: Deps = {}) {
       // 撞上二进制帧会 decodeServer 抛、丢帧、rpc 挂到 10 秒超时，term.history
       // 每次挂载终端都会跑，等于老客户端被新 agent 砖化而不是降级。
       const wantsBin = Array.isArray(acceptEnc) && acceptEnc.includes("bin");
-      if (zipFitsOneFrame(id, out.data)) {
+      // zipFitsOneFrame 的算式要跟着 wantsBin 分岔——不分岔会让 JSON 回落帧的
+      // base64 膨胀被漏算，见 zipFitsOneFrame 自己的注释与 rpc-fit.test.ts 里
+      // 崩溃带那条回归用例。
+      if (zipFitsOneFrame(id, out.data, wantsBin)) {
         if (wantsBin) {
           sendBinSecure(conn, { type: "rpcZip", id }, out.data);
         } else {
