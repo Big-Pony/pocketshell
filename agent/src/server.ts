@@ -10,7 +10,8 @@ import { ShellService } from "./shell-service";
 import { ReplayService } from "./replay";
 import { OutputBatcher } from "./output-batcher";
 import { sweepTmp } from "./fs-service";
-import { RPC_FIT_SAFE_BYTES, chunkRpcPayload } from "./rpc-fit";
+import { RPC_FIT_SAFE_BYTES, RPC_CHUNK_PAYLOAD_BYTES, chunkRpcPayload } from "./rpc-fit";
+import { compressRpcPayload, zipFitsOneFrame } from "./rpc-compress";
 import { decodeClient, encode, type ServerMsg, type DeviceInfo, type SessionMeta } from "./protocol";
 import { sessionListsEqual } from "./sessions-diff";
 import { isSaneSize } from "./sane-size";
@@ -484,8 +485,42 @@ export function startServer(deps: Deps = {}) {
   // Method-agnostic: covers fs.read/fs.diff/git.log/term.history and any future
   // large result. At/under RPC_FIT_SAFE_BYTES the single-frame fast path is
   // unchanged; ok:false replies are small and always go single-frame.
-  const sendRpcResult = (conn: Conn, id: string, result: unknown) => {
+  const sendRpcResult = (
+    conn: Conn,
+    id: string,
+    result: unknown,
+    acceptEnc?: string[],
+    method = "",
+  ) => {
     const payload = encode({ type: "response", id, ok: true, result });
+    // 压缩判定在分片判定**之前**：压完往往从"要分片"降级成"单帧"，
+    // 省下的不只是字节，还有一整轮分片往返。
+    const out = compressRpcPayload(payload, method, acceptEnc);
+    if (out.kind === "zip") {
+      if (zipFitsOneFrame(id, out.data)) {
+        sendSecure(conn, { type: "rpcZip", id, data: out.data });
+        return;
+      }
+      // 压完仍超单帧预算：切成带 enc 标记的分片，客户端重组后再解压。
+      //
+      // 这里不能复用 chunkRpcPayload —— 它收字符串并在内部 Buffer.from(s,"utf8")，
+      // 而 gzip 出来的是任意字节，先转 utf8 字符串会把非法序列替换成 U+FFFD，
+      // 解压必炸。所以直接对字节切片。
+      const gzBytes = Buffer.from(out.data, "base64");
+      const total = Math.max(1, Math.ceil(gzBytes.length / RPC_CHUNK_PAYLOAD_BYTES));
+      for (let index = 0; index < total; index++) {
+        const slice = gzBytes.subarray(
+          index * RPC_CHUNK_PAYLOAD_BYTES,
+          (index + 1) * RPC_CHUNK_PAYLOAD_BYTES,
+        );
+        sendSecure(conn, {
+          type: "rpcChunk", id, index, total,
+          data: slice.toString("base64"), enc: "gzip",
+        });
+      }
+      return;
+    }
+    // 未压缩：以下两条是原有逻辑，一字未改。
     if (Buffer.byteLength(payload, "utf8") <= RPC_FIT_SAFE_BYTES) {
       sendSecure(conn, { type: "response", id, ok: true, result });
       return;
@@ -673,7 +708,7 @@ export function startServer(deps: Deps = {}) {
         broadcastHintsChanged();
         break;
       case "rpc": {
-        const { id, method, params } = msg;
+        const { id, method, params, acceptEnc } = msg;
         // Table-driven dispatch lives in rpc-router.ts. This stays the only
         // place that knows how to put bytes on this conn's channel: every
         // handler answers through sendResult/sendError below — including the
@@ -685,7 +720,7 @@ export function startServer(deps: Deps = {}) {
             claudeSettingsPath: toolPaths.claude, agentBin, doWire, runApply,
             id,
             devicePub: conn.remoteStatic,
-            sendResult: (result) => sendRpcResult(conn, id, result),
+            sendResult: (result) => sendRpcResult(conn, id, result, acceptEnc, method),
             sendError: (code, message) => sendSecure(conn, { type: "response", id, ok: false, error: { code, message } }),
           },
           method,
