@@ -1,19 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, test } from "vitest";
 import { encodeWriteChunks, saveFile, isConflictError, langExtension } from "./editor";
-import { fromB64 } from "./bytes";
 
-function decodeAll(chunks: string[]): string {
-  const parts = chunks.map(fromB64);
-  const total = parts.reduce((n, p) => n + p.length, 0);
+function decodeAll(chunks: Uint8Array[]): string {
+  const total = chunks.reduce((n, p) => n + p.length, 0);
   const buf = new Uint8Array(total);
   let o = 0;
-  for (const p of parts) { buf.set(p, o); o += p.length; }
+  for (const p of chunks) { buf.set(p, o); o += p.length; }
   return new TextDecoder().decode(buf);
 }
 
 describe("encodeWriteChunks", () => {
   it("empty text → single empty chunk", () => {
-    expect(encodeWriteChunks("")).toEqual([""]);
+    const chunks = encodeWriteChunks("");
+    expect(chunks.length).toBe(1);
+    expect(chunks[0].length).toBe(0);
   });
   it("byte-slices reassemble to the original even when CJK chars split across chunks", () => {
     const text = "你好a世界"; // 3+3+1+3+3 = 13 utf8 bytes
@@ -23,7 +23,7 @@ describe("encodeWriteChunks", () => {
   });
   it("each chunk stays within the raw-byte cap", () => {
     const chunks = encodeWriteChunks("x".repeat(100_000), 45 * 1024);
-    for (const c of chunks) expect(fromB64(c).length).toBeLessThanOrEqual(45 * 1024);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(45 * 1024);
     expect(decodeAll(chunks).length).toBe(100_000);
   });
 });
@@ -31,7 +31,13 @@ describe("encodeWriteChunks", () => {
 describe("saveFile", () => {
   function fakeConn() {
     const calls: any[] = [];
-    return { calls, rpc: async (_m: string, p: any) => { calls.push(p); return p.last ? { ok: true, mtime: 42 } : { written: 1 }; } };
+    return {
+      calls,
+      rpc: async (_m: string, p: any) => { calls.push(p); return p.last ? { ok: true, mtime: 42 } : { written: 1 }; },
+      rpcBin: async (_m: string, p: any, blob: Uint8Array) => {
+        calls.push({ ...p, blob }); return p.last ? { ok: true, mtime: 42 } : { written: 1 };
+      },
+    };
   }
   it("small file: one chunk carrying first+last+path+expectMtime, resolves mtime", async () => {
     const c = fakeConn();
@@ -54,6 +60,21 @@ describe("saveFile", () => {
     await saveFile(c, "/a.txt", "hi");
     expect("expectMtime" in c.calls[0]).toBe(false);
   });
+});
+
+test("saveFile 走 rpcBin，内容含 CJK 与 emoji 时逐字节正确", async () => {
+  const calls: { params: any; blob: Uint8Array }[] = [];
+  const conn = {
+    rpc: async () => ({ ok: true, mtime: 1 }),
+    rpcBin: async (_m: string, params: unknown, blob: Uint8Array) => {
+      calls.push({ params: params as any, blob }); return { ok: true, mtime: 1 };
+    },
+  };
+  const text = "const s = '中文与 emoji 🎉';\n";
+  await saveFile(conn as any, "/a.ts", text);
+  const joined = new Uint8Array(calls.reduce<number[]>((a, c) => a.concat(Array.from(c.blob)), []));
+  expect(new TextDecoder().decode(joined)).toBe(text);
+  expect(calls[calls.length - 1].params.path).toBe("/a.ts");
 });
 
 describe("isConflictError / langExtension", () => {

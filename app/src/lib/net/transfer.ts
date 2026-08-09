@@ -1,20 +1,21 @@
 // P2: file transfer orchestration (pure-ish; DOM download helper lives in the
-// download half). All bytes travel the encrypted WS via conn.rpc — chunked
-// base64 to stay well under the WS payload cap.
-import { toB64, fromB64 } from "../bytes";
+// download half). All bytes travel the encrypted WS via conn.rpc/conn.rpcBin —
+// chunked to stay well under the WS payload cap.
 import { tr } from "../i18n";
 
 export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
 
 // Chunk size is bounded by the Noise transport: SecureChannel encrypts each RPC
 // as ONE ChaChaPoly message, and noise-handshake hard-caps ciphertext at 65535
-// bytes (plaintext ≤ 65519). A chunk travels as base64 in dataB64 (×4/3) inside
-// a small JSON envelope, so the raw chunk must stay well under ~48KB. 45KB keeps
-// base64 (~61.4KB) + envelope + 16B MAC comfortably below the cap. Do NOT raise
-// this without adding transport-level framing (see spec non-goals).
+// bytes (plaintext ≤ 65519). 二阶段起 chunk 走二进制帧尾（不再 base64），一片
+// 45KB 上线约 46KB，帧预算余量很大。**尺寸仍不动**：本轮是纯编码变更，调尺寸
+// 会引入 RTT/内存/背压的新变量，出了问题分不清是编码错还是尺寸错。
 export const CHUNK_BYTES = 45 * 1024;
 
-export type RpcLike = { rpc(method: string, params?: unknown): Promise<unknown> };
+export type RpcLike = {
+  rpc(method: string, params?: unknown): Promise<unknown>;
+  rpcBin(method: string, params: unknown, blob: Uint8Array): Promise<unknown>;
+};
 export type UploadItem = { name: string; size: number; blob: Blob; destName: string };
 
 export function humanSize(bytes: number): string {
@@ -112,7 +113,7 @@ export async function uploadChunksWindowed(
     try {
       const bytes = await slots[i]!;
       slots[i] = undefined; // free the slice as soon as it is on the wire
-      track(conn.rpc("fs.uploadChunk", { uploadId, dataB64: toB64(bytes), first: i === 0, last: false }), windows[i][1]);
+      track(conn.rpcBin("fs.uploadChunk", { uploadId, first: i === 0, last: false }, bytes), windows[i][1]);
       i++;
     } catch (e) { firstError = e; break; }
   }
@@ -126,7 +127,7 @@ export async function uploadChunksWindowed(
     pumpReads(n);
     try {
       const bytes = await slots[n - 1]!;
-      await conn.rpc("fs.uploadChunk", { uploadId, dataB64: toB64(bytes), first: n === 1, last: true, destPath });
+      await conn.rpcBin("fs.uploadChunk", { uploadId, first: n === 1, last: true, destPath }, bytes);
       opts.onChunkDone?.(windows[n - 1][1]);
     } catch (e) { firstError = e; }
   }
@@ -145,7 +146,7 @@ export async function downloadFileBlob(
 ): Promise<Blob> {
   const chunk = opts.chunkBytes ?? CHUNK_BYTES;
   // Pre-check size so the user gets a localized error before any real bytes flow.
-  const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as { dataB64: string; eof: boolean; size: number };
+  const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as { bytes: Uint8Array; eof: boolean; size: number };
   if (probe.size > MAX_TRANSFER_BYTES) throw new Error(tr("errors.transfer.tooBig"));
   if (probe.eof) return new Blob([]);
   let downloaded = 0;
@@ -175,10 +176,13 @@ export async function fetchChunksWindowed(
     while (next < windows.length) {
       const i = next++;
       const [offset, len] = windows[i];
-      const r = (await conn.rpc("fs.downloadChunk", { path, offset, len })) as { dataB64: string; eof: boolean; size: number };
-      const bytes = fromB64(r.dataB64);
-      parts[i] = bytes;
-      onChunkDone?.(bytes.length);
+      const r = (await conn.rpc("fs.downloadChunk", { path, offset, len })) as { bytes: Uint8Array; eof: boolean; size: number };
+      // 不需要在这里 slice：handleRpcBin 在 resolve 前已经 slice 过一次真拷贝
+      // （因为 blob 要跨帧存活到整个文件下载完）。这里再 slice 是白拷一遍。
+      // 若哪天有人「优化」掉 handleRpcBin 里那次 slice，这些 parts 会各自钉住
+      // 一整帧的底层 buffer —— 4552 个分片 × 整帧，那才是问题。
+      parts[i] = r.bytes;
+      onChunkDone?.(r.bytes.length);
     }
   };
   const lanes = Math.min(windowSize, windows.length);

@@ -25,12 +25,12 @@ function fileList(files: File[]): FileList {
 test("selecting → upload with no conflicts streams then reports done", async () => {
   const rpc = vi.fn(async (m: string) => {
     if (m === "fs.uploadCheck") return { conflicts: [] };
-    if (m === "fs.uploadChunk") return { written: 0 };
     return {};
   });
+  const rpcBin = vi.fn(async () => ({ written: 0 }));
   const onUploaded = vi.fn();
   const { getByText, container } = render(UploadDialog, {
-    props: { conn: { rpc } as any, dir: "/d", onClose: vi.fn(), onUploaded },
+    props: { conn: { rpc, rpcBin } as any, dir: "/d", onClose: vi.fn(), onUploaded },
   });
 
   const input = container.querySelector('input[type=file]') as HTMLInputElement;
@@ -42,13 +42,15 @@ test("selecting → upload with no conflicts streams then reports done", async (
   await fireEvent.click(getByText("上传"));
 
   await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith("fs.uploadCheck", { dir: "/d", names: ["a.txt"] }));
+  await vi.waitFor(() => expect(rpcBin).toHaveBeenCalledWith("fs.uploadChunk", expect.anything(), expect.any(Uint8Array)));
   await vi.waitFor(() => expect(onUploaded).toHaveBeenCalledWith("/d"));
 });
 
 test("closing while uploading cancels (onClose fires)", async () => {
   const onClose = vi.fn();
   const rpc = vi.fn(async () => ({ conflicts: [], written: 0 }));
-  const { container } = render(UploadDialog, { props: { conn: { rpc } as any, dir: "/d", onClose, onUploaded: vi.fn() } });
+  const rpcBin = vi.fn(async () => ({ written: 0 }));
+  const { container } = render(UploadDialog, { props: { conn: { rpc, rpcBin } as any, dir: "/d", onClose, onUploaded: vi.fn() } });
   const input = container.querySelector('input[type=file]') as HTMLInputElement;
   Object.defineProperty(input, "files", { value: fileList([new File(["x"], "a.txt")]) });
   await fireEvent.change(input);

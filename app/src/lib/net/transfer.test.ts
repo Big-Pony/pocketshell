@@ -1,6 +1,5 @@
 import { test, expect, vi, beforeAll, describe } from "vitest";
 import { humanSize, chunkOffsets, childPath, uploadFiles, uploadChunksWindowed, UPLOAD_WINDOW, baseName, downloadFileBlob, downloadFolder, fetchChunksWindowed, DOWNLOAD_WINDOW, CHUNK_BYTES, type RpcLike } from "./transfer";
-import { toB64, fromB64 } from "../bytes";
 
 beforeAll(() => {
   // jsdom does not implement Blob.prototype.arrayBuffer; polyfill it via
@@ -35,10 +34,10 @@ test("childPath joins under root and under '/'", () => {
 
 test("uploadFiles chunks each file, flags first/last, reports aggregate progress", async () => {
   const calls: any[] = [];
-  const rpc = vi.fn(async (m: string, p: any) => { calls.push({ m, p }); return { written: 0 }; });
+  const rpcBin = vi.fn(async (m: string, p: any, bytes: Uint8Array) => { calls.push({ m, p, bytes }); return { written: 0 }; });
   const progress: [number, number][] = [];
   const blob = new Blob(["abcde"]); // 5 bytes
-  await uploadFiles({ rpc } as any, "/dir", [{ name: "f.txt", size: 5, blob, destName: "f.txt" }], {
+  await uploadFiles({ rpcBin } as any, "/dir", [{ name: "f.txt", size: 5, blob, destName: "f.txt" }], {
     chunkBytes: 2, onProgress: (u, t) => progress.push([u, t]),
   });
   const chunks = calls.filter((c) => c.m === "fs.uploadChunk");
@@ -52,13 +51,13 @@ test("uploadFiles chunks each file, flags first/last, reports aggregate progress
 
 test("uploadFiles stops early when shouldCancel() turns true", async () => {
   // Typed with RpcLike's own signature so the recorded wrapper can forward the
-  // real (method, params) pair — a bare `async () => …` mock takes 0 args.
-  const rpc = vi.fn<RpcLike["rpc"]>(async () => ({ written: 0 }));
+  // real (method, params, blob) triple — a bare `async () => …` mock takes 0 args.
+  const rpcBin = vi.fn<RpcLike["rpcBin"]>(async () => ({ written: 0 }));
   let sent = 0;
-  const orig = rpc.getMockImplementation()!;
-  rpc.mockImplementation(async (method, params) => { sent++; return orig(method, params); });
+  const orig = rpcBin.getMockImplementation()!;
+  rpcBin.mockImplementation(async (method, params, blob) => { sent++; return orig(method, params, blob); });
   const blob = new Blob([new Uint8Array(10)]);
-  await uploadFiles({ rpc } as unknown as RpcLike, "/d", [{ name: "f", size: 10, blob, destName: "f" }], {
+  await uploadFiles({ rpcBin } as unknown as RpcLike, "/d", [{ name: "f", size: 10, blob, destName: "f" }], {
     chunkBytes: 2, shouldCancel: () => sent >= 2, // cancel after 2 chunks
   });
   expect(sent).toBeLessThan(5); // did not send all 5 chunks
@@ -71,12 +70,12 @@ test("baseName returns last segment, falls back to 'root' for '/'", () => {
 });
 
 test("downloadFileBlob probes size then concatenates chunks until eof", async () => {
-  const parts = [toB64(new Uint8Array([1, 2])), toB64(new Uint8Array([3]))];
+  const parts = [new Uint8Array([1, 2]), new Uint8Array([3])];
   let call = 0;
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { dataB64: "", eof: false, size: 3 }; // probe
-    const dataB64 = parts[call]; const eof = call === parts.length - 1; call++;
-    return { dataB64, eof, size: 3 };
+    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: 3 }; // probe
+    const bytes = parts[call]; const eof = call === parts.length - 1; call++;
+    return { bytes, eof, size: 3 };
   });
   const blob = await downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2 });
   const buf = new Uint8Array(await blob.arrayBuffer());
@@ -85,7 +84,7 @@ test("downloadFileBlob probes size then concatenates chunks until eof", async ()
 });
 
 test("downloadFileBlob rejects files over MAX_TRANSFER_BYTES with a localized message", async () => {
-  const rpc = vi.fn(async () => ({ dataB64: "", eof: false, size: 200 * 1024 * 1024 + 1 }));
+  const rpc = vi.fn(async () => ({ bytes: new Uint8Array(0), eof: false, size: 200 * 1024 * 1024 + 1 }));
   await expect(downloadFileBlob({ rpc } as any, "/huge.bin")).rejects.toThrow("文件超过 200MB 上限");
 });
 
@@ -94,13 +93,13 @@ test("downloadFileBlob fetches chunks concurrently and assembles in offset order
   const size = 8; // 4 windows of 2 bytes
   let inFlight = 0, maxInFlight = 0;
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { dataB64: "", eof: false, size }; // probe
+    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size }; // probe
     inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
     // Later offsets resolve FIRST — proves assembly is by offset, not arrival.
     await new Promise((r) => setTimeout(r, (size - p.offset) * 2));
     inFlight--;
     const bytes = new Uint8Array(p.len).fill(p.offset); // mark each chunk with its offset
-    return { dataB64: toB64(bytes), eof: p.offset + p.len >= size, size };
+    return { bytes, eof: p.offset + p.len >= size, size };
   });
   const blob = await downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2, windowSize: 4 });
   const buf = [...new Uint8Array(await blob.arrayBuffer())];
@@ -112,11 +111,11 @@ test("downloadFileBlob caps concurrency at the default DOWNLOAD_WINDOW", async (
   const size = 20; // 10 windows of 2 bytes
   let inFlight = 0, maxInFlight = 0;
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { dataB64: "", eof: false, size };
+    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size };
     inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
     await new Promise((r) => setTimeout(r, 1));
     inFlight--;
-    return { dataB64: toB64(new Uint8Array(p.len)), eof: p.offset + p.len >= size, size };
+    return { bytes: new Uint8Array(p.len), eof: p.offset + p.len >= size, size };
   });
   await downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2 });
   expect(maxInFlight).toBe(DOWNLOAD_WINDOW);
@@ -124,9 +123,9 @@ test("downloadFileBlob caps concurrency at the default DOWNLOAD_WINDOW", async (
 
 test("downloadFileBlob rejects the whole download when any chunk fails", async () => {
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { dataB64: "", eof: false, size: 6 };
+    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: 6 };
     if (p.offset === 2) throw new Error("boom");
-    return { dataB64: toB64(new Uint8Array(p.len)), eof: true, size: 6 };
+    return { bytes: new Uint8Array(p.len), eof: true, size: 6 };
   });
   await expect(downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2, windowSize: 2 })).rejects.toThrow("boom");
 });
@@ -134,8 +133,8 @@ test("downloadFileBlob rejects the whole download when any chunk fails", async (
 test("downloadFileBlob reports cumulative progress per completed chunk", async () => {
   const progress: [number, number][] = [];
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { dataB64: "", eof: false, size: 4 };
-    return { dataB64: toB64(new Uint8Array(p.len)), eof: true, size: 4 };
+    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: 4 };
+    return { bytes: new Uint8Array(p.len), eof: true, size: 4 };
   });
   await downloadFileBlob({ rpc } as any, "/f", { chunkBytes: 2, onProgress: (d, t) => progress.push([d, t]) });
   expect(progress.length).toBe(2);
@@ -151,7 +150,7 @@ test("fetchChunksWindowed leaves no window unfetched and honors a window of 1", 
     await new Promise((r) => setTimeout(r, 1));
     inFlight--;
     seen.push(p.offset);
-    return { dataB64: toB64(new Uint8Array(p.len).fill(p.offset)), eof: false, size: 6 };
+    return { bytes: new Uint8Array(p.len).fill(p.offset), eof: false, size: 6 };
   });
   const parts = await fetchChunksWindowed({ rpc } as any, "/f", windows, 1);
   expect(maxInFlight).toBe(1); // serial when window = 1
@@ -160,11 +159,13 @@ test("fetchChunksWindowed leaves no window unfetched and honors a window of 1", 
 });
 
 describe("chunk size stays under the Noise message ceiling", () => {
-  test("base64 + json envelope + MAC fits in one Noise message (<65535)", () => {
-    const b64 = Math.ceil(CHUNK_BYTES / 3) * 4;
-    const envelope = 300;
+  // 二阶段起 chunk 走二进制帧尾（不再 base64），开销只是 3 字节前缀 + JSON 头，
+  // 不再有 base64 的 ×4/3 膨胀。
+  test("raw chunk + binary frame prefix/header + MAC fits in one Noise message (<65535)", () => {
+    const prefix = 3; // BIN_FRAME_PREFIX_BYTES
+    const header = 300; // generous JSON header (type/id/method/params/acceptEnc)
     const mac = 16;
-    expect(b64 + envelope + mac).toBeLessThan(65535);
+    expect(CHUNK_BYTES + prefix + header + mac).toBeLessThan(65535);
   });
   test("splits a 700KB file into multiple chunks", () => {
     const windows = chunkOffsets(700 * 1024, CHUNK_BYTES);
@@ -177,7 +178,7 @@ test("downloadFolder archives, downloads, then deletes the temp archive", async 
   const rpc = vi.fn(async (m: string, p: any) => {
     order.push(m);
     if (m === "fs.archive") return { archivePath: "/tmp/psarchive-x.zip", size: 2 };
-    if (m === "fs.downloadChunk") return { dataB64: toB64(new Uint8Array([9, 9])), eof: p.len > 0, size: 2 };
+    if (m === "fs.downloadChunk") return { bytes: new Uint8Array([9, 9]), eof: p.len > 0, size: 2 };
     if (m === "fs.op") return { ok: true };
     return {};
   });
@@ -197,15 +198,15 @@ test("downloadFolder archives, downloads, then deletes the temp archive", async 
 // identifiable because seqBlob sets byte[offset] = offset, so a chunk's first
 // byte / chunkBytes is its index.
 const seqBlob = (size: number) => new Blob([Uint8Array.from({ length: size }, (_, o) => o)]);
-const idxOf = (dataB64: string, chunkBytes: number) => fromB64(dataB64)[0] / chunkBytes;
+const idxOf = (bytes: Uint8Array, chunkBytes: number) => bytes[0] / chunkBytes;
 
 describe("windowed upload (WP-5)", () => {
   test("uploadFiles caps concurrency at UPLOAD_WINDOW and sends in index order despite out-of-order replies", async () => {
     const size = 16, chunkBytes = 2, n = 8;
     let inFlight = 0, maxInFlight = 0;
     const sentOrder: number[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => {
-      const idx = idxOf(p.dataB64, chunkBytes);
+    const rpcBin = vi.fn(async (_m: string, _p: any, bytes: Uint8Array) => {
+      const idx = idxOf(bytes, chunkBytes);
       sentOrder.push(idx); // recorded synchronously at call time = wire order
       inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
       // Later chunks resolve FIRST — proves ordering comes from send order,
@@ -214,7 +215,7 @@ describe("windowed upload (WP-5)", () => {
       inFlight--;
       return { written: 0 };
     });
-    await uploadFiles({ rpc } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes });
+    await uploadFiles({ rpcBin } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes });
     expect(sentOrder).toEqual([0, 1, 2, 3, 4, 5, 6, 7]); // strictly monotonic
     expect(maxInFlight).toBe(UPLOAD_WINDOW); // full window actually in flight
   });
@@ -223,14 +224,14 @@ describe("windowed upload (WP-5)", () => {
     const size = 8, chunkBytes = 2, n = 4;
     let settled = 0, settledWhenLastSent = -1;
     const calls: any[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => {
-      calls.push(p);
+    const rpcBin = vi.fn(async (_m: string, p: any, bytes: Uint8Array) => {
+      calls.push({ ...p, bytes });
       if (p.last) settledWhenLastSent = settled;
       await new Promise((r) => setTimeout(r, p.last ? 0 : 5));
       settled++;
       return { written: 0 };
     });
-    await uploadFiles({ rpc } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes, windowSize: 4 });
+    await uploadFiles({ rpcBin } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes, windowSize: 4 });
     expect(settledWhenLastSent).toBe(n - 1); // closing barrier: all prior chunks done
     expect(calls[0].first).toBe(true);
     expect(calls[0].last).toBe(false);
@@ -242,8 +243,8 @@ describe("windowed upload (WP-5)", () => {
   test("uploadFiles stops issuing new chunks when shouldCancel flips at a window boundary", async () => {
     const size = 20, chunkBytes = 2; // 10 chunks
     const sent: any[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => { sent.push(p); return { written: 0 }; });
-    await uploadFiles({ rpc } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], {
+    const rpcBin = vi.fn(async (_m: string, p: any) => { sent.push(p); return { written: 0 }; });
+    await uploadFiles({ rpcBin } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], {
       chunkBytes, windowSize: 4, shouldCancel: () => sent.length >= 2,
     });
     expect(sent.length).toBe(2); // cancelled after 2 chunks, nothing new sent afterwards
@@ -253,15 +254,15 @@ describe("windowed upload (WP-5)", () => {
   test("uploadFiles rejects and stops sending new chunks when any chunk rpc fails", async () => {
     const size = 12, chunkBytes = 2; // 6 chunks
     const sentOrder: number[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => {
-      const idx = idxOf(p.dataB64, chunkBytes);
+    const rpcBin = vi.fn(async (_m: string, _p: any, bytes: Uint8Array) => {
+      const idx = idxOf(bytes, chunkBytes);
       sentOrder.push(idx);
       if (idx === 1) { await new Promise((r) => setTimeout(r, 5)); throw new Error("boom"); }
       await new Promise((r) => setTimeout(r, idx === 0 ? 50 : 0));
       return { written: 0 };
     });
     await expect(
-      uploadFiles({ rpc } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes, windowSize: 2 }),
+      uploadFiles({ rpcBin } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes, windowSize: 2 }),
     ).rejects.toThrow("boom");
     expect(sentOrder).toEqual([0, 1]); // nothing new issued after the failure was observed
   });
@@ -269,8 +270,8 @@ describe("windowed upload (WP-5)", () => {
   test("uploadFiles reports cumulative progress once per completed chunk", async () => {
     const size = 8, chunkBytes = 2;
     const progress: [number, number][] = [];
-    const rpc = vi.fn(async () => ({ written: 0 }));
-    await uploadFiles({ rpc } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], {
+    const rpcBin = vi.fn(async () => ({ written: 0 }));
+    await uploadFiles({ rpcBin } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], {
       chunkBytes, onProgress: (u, t) => progress.push([u, t]),
     });
     expect(progress.length).toBe(4);
@@ -280,22 +281,22 @@ describe("windowed upload (WP-5)", () => {
 
   test("uploadFiles uploads files serially, each with its own uploadId and destPath on its last chunk", async () => {
     const calls: any[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => { calls.push(p); return { written: 0 }; });
+    const rpcBin = vi.fn(async (_m: string, p: any, bytes: Uint8Array) => { calls.push({ ...p, bytes }); return { written: 0 }; });
     const mk = (name: string) => ({ name, size: 4, blob: seqBlob(4), destName: name });
-    await uploadFiles({ rpc } as any, "/d", [mk("a"), mk("b")], { chunkBytes: 2, windowSize: 4 });
+    await uploadFiles({ rpcBin } as any, "/d", [mk("a"), mk("b")], { chunkBytes: 2, windowSize: 4 });
     expect(calls.length).toBe(4); // 2 chunks per file
     expect(calls[0].uploadId).toBe(calls[1].uploadId);
     expect(calls[2].uploadId).toBe(calls[3].uploadId);
     expect(calls[0].uploadId).not.toBe(calls[2].uploadId);
-    expect(idxOf(calls[1].dataB64, 2)).toBe(1); // file a's chunks precede file b's
+    expect(idxOf(calls[1].bytes, 2)).toBe(1); // file a's chunks precede file b's
     expect(calls[1].last).toBe(true); expect(calls[1].destPath).toBe("/d/a");
     expect(calls[3].last).toBe(true); expect(calls[3].destPath).toBe("/d/b");
   });
 
   test("uploadFiles sends a single first+last chunk (with destPath) for an empty file", async () => {
     const calls: any[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => { calls.push(p); return { written: 0 }; });
-    await uploadFiles({ rpc } as any, "/d", [{ name: "e", size: 0, blob: new Blob([]), destName: "e" }], { chunkBytes: 2 });
+    const rpcBin = vi.fn(async (_m: string, p: any) => { calls.push(p); return { written: 0 }; });
+    await uploadFiles({ rpcBin } as any, "/d", [{ name: "e", size: 0, blob: new Blob([]), destName: "e" }], { chunkBytes: 2 });
     expect(calls.length).toBe(1);
     expect(calls[0].first).toBe(true);
     expect(calls[0].last).toBe(true);
@@ -306,16 +307,46 @@ describe("windowed upload (WP-5)", () => {
     const size = 8, chunkBytes = 2;
     let inFlight = 0, maxInFlight = 0;
     const sentOrder: number[] = [];
-    const rpc = vi.fn(async (_m: string, p: any) => {
-      sentOrder.push(idxOf(p.dataB64, chunkBytes));
+    const rpcBin = vi.fn(async (_m: string, _p: any, bytes: Uint8Array) => {
+      sentOrder.push(idxOf(bytes, chunkBytes));
       inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((r) => setTimeout(r, 1));
       inFlight--;
       return { written: 0 };
     });
-    const r = await uploadChunksWindowed({ rpc } as any, "up1", seqBlob(size), chunkOffsets(size, chunkBytes), "/d/f", { windowSize: 1 });
+    const r = await uploadChunksWindowed({ rpcBin } as any, "up1", seqBlob(size), chunkOffsets(size, chunkBytes), "/d/f", { windowSize: 1 });
     expect(r).toBe("done");
     expect(maxInFlight).toBe(1);
     expect(sentOrder).toEqual([0, 1, 2, 3]);
   });
+});
+
+test("上传走 rpcBin，字节不经 base64", async () => {
+  const calls: { method: string; params: any; blob?: Uint8Array }[] = [];
+  const conn = {
+    rpc: async (method: string, params: unknown) => { calls.push({ method, params }); return {}; },
+    rpcBin: async (method: string, params: unknown, blob: Uint8Array) => {
+      calls.push({ method, params, blob }); return {};
+    },
+  };
+  const EVIL = new Uint8Array([0xed, 0xa0, 0x80, 0xff, 0xfe]);
+  await uploadChunksWindowed(conn as any, "u1", new Blob([EVIL]), [[0, EVIL.length]], "/dest", {});
+  const up = calls.filter((c) => c.method === "fs.uploadChunk");
+  expect(up.length).toBe(1);
+  expect(up[0].blob).toBeDefined();
+  expect(Array.from(up[0].blob!)).toEqual(Array.from(EVIL));
+  expect(up[0].params.dataB64).toBeUndefined(); // 不再有 base64 字段
+});
+
+test("下载读 r.bytes，不再 fromB64", async () => {
+  const EVIL = new Uint8Array([0xed, 0xa0, 0x80, 0xff, 0xfe, 0x00]);
+  const conn = {
+    rpc: async (_m: string, p: any) => {
+      if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: EVIL.length };
+      return { bytes: EVIL, eof: true, size: EVIL.length };
+    },
+  };
+  const blob = await downloadFileBlob(conn as any, "/a");
+  const got = new Uint8Array(await blob.arrayBuffer());
+  expect(Array.from(got)).toEqual(Array.from(EVIL));
 });
