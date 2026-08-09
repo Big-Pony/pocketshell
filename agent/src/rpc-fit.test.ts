@@ -100,6 +100,7 @@ test("chunk sizing keeps a worst-case rpcChunk frame under the plaintext ceiling
     index: 99999,
     total: 99999,
     data: Buffer.alloc(RPC_CHUNK_PAYLOAD_BYTES).toString("base64"),
+    enc: "gzip" as const,   // 压缩分片带这个标记，最坏帧要按它算
   };
   const size = encodedBytes(worst);
   expect(size).toBeLessThanOrEqual(RPC_CHUNK_FRAME_MAX_BYTES);
@@ -351,4 +352,59 @@ test("rpc error replies stay single-frame (ok:false, never chunked)", () => {
   expect(reply.id).toBe("e1");
   expect(reply.error.code).toBe("rpc_error");
   srv.stop();
+});
+
+test("a compressed response too big for one frame is chunked with enc markers", () => {
+  // 中等熵的类源码内容：能压（不像 term.history 已被 compressHistory 压过），
+  // 但压完仍远超单帧预算，所以走 rpcChunk + enc:"gzip"。
+  //
+  // 为什么不用 term.history 当载体：它的 handler 里已经调了 compressHistory 做
+  // 字段级压缩，出来的 data 是 gzip 后的 base64（近乎最大熵），外层判据必然
+  // 拒绝、永远走不到压缩分片这条路。实测 payload 407341 → outcome=plain。
+  //
+  // 也不能用纯随机字母：那种内容 gzip 省下的约 25% 被 base64 的 4/3 回膨胀
+  // 抵消，同样落回 plain。要的是"真能压缩但压完仍很大"。
+  // 4900 行、每行 5 个词元：踩在 fs.read 默认 DEFAULT_MAX_LINES=5000 /
+  // DEFAULT_MAX_BYTES=512KiB 之下（不然会被截断，content 逐字节比对必炸），
+  // 同时字节数够大——实测 332849B 原始 -> 压完 115504B，超过 RPC_FIT_SAFE_BYTES
+  // (61440B) 必须分片，又比只有 3 词元/行（179536B 原始）时压完的 58832B 大，
+  // 后者仍会落进单帧 rpcZip，测不到分片路径。
+  let s = 0x9e3779b9;
+  const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; };
+  const W = ["const", "function", "return", "export", "import", "value",
+             "result", "config", "handler", "session", "buffer", "index"];
+  const src = Array.from({ length: 4900 }, (_, i) =>
+    `  ${W[rnd() % 12]} ${W[rnd() % 12]}${i} = ${W[rnd() % 12]}(${rnd() % 9999}, ${W[rnd() % 12]}, ${W[rnd() % 12]}${rnd() % 99}, ${W[rnd() % 12]}(${rnd() % 9999}));`,
+  ).join("\n");
+
+  const dir = mkdtempSync(join(tmpdir(), "ps-zipchunk-"));
+  const file = join(dir, "big.ts");
+  writeFileSync(file, src);
+  const srv = startServer({ port: 0, channelFactory: passthroughResponder });
+
+  const ws = fakeWs();
+  srv.__test.open(ws as any);
+  srv.__test.message(ws as any, M1);
+  ws.sent.length = 0;
+  srv.__test.message(ws as any, utf8(encode({
+    type: "rpc", id: "cz", method: "fs.read", params: { path: file }, acceptEnc: ["gzip"],
+  } as any)));
+
+  const msgs = ws.sent.map((f) => decodeServer(Buffer.from(f).toString("utf8")) as any);
+  expect(msgs.length).toBeGreaterThan(1);          // 压完仍要分片
+  for (const m of msgs) {
+    expect(m.type).toBe("rpcChunk");
+    expect(m.enc).toBe("gzip");                     // 每片都带标记
+  }
+  for (const f of ws.sent) expect(f.length).toBeLessThanOrEqual(RPC_CHUNK_FRAME_MAX_BYTES);
+
+  // 重组 + 解压后必须逐字节还原 —— 压缩是纯优化，语义不能变。
+  const joined = Buffer.concat(msgs.map((m) => Buffer.from(m.data, "base64")));
+  const reply = JSON.parse(Buffer.from(Bun.gunzipSync(joined)).toString("utf8"));
+  expect(reply.ok).toBe(true);
+  expect(reply.id).toBe("cz");
+  expect(reply.result.content).toBe(src);
+
+  srv.stop();
+  rmSync(dir, { recursive: true, force: true });
 });
