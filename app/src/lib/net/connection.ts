@@ -317,8 +317,16 @@ export class Connection {
   // 二进制帧。只放计数与方法名，不放任何载荷内容——这条日志用户可能直接贴进
   // 公开 issue。字段名与 agent 侧 diag-report.ts 的白名单逐字对应，漂移是
   // 静默的。只上报 wireBytes 明显大的一批，小 rpc 高频且不关心。
+  //
+  // C1：仅按 wireBytes 门槛采样对方法无差别，fs.downloadChunk 之类在压缩
+  // 黑名单里的方法响应恒为 45KB base64 ≈ 61531 字节，永远越过门槛——200MB
+  // 下载 4552 个分片就是 4552 次白打的 diag rpc，且与下载窗口（4 路并发）
+  // 抢同一条链路，慢链路上是实打实的拖累。这些记录还信息量为零：黑名单方法
+  // 的 wireBytes 恒等于 rawBytes，压缩率永远 1.0。所以额外要求"压缩真的
+  // 生效过"——没压成功的样本本来就回答不了"这轮压缩省了多少"这个问题。
   private reportRpcIfBig(method: string, rttMs: number, wireBytes: number, rawBytes: number, chunks: number): void {
     if (wireBytes <= RPC_DIAG_SAMPLE_MIN_BYTES) return;
+    if (wireBytes >= rawBytes) return;
     void this.rpc("diag.report", buildRpcReport({ method, rttMs, wireBytes, rawBytes, chunks })).catch(() => {});
   }
 

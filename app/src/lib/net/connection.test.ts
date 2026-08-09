@@ -1303,3 +1303,82 @@ test("GUARD: a compressed rpcChunk decoded after a reconnect does not re-enter d
   expect(dispatchSpy.mock.calls.length).toBe(callsAfterDelivery);
   dispatchSpy.mockRestore();
 });
+
+// ---- rpc 压缩埋点采样门槛（C1/I2）----
+// C1 修复前：reportRpcIfBig 只看 wireBytes>8192，对方法无差别。
+// fs.downloadChunk 的响应恒为 45KB base64（≈61531 字节）且在压缩黑名单里，
+// 永远越过门槛却永远没压缩——200MB 下载 4552 个分片就是 4552 次白打的
+// diag rpc，还跟下载窗口抢同一条链路。这里补两条此前完全没有回归保护的
+// 用例：把被测的门槛判断删掉，这两条测试必须能挂。
+
+test("C1: 大但未压缩的明帧响应不触发 diag 上报", async () => {
+  const h = harness();
+  const rpcSpy = vi.spyOn(h.conn, "rpc");
+  const p = h.conn.rpc("fs.downloadChunk", { path: "/big.bin", offset: 0 });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  // 明帧 response：wireOverride 为空，wireBytes 由这一帧的字节数现算，
+  // 天然等于 rawBytes——这正是黑名单方法（以及任何从未压缩过的响应）的
+  // 真实形状。61531 字节复刻的是 45KB 分片 base64 后的真实体积。
+  const dataB64 = "a".repeat(61531);
+  h.deliver({ type: "response", id, ok: true, result: { dataB64, eof: false } } as any);
+  await expect(p).resolves.toMatchObject({ eof: false });
+
+  const diagCalls = rpcSpy.mock.calls.filter((c) => c[0] === "diag.report");
+  expect(diagCalls.length).toBe(0);
+});
+
+test("I2: 真正压缩过的大响应会触发 diag 上报，且字段值正确", async () => {
+  const h = harness();
+  const rpcSpy = vi.spyOn(h.conn, "rpc");
+  const p = h.conn.rpc("git.log", { cwd: "/repo" });
+  const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  // 中等熵的 fixture：太规整（如单字符重复）会被 gzip 压到几百字节，
+  // 反而低于 RPC_DIAG_SAMPLE_MIN_BYTES(8192) 触发第一道门槛提前返回——
+  // 假绿。这里复用 rpc-compress.test.ts 的 PRNG 手法，压出一个 wireBytes
+  // 明确落在「> 8192 且 < rawBytes」区间的样本。
+  let seed = 0x9e3779b9;
+  const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return seed >>> 0; };
+  const CH = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const line = () => "\x1b[32m$\x1b[0m " + Array.from({ length: 40 }, () => CH[rnd() % 36]).join("") + "\n";
+  const content = Array.from({ length: 400 }, line).join("");
+  const expectedRawBytes = new TextEncoder().encode(
+    encode({ type: "response", id, ok: true, result: { content } } as ServerMsg),
+  ).length;
+  h.deliver(zipFrame(id, { content }));
+  await expect(p).resolves.toEqual({ content });
+
+  const diagCalls = rpcSpy.mock.calls.filter((c) => c[0] === "diag.report");
+  expect(diagCalls.length).toBe(1);
+  const report = diagCalls[0][1] as Record<string, unknown>;
+  expect(report.method).toBe("git.log");
+  expect(report.chunks).toBe(1);
+  expect(report.rawBytes).toBe(expectedRawBytes);
+  expect(report.wireBytes as number).toBeLessThan(report.rawBytes as number);
+});
+
+// ---- inflightBytes 泄漏防护（m1）----
+// 评审做 mutation 时发现：把 handleRpcZip 错误分支里的 releaseRpc 删掉，
+// 全套测试依然全绿——缺的就是这条。少一步就是 inflightBytes 泄漏，后续
+// rpc 会拿到虚高的死线预算，把真实故障掩盖成"偶发变慢"。
+
+test("m1: rpcZip 解压失败后 inflightBytes 精确回落到 reject 之前的水平", async () => {
+  const h = harness();
+  const p1 = h.conn.rpc("fs.read", { path: "/corrupt" });
+  const id1 = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
+  const bytesAfterFirst = (h.conn as any).inflightBytes;
+  expect(bytesAfterFirst).toBeGreaterThan(0);
+
+  // 留一路继续挂着做基线对照：只有 rpc1 的预留字节应当被释放，rpc2 的
+  // 那部分必须原封不动——多了说明 releaseRpc 漏调（泄漏），少了说明误删
+  // 了别人的账。
+  const p2 = h.conn.rpc("fs.read", { path: "/still-pending" });
+  const bytes2 = (h.conn as any).inflightBytes - bytesAfterFirst;
+  expect(bytes2).toBeGreaterThan(0);
+
+  h.deliver({ type: "rpcZip", id: id1, data: "!!!not base64!!!" } as ServerMsg);
+  await expect(p1).rejects.toMatchObject({ code: "rpc_zip_invalid" });
+
+  expect((h.conn as any).inflightBytes).toBe(bytes2);
+
+  void p2.catch(() => {}); // harness 拆除时 p2 仍是 pending，避免未处理 rejection 噪音
+});
