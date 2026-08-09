@@ -27,6 +27,7 @@
   import { shouldReloadAfterUpdate } from "./lib/update";
   import { hardReset } from "./lib/cache-admin";
   import { brandPrefix } from "./lib/ui/instance-name";
+  import { inputTarget } from "./lib/ui/input-target";
   import type { AppCommand } from "./lib/term/input-router";
   import { reset, type SelState } from "./lib/term/terminal-select";
   import { makeSwipeTracker } from "./lib/ui/swipe";
@@ -563,14 +564,23 @@
 
   const topFlex = $derived(fullscreen ? 1 : splitRatio);
 
+  // 所有键盘/输入法/片段文本的唯一出口。
+  //
+  // 目标会话取自 **activeTopId（聚焦的那个 tab）**，不是 activeId：两者会分叉
+  // ——切到文件 tab 时只设 activeTop、不动 activeId（selectTop / openFile /
+  // closeFile 三处），于是文本会静默打进上一个终端（2026-08-09 真机 bug）。
+  // 判定收敛在 inputTarget 里，那儿有单测钉着。
   function sendActive(text: string) {
-    if (!activeId) return;
-    conn.sendInput(activeId, new TextEncoder().encode(text));
+    const target = inputTarget(activeTopId);
+    if (!target) return; // 聚焦在文件 tab 上：这段输入不属于任何终端
+    conn.sendInput(target, new TextEncoder().encode(text));
     // Mirror outbound bytes into the per-session command line, except while a
     // full-screen TUI (vim/htop) owns the alternate screen — then hints pause.
-    const alt = activeTerm()?.buffer.active.type === "alternate";
+    // 查的是 target 的终端而不是 activeTerm()（后者读 activeId）——同一个分叉，
+    // 查错了会把字节镜像进另一个会话的命令行、污染它的联想。
+    const alt = terms.get(target)?.buffer.active.type === "alternate";
     if (!alt) {
-      cmdLines.set(activeId, feed(cmdState(activeId), text));
+      cmdLines.set(target, feed(cmdState(target), text));
       recomputeHints();
     }
   }
@@ -590,8 +600,11 @@
   }
 
   function onHint(cmd: string) {
-    if (!activeId) return;
-    const s = cmdState(activeId);
+    // 同 sendActive：命令行差量要按**聚焦的那个终端**算。用 activeId 会在
+    // 文件 tab 聚焦时拿上一个终端的命令行，算出一段错的差量再发出去。
+    const target = inputTarget(activeTopId);
+    if (!target) return;
+    const s = cmdState(target);
     sendActive(delta(s.line, cmd));
   }
 
