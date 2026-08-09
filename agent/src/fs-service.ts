@@ -146,12 +146,15 @@ export function fsResolveName(dir: string, name: string): { name: string } {
 }
 
 export function fsUploadChunk(
-  tmpDir: string, uploadId: string, dataB64: string,
+  tmpDir: string, uploadId: string, bytes: Uint8Array,
   opts: { first?: boolean; last?: boolean; destPath?: string } = {}
 ): { written: number } {
   const safeId = uploadId.replace(/[^a-z0-9-]/gi, "");
   const part = join(resolve(tmpDir), `psupload-${safeId}.part`);
-  const buf = Buffer.from(dataB64, "base64");
+  // Buffer.from(bytes) —— **不是** Buffer.from(bytes.buffer)。bytes 是解帧出来的
+  // subarray 视图（byteOffset 恒 > 0），用 .buffer 会把整帧（魔数+JSON头+相邻
+  // 数据）写进用户文件。Buffer.from(Uint8Array) 尊重 byteOffset/length。
+  const buf = Buffer.from(bytes);
   if (opts.first) writeFileSync(part, buf);
   else appendFileSync(part, buf);
   const written = statSync(part).size;
@@ -176,12 +179,15 @@ export function fsUploadChunk(
 // means an external write within the same tick as the open snapshot can slip
 // through undetected — acceptable for the human-edit-vs-agent-write case.
 export function fsWrite(
-  tmpDir: string, writeId: string, dataB64: string,
+  tmpDir: string, writeId: string, bytes: Uint8Array,
   opts: { first?: boolean; last?: boolean; path?: string; expectMtime?: number } = {}
 ): { written: number } | { ok: true; mtime: number } {
   const safeId = writeId.replace(/[^a-z0-9-]/gi, "");
   const part = join(resolve(tmpDir), `pswrite-${safeId}.part`);
-  const buf = Buffer.from(dataB64, "base64");
+  // Buffer.from(bytes) —— **不是** Buffer.from(bytes.buffer)。bytes 是解帧出来的
+  // subarray 视图（byteOffset 恒 > 0），用 .buffer 会把整帧（魔数+JSON头+相邻
+  // 数据）写进用户文件。Buffer.from(Uint8Array) 尊重 byteOffset/length。
+  const buf = Buffer.from(bytes);
   if (opts.first) writeFileSync(part, buf);
   else appendFileSync(part, buf);
   const written = statSync(part).size;
@@ -221,7 +227,7 @@ export function fsWrite(
   return { ok: true, mtime: Math.floor(statSync(dest).mtimeMs) };
 }
 
-export function fsDownloadChunk(path: string, offset: number, len: number): { dataB64: string; eof: boolean; size: number } {
+export function fsDownloadChunk(path: string, offset: number, len: number): { bytes: Uint8Array; eof: boolean; size: number } {
   const abs = resolve(path);
   const size = statSync(abs).size;
   if (size > MAX_TRANSFER_BYTES) throw new Error(`file exceeds ${MAX_TRANSFER_BYTES} bytes`);
@@ -232,7 +238,9 @@ export function fsDownloadChunk(path: string, offset: number, len: number): { da
     const fd = openSync(abs, "r");
     try { readSync(fd, buf, 0, length, offset); } finally { closeSync(fd); }
   }
-  return { dataB64: buf.toString("base64"), eof: end >= size, size };
+  // 返回裸字节：调用方（server.ts 的 sendRpcResult）会把它装进 rpcBin 帧的
+  // blob。此前这里 toString("base64") 造成 4/3 膨胀，45KiB 分片要占 61.5KB。
+  return { bytes: new Uint8Array(buf), eof: end >= size, size };
 }
 
 export function fsArchive(tmpDir: string, path: string): { archivePath: string; size: number } {

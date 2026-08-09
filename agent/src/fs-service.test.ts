@@ -203,9 +203,8 @@ test("fsUploadChunk streams via temp part then copies to destPath on last", () =
   const d = tmp();
   const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
   const dest = join(d, "out.bin");
-  const b64 = (s: string) => Buffer.from(s).toString("base64");
-  fsUploadChunk(tmpDir, "u1", b64("hello "), { first: true });
-  const r = fsUploadChunk(tmpDir, "u1", b64("world"), { last: true, destPath: dest });
+  fsUploadChunk(tmpDir, "u1", Buffer.from("hello "), { first: true });
+  const r = fsUploadChunk(tmpDir, "u1", Buffer.from("world"), { last: true, destPath: dest });
   expect(r.written).toBe(11);
   expect(rfSync(dest).toString()).toBe("hello world");
   // temp part removed after copy
@@ -217,8 +216,7 @@ test("fsUploadChunk overwrites an existing dest file", () => {
   const d = tmp();
   const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
   const dest = join(d, "out.bin"); writeFileSync(dest, "OLD-LONG-CONTENT");
-  const b64 = (s: string) => Buffer.from(s).toString("base64");
-  fsUploadChunk(tmpDir, "u2", b64("new"), { first: true, last: true, destPath: dest });
+  fsUploadChunk(tmpDir, "u2", Buffer.from("new"), { first: true, last: true, destPath: dest });
   expect(rfSync(dest).toString()).toBe("new");
   rmSync(d, { recursive: true, force: true });
 });
@@ -226,8 +224,8 @@ test("fsUploadChunk overwrites an existing dest file", () => {
 test("fsUploadChunk throws and cleans temp when exceeding MAX_TRANSFER_BYTES", () => {
   const d = tmp();
   const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
-  // one byte over the cap, base64-encoded
-  const big = Buffer.alloc(MAX_TRANSFER_BYTES + 1).toString("base64");
+  // one byte over the cap
+  const big = Buffer.alloc(MAX_TRANSFER_BYTES + 1);
   expect(() => fsUploadChunk(tmpDir, "u3", big, { first: true })).toThrow();
   expect(existsSync(join(tmpDir, "psupload-u3.part"))).toBe(false);
   rmSync(d, { recursive: true, force: true });
@@ -237,11 +235,11 @@ test("fsDownloadChunk reads a window and reports size + eof", () => {
   const d = tmp();
   writeFileSync(join(d, "f.bin"), "abcdefghij"); // 10 bytes
   const r1 = fsDownloadChunk(join(d, "f.bin"), 0, 4);
-  expect(Buffer.from(r1.dataB64, "base64").toString()).toBe("abcd");
+  expect(Buffer.from(r1.bytes).toString()).toBe("abcd");
   expect(r1.size).toBe(10);
   expect(r1.eof).toBe(false);
   const r2 = fsDownloadChunk(join(d, "f.bin"), 8, 4); // only 2 left
-  expect(Buffer.from(r2.dataB64, "base64").toString()).toBe("ij");
+  expect(Buffer.from(r2.bytes).toString()).toBe("ij");
   expect(r2.eof).toBe(true);
   rmSync(d, { recursive: true, force: true });
 });
@@ -256,6 +254,72 @@ test("fsDownloadChunk throws when file exceeds MAX_TRANSFER_BYTES", () => {
   // Keep this test lightweight: a normal small file must NOT throw.
   expect(() => fsDownloadChunk(p, 0, 8)).not.toThrow();
   rmSync(d, { recursive: true, force: true });
+});
+
+// 字节 fixture 必须是 byteOffset>0 的**视图**，不能是全新数组。
+// 真实调用里 blob 来自 unpackBinFrame 的 subarray，byteOffset 恒 > 0；
+// 若写盘时误用 blob.buffer 就会把整帧（魔数+JSON头）写进用户文件。
+// 用全新数组做 fixture 时 .buffer 与 subarray 表现一致，这个 bug 会全绿通过。
+function viewOf(payload: number[]): Uint8Array {
+  const backing = new Uint8Array(payload.length + 64);
+  backing.fill(0xcc); // 前后填哨兵字节，误用 .buffer 时会混进文件
+  backing.set(payload, 37);
+  return backing.subarray(37, 37 + payload.length);
+}
+
+// 非法 UTF-8：孤立代理项 + 裸续字节。任何 toString("utf8") 往返都会毁掉它们。
+const EVIL_BYTES = [0xed, 0xa0, 0x80, 0x80, 0xff, 0xfe, 0x41, 0x42];
+
+test("fsUploadChunk 写入的字节与传入逐字节相同（非法 UTF-8 + 视图输入）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-up-"));
+  const bytes = viewOf(EVIL_BYTES);
+  expect(bytes.byteOffset).toBeGreaterThan(0); // 前提：确实是视图
+  const dest = join(dir, "out.bin");
+  fsUploadChunk(dir, "u1", bytes, { first: true, last: true, destPath: dest });
+  const got = rfSync(dest);
+  expect(got.length).toBe(EVIL_BYTES.length); // 误用 .buffer 时这里会是 72
+  expect(Array.from(got)).toEqual(EVIL_BYTES);
+});
+
+test("fsUploadChunk 多片追加，拼接结果逐字节正确", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-up2-"));
+  const a = viewOf([0xed, 0xa0, 0x80]);
+  const b = viewOf([0xff, 0xfe, 0x00]);
+  const dest = join(dir, "out.bin");
+  fsUploadChunk(dir, "u2", a, { first: true });
+  fsUploadChunk(dir, "u2", b, { last: true, destPath: dest });
+  expect(Array.from(rfSync(dest))).toEqual([0xed, 0xa0, 0x80, 0xff, 0xfe, 0x00]);
+});
+
+test("fsWrite 写入的字节与传入逐字节相同（视图输入）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-w-"));
+  const dest = join(dir, "f.bin");
+  const bytes = viewOf(EVIL_BYTES);
+  fsWrite(dir, "w1", bytes, { first: true, last: true, path: dest });
+  const got = rfSync(dest);
+  expect(got.length).toBe(EVIL_BYTES.length);
+  expect(Array.from(got)).toEqual(EVIL_BYTES);
+});
+
+test("fsDownloadChunk 返回字节而非 base64，内容逐字节正确", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-dl-"));
+  const src = join(dir, "in.bin");
+  writeFileSync(src, Buffer.from(EVIL_BYTES));
+  const r = fsDownloadChunk(src, 0, 1024);
+  expect(r.bytes).toBeInstanceOf(Uint8Array);
+  expect(Array.from(r.bytes)).toEqual(EVIL_BYTES);
+  expect(r.eof).toBe(true);
+  expect(r.size).toBe(EVIL_BYTES.length);
+});
+
+test("fsDownloadChunk 的 len=0 探测仍返回 size", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ps-dl2-"));
+  const src = join(dir, "in.bin");
+  writeFileSync(src, Buffer.alloc(5000));
+  const r = fsDownloadChunk(src, 0, 0);
+  expect(r.bytes.length).toBe(0);
+  expect(r.size).toBe(5000);
+  expect(r.eof).toBe(false);
 });
 
 test("fsArchive zips a directory into tmpDir (requires system zip)", () => {
@@ -285,8 +349,7 @@ test("fsUploadChunk sanitizes uploadId to keep temp part under tmpDir", () => {
   const d = tmp();
   const tmpDir = join(d, "tmp"); mkdirSync(tmpDir);
   const dest = join(d, "out.bin");
-  const b64 = (s: string) => Buffer.from(s).toString("base64");
-  fsUploadChunk(tmpDir, "../../etc/passwd", b64("x"), { first: true, last: true, destPath: dest });
+  fsUploadChunk(tmpDir, "../../etc/passwd", Buffer.from("x"), { first: true, last: true, destPath: dest });
   expect(rfSync(dest).toString()).toBe("x");
   // the .part file must live inside tmpDir, not follow the malicious uploadId
   const parts = readdirSync(tmpDir).filter((n) => n.startsWith("psupload-"));
@@ -401,7 +464,7 @@ test("fsRead returns file mtime (epoch ms), also on binary early-return", () => 
 test("fsWrite single chunk creates file and returns mtime", () => {
   const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
   const dest = join(d, "out.txt");
-  const r = fsWrite(tmpD, "w1", Buffer.from("hello").toString("base64"), { first: true, last: true, path: dest });
+  const r = fsWrite(tmpD, "w1", Buffer.from("hello"), { first: true, last: true, path: dest });
   expect(rfSync(dest, "utf8")).toBe("hello");
   expect((r as any).ok).toBe(true);
   expect((r as any).mtime).toBe(Math.floor(statS(dest).mtimeMs));
@@ -412,9 +475,9 @@ test("fsWrite single chunk creates file and returns mtime", () => {
 test("fsWrite multi-chunk concatenates in order", () => {
   const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
   const dest = join(d, "out.txt");
-  fsWrite(tmpD, "w2", Buffer.from("你好").toString("base64"), { first: true });
-  fsWrite(tmpD, "w2", Buffer.from("世界").toString("base64"), {});
-  fsWrite(tmpD, "w2", Buffer.from("!").toString("base64"), { last: true, path: dest });
+  fsWrite(tmpD, "w2", Buffer.from("你好"), { first: true });
+  fsWrite(tmpD, "w2", Buffer.from("世界"), {});
+  fsWrite(tmpD, "w2", Buffer.from("!"), { last: true, path: dest });
   expect(rfSync(dest, "utf8")).toBe("你好世界!");
   rmSync(d, { recursive: true, force: true });
 });
@@ -424,7 +487,7 @@ test("fsWrite rejects on mtime mismatch, leaves target untouched, cleans part", 
   const dest = join(d, "out.txt");
   writeFileSync(dest, "original");
   const stale = Math.floor(statS(dest).mtimeMs) - 1000; // simulate outdated snapshot
-  expect(() => fsWrite(tmpD, "w3", Buffer.from("new").toString("base64"),
+  expect(() => fsWrite(tmpD, "w3", Buffer.from("new"),
     { first: true, last: true, path: dest, expectMtime: stale })).toThrow(/^conflict/);
   expect(rfSync(dest, "utf8")).toBe("original");
   expect(readdirSync(tmpD)).toEqual([]);
@@ -438,11 +501,11 @@ test("fsWrite conflict error carries code 'conflict'; success leaves no staging 
   const stale = Math.floor(statS(dest).mtimeMs) - 1000;
   let caught: any = null;
   try {
-    fsWrite(tmpD, "wc", Buffer.from("x").toString("base64"), { first: true, last: true, path: dest, expectMtime: stale });
+    fsWrite(tmpD, "wc", Buffer.from("x"), { first: true, last: true, path: dest, expectMtime: stale });
   } catch (e) { caught = e; }
   expect(caught?.code).toBe("conflict");
   // A successful atomic write must not leave a .pswrite-*.tmp staging file behind.
-  fsWrite(tmpD, "wc2", Buffer.from("done").toString("base64"), { first: true, last: true, path: dest });
+  fsWrite(tmpD, "wc2", Buffer.from("done"), { first: true, last: true, path: dest });
   expect(rfSync(dest, "utf8")).toBe("done");
   expect(readdirSync(d).filter((n) => n.startsWith(".pswrite"))).toEqual([]);
   rmSync(d, { recursive: true, force: true });
@@ -453,7 +516,7 @@ test("fsWrite with matching expectMtime overwrites and returns new mtime", () =>
   const dest = join(d, "out.txt");
   writeFileSync(dest, "original");
   const cur = Math.floor(statS(dest).mtimeMs);
-  const r = fsWrite(tmpD, "w4", Buffer.from("updated").toString("base64"),
+  const r = fsWrite(tmpD, "w4", Buffer.from("updated"),
     { first: true, last: true, path: dest, expectMtime: cur });
   expect(rfSync(dest, "utf8")).toBe("updated");
   expect((r as any).mtime).toBe(Math.floor(statS(dest).mtimeMs));
@@ -464,10 +527,10 @@ test("fsWrite without expectMtime force-overwrites; with expectMtime but target 
   const d = tmp(); const tmpD = join(d, "t"); mkdirSync(tmpD);
   const dest = join(d, "out.txt");
   writeFileSync(dest, "x");
-  fsWrite(tmpD, "w5", Buffer.from("forced").toString("base64"), { first: true, last: true, path: dest });
+  fsWrite(tmpD, "w5", Buffer.from("forced"), { first: true, last: true, path: dest });
   expect(rfSync(dest, "utf8")).toBe("forced");
   const gone = join(d, "gone.txt");
-  expect(() => fsWrite(tmpD, "w6", Buffer.from("y").toString("base64"),
+  expect(() => fsWrite(tmpD, "w6", Buffer.from("y"),
     { first: true, last: true, path: gone, expectMtime: 123 })).toThrow(/^conflict/);
   expect(existsSync(gone)).toBe(false);
   rmSync(d, { recursive: true, force: true });
