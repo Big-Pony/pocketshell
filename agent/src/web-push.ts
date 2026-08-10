@@ -62,7 +62,14 @@ export async function sendPush(
     // "the VAPID credentials ... do not correspond"）。只取 message 会把这些
     // 丢光，UI 上只剩一句什么也没说的通用文本。
     const body = typeof err.body === "string" ? err.body.trim() : "";
-    if (code) return { ok: false, gone: code === 404 || code === 410, error: body ? `status ${code}: ${body}` : `status ${code}` };
+    // 404/410 = 推送服务说这个 endpoint 没了（正常回收）。
+    // 403 = VAPID 凭据对不上（换服务器或重生成密钥后旧订阅必得此码，
+    //       body 明说 "the VAPID credentials ... do not correspond"）。
+    //       此前不算 gone，坏订阅会永久卡住：每次发都失败、每次都不清理，
+    //       而浏览器侧那条用旧 key 建的订阅也还在，自愈同样救不了。
+    //       当成 gone 删掉即可——下次连接时前端会用新 key 重建（14 期）。
+    const gone = code === 404 || code === 410 || code === 403;
+    if (code) return { ok: false, gone, error: body ? `status ${code}: ${body}` : `status ${code}` };
     return { ok: false, gone: false, error: e instanceof Error ? e.message : String(e) };
   }
 }

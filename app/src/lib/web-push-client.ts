@@ -36,13 +36,26 @@ export async function hasBrowserSubscription(): Promise<boolean> {
 export async function subscribeAndReport(conn: PushConn): Promise<void> {
   const reg = await navigator.serviceWorker.ready;
   const { publicKey } = await conn.notifyGetVapidKey();
-  const sub = await reg.pushManager.subscribe({
+  // Uint8Array<ArrayBufferLike> vs BufferSource: lib.dom 的 PushSubscription-
+  // OptionsInit 只认 ArrayBuffer 支撑的视图，而 TS 5.7 起 Uint8Array 带上了
+  // 缓冲区类型参数。运行时是同一个 Uint8Array，取 .buffer 让签名对上。
+  const opts: PushSubscriptionOptionsInit = {
     userVisibleOnly: true,
-    // Uint8Array<ArrayBufferLike> vs BufferSource: lib.dom 的 PushSubscription-
-    // OptionsInit 只认 ArrayBuffer 支撑的视图，而 TS 5.7 起 Uint8Array 带上了
-    // 缓冲区类型参数。运行时是同一个 Uint8Array，取 .buffer 让签名对上。
     applicationServerKey: urlBase64ToUint8Array(publicKey).buffer as ArrayBuffer,
-  });
+  };
+  let sub: PushSubscription;
+  try {
+    sub = await reg.pushManager.subscribe(opts);
+  } catch (e) {
+    // InvalidStateError = 已存在一个用**不同 applicationServerKey** 建的订阅
+    // （换服务器或 agent 重生成 VAPID 后必然如此）。规范要求先退订再重订，
+    // 这是 VAPID 换掉后唯一的自动恢复路径——用户"手动关一次再开就好"正是
+    // 因为关的时候走了 unsubscribeBrowser()。
+    if ((e as Error)?.name !== "InvalidStateError") throw e;
+    const stale = await reg.pushManager.getSubscription();
+    if (stale) await stale.unsubscribe();
+    sub = await reg.pushManager.subscribe(opts);
+  }
   await conn.notifySubscribe(sub.toJSON());
 }
 

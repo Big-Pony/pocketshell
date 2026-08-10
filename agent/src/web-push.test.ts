@@ -53,7 +53,9 @@ test("http-level failure carries status and body, not the library's generic mess
     throw e;
   }, { pubKey: "A", subscription: {} }, "x");
   expect(r.ok).toBe(false);
-  expect(r.gone).toBe(false);
+  // gone 从 false 改成 true 是 14 期需求 4 的刻意行为变更，见下方 403 用例：
+  // 这里只关心「诊断信息有没有被丢光」，清理与否由那条用例负责。
+  expect(r.gone).toBe(true);
   expect(r.error).toContain("403");
   expect(r.error).toContain("VAPID credentials");
 });
@@ -61,4 +63,20 @@ test("http-level failure carries status and body, not the library's generic mess
 test("an error with no body falls back to its message", async () => {
   const r = await sendPush(async () => { throw new Error("socket hang up"); }, { pubKey: "A", subscription: {} }, "x");
   expect(r.error).toBe("socket hang up");
+});
+
+// 14 期需求 4（R7 配套）：403 = VAPID 密钥对不上（换服务器/重生成密钥后
+// 旧订阅会得到它，body 明说"the VAPID credentials do not correspond"）。
+// 此前不算 gone，于是坏订阅永久卡在 push-subs.json 里，每次都失败、
+// 每次都不清理。与 410/404 同等对待即可——下次连接时前端会自动重建。
+test("403 也算 gone，坏订阅要被清掉", async () => {
+  const r = await sendPush(async () => {
+    const e: any = new Error("Received unexpected response code");
+    e.statusCode = 403;
+    e.body = "the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscription";
+    throw e;
+  }, { pubKey: "A", subscription: {} }, "x");
+  expect(r.ok).toBe(false);
+  expect(r.gone, "403 应触发订阅清理").toBe(true);
+  expect(r.error).toContain("403");
 });

@@ -312,7 +312,11 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   "notify.setConfig": (ctx, p) => { ctx.notify.setConfig(parse.notifySetConfig(p).config); return ok({ ok: true }); },
   "notify.getVapidPublicKey": (ctx) => ok({ publicKey: ctx.notify.vapidPublicKey() }),
   "notify.subscribeWebPush": (ctx, p) => {
-    if (ctx.devicePub) ctx.notify.addSub(ctx.devicePub, parse.notifySubscribe(p).subscription);
+    // devicePub 为 null 时此前静默丢弃订阅却仍回 ok:true，前端会以为订阅成功、
+    // 然后永远收不到推送且无从排查（14 期需求 4）。正常握手后它不该为 null，
+    // 但静默失败通道必须堵上：抛出去由 dispatchRpc 转成 rpc_error。
+    if (!ctx.devicePub) throw new Error("no_device_identity");
+    ctx.notify.addSub(ctx.devicePub, parse.notifySubscribe(p).subscription);
     return ok({ ok: true });
   },
   "notify.unsubscribeWebPush": (ctx) => {

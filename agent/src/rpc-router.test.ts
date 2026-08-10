@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parse, compressHistory } from "./rpc-router";
+import { parse, compressHistory, RPC_TABLE } from "./rpc-router";
 
 test("parse.gitReview 解析 worktree 三档", () => {
   expect(parse.gitReview({ cwd: "/p", scope: { kind: "worktree", stage: "staged" } }))
@@ -50,4 +50,27 @@ test("压不小的短载荷原样返回，不带 enc", () => {
 test("parse.termHistory 读 lines，缺省为 undefined（= 全量 scrollback）", () => {
   expect(parse.termHistory({ session: "work", lines: 1000 })).toEqual({ session: "work", lines: 1000 });
   expect(parse.termHistory({ session: "work" }).lines).toBeUndefined();
+});
+
+// 14 期需求 4：devicePub 为 null 时此前静默丢弃订阅却照样回 {ok:true}，
+// 前端以为订阅成功、然后永远收不到推送且无从排查。正常握手后它不该为 null，
+// 但静默失败通道必须堵上——handler 抛错，dispatchRpc 转成 rpc_error 回给前端。
+test("notify.subscribeWebPush 在没有设备身份时报错而不是静默成功", () => {
+  const ctx = {
+    devicePub: null,
+    notify: { addSub: () => { throw new Error("不该被调用"); } },
+  } as unknown as Parameters<(typeof RPC_TABLE)["notify.subscribeWebPush"]>[0];
+  expect(() => RPC_TABLE["notify.subscribeWebPush"](ctx, { subscription: {} }))
+    .toThrow("no_device_identity");
+});
+
+test("notify.subscribeWebPush 有设备身份时照常写入", () => {
+  const seen: unknown[] = [];
+  const ctx = {
+    devicePub: "PUB",
+    notify: { addSub: (k: string, s: unknown) => seen.push([k, s]) },
+  } as unknown as Parameters<(typeof RPC_TABLE)["notify.subscribeWebPush"]>[0];
+  const out = RPC_TABLE["notify.subscribeWebPush"](ctx, { subscription: { endpoint: "e" } });
+  expect(seen).toEqual([["PUB", { endpoint: "e" }]]);
+  expect(out).toEqual({ kind: "result", result: { ok: true } });
 });
