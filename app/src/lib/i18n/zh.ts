@@ -21,6 +21,9 @@ export default {
       offline: "已断开",
     },
     banner: "⚠ 连接已断开 · 会话由服务器托管，任务继续运行 · 正在重连…",
+    // 首次连接与断线重连是两回事：前者没什么"断开"可言，
+    // 用同一句"已断开"会让第一次打开 App 的人以为出了问题（14 期需求 5）。
+    bannerFirstConnect: "正在连接服务器…",
     empty: {
       title: "开始使用 PocketShell",
       body: "点右上角 ＋ 新建 tmux / shell 窗口 · 双击上方标签页关闭窗口 · 键盘 Fn + n 也能快捷新建",
@@ -325,6 +328,11 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       title: "切换项目根",
       empty: "暂无历史",
     },
+  },
+  terminal: {
+    // 开 App 后的第一个等待：term.history（tmux capture + gzip + 可能分片）。
+    // 此前是纯黑空终端、零反馈（14 期需求 5）。
+    seeding: "正在读取会话历史…",
   },
   keyboard: {
     tab: {

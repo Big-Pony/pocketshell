@@ -48,3 +48,15 @@ test("zh and en use the same {placeholder} names per key", () => {
     expect(ph(pick(en)), `placeholder mismatch at ${key}`).toEqual(ph(pick(zh)));
   }
 });
+
+// 14 期需求 5：App.svelte 整体渲染开销大（xterm + 全部面板），故这里只焊住
+// 文案分支的前提——两条 key 都在且措辞不同。真机走查确认它挂在 everOnline 上。
+test("首次连接与断线重连用两句不同的横幅文案", () => {
+  for (const [name, dict] of [["zh", zh], ["en", en]] as const) {
+    const app = (dict as any).app;
+    expect(app.bannerFirstConnect, `${name} 缺 app.bannerFirstConnect`).toBeTruthy();
+    expect(app.banner, `${name} 的首连文案与重连文案相同`).not.toBe(app.bannerFirstConnect);
+    // 首连场景下不该出现"断开/Disconnected"——那正是这次要修的语义错位。
+    expect(app.bannerFirstConnect).not.toMatch(/断开|Disconnected/);
+  }
+});

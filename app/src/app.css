@@ -112,7 +112,7 @@ button, input, select, textarea {
    两个加载原子（components/ui/Skeleton、ProgressLine）各自在组件内处理，
    FileTree 的全屏转圈遮罩已在需求 5b 中被替换掉。 */
 @media (prefers-reduced-motion: reduce) {
-  .dot-run, .dot-wait, .dot {
+  .dot-run, .dot-wait, .dot, .conn-connecting {
     animation: none !important;
   }
 }

@@ -457,3 +457,22 @@ test("hardens the xterm helper textarea against mobile IME", async () => {
     xtermCtl.useMock = true; // restore the mock for anything added after this
   }
 });
+
+// ──────────────────────────────────────────────────────────────
+// 14 期需求 5：首屏 seed 提示。term.history 是用户开 App 后的第一个等待
+// （tmux capture + gzip + 可能分片），此前是纯黑空终端、零反馈。
+// ──────────────────────────────────────────────────────────────
+test("首屏读取历史期间显示提示，历史到达后消失", async () => {
+  let release: ((v: unknown) => void) | null = null;
+  const conn = stubConn();
+  conn.rpc = vi.fn(async (method: string) => {
+    if (method === "term.paneInfo") return { currentCommand: "zsh", alternateOn: false, isShell: true };
+    if (method === "term.history") return new Promise((r) => { release = r; });
+    return {};
+  }) as any;
+  const { container, findByText } = render(TerminalView, { props: propsFor(conn, true) });
+  expect(await findByText("正在读取会话历史…")).toBeTruthy();
+  expect(container.querySelector(".pl")).toBeTruthy();
+  release!({ data: toB64(new TextEncoder().encode("HISTORY\n")) });
+  await waitFor(() => expect(container.querySelector(".term-seed")).toBeNull());
+});

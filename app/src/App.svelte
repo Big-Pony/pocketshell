@@ -137,6 +137,9 @@
   const demo = DEMO ? createDemoConnection(wsUrl) : null;
   const conn = demo ? demo.conn : new Connection({ url: wsUrl });
   let status = $state<ConnStatus>("connecting");
+  // 首次连接与断线重连是两回事：前者没什么"断开"可言，用同一句"已断开"
+  // 会让第一次打开 App 的人以为出了问题（14 期需求 5）。
+  let everOnline = $state(false);
   let updInfo = $state<CheckResult | null>(null);
   let updOpen = $state(false);
   let updPhase = $state<string | null>(null);
@@ -249,6 +252,7 @@
   conn.onStatus((s) => {
     const wasOnline = status === "online";
     status = s;
+    if (s === "online") everOnline = true;
     if (s === "online" && !wasOnline) {
       reportPresence();
       void refreshGitBranch();   // 重连后补一次，分割条左侧才不会一直空着
@@ -934,7 +938,7 @@
 
   {#if notice}<div class="notice">{notice}</div>{/if}
   {#if status !== "online"}
-    <div class="banner">{$t('app.banner')}</div>
+    <div class="banner">{everOnline ? $t('app.banner') : $t('app.bannerFirstConnect')}</div>
   {/if}
 
   <div class="top" style="flex: {topFlex} 1 0;" role="application" aria-label={$t('app.topAria')} bind:this={topEl}>
@@ -1158,7 +1162,13 @@
     color: var(--dim);
   }
   .conn-online { color: var(--ok); }
-  .conn-connecting { color: var(--amber); }
+  /* 连接中缓慢呼吸：状态点是"正在发生"而不是一个静止结论（14 期需求 5）。
+     reduced-motion 下由 app.css 统一关掉。 */
+  .conn-connecting {
+    color: var(--amber);
+    animation: conn-breathe 1.6s var(--ease-breathe, ease-in-out) infinite alternate;
+  }
+  @keyframes conn-breathe { from { opacity: 0.4; } to { opacity: 1; } }
   .conn-offline { color: var(--red); }
   .conn-dot {
     width: 7px;

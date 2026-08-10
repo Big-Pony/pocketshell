@@ -19,6 +19,7 @@ export default {
       offline: "Disconnected",
     },
     banner: "⚠ Disconnected · Sessions are hosted by the server and keep running · Reconnecting…",
+    bannerFirstConnect: "Connecting to the agent…",
     empty: {
       title: "Get started with PocketShell",
       body: "Tap ＋ top-right to open a tmux / shell window · double-tap a top tab to close it · or press Fn + n on the keyboard",
@@ -328,6 +329,9 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       title: "Switch project root",
       empty: "No history",
     },
+  },
+  terminal: {
+    seeding: "Loading session history…",
   },
   keyboard: {
     tab: {

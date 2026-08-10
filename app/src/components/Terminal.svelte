@@ -89,6 +89,8 @@
   import { DEFAULT_SETTINGS } from "../lib/settings";
   import type { TermHistoryResult } from "../lib/net/protocol";
   import { familyOf, termFontFamily, type FontId } from "../lib/font";
+  import { t } from "svelte-i18n";
+  import ProgressLine from "./ui/ProgressLine.svelte";
 
   let {
     conn,
@@ -114,6 +116,9 @@
   } = $props();
 
   let host: HTMLDivElement;
+  // 首屏 seed（term.history）。历史行数越多越慢——设置项说明原文就是
+  // "越少越快"，说明这条早被识别为慢路径。此前纯黑等待、零反馈（14 期需求 5）。
+  let seeding = $state(true);
   let term: Terminal;
   let fit: FitAddon;
   // Plain `let term/fit` are NOT reactive — a visibility $effect keyed on them
@@ -480,6 +485,8 @@
         conn.attach(sessionId, h?.seq ?? 0, { seed: true });
       } catch {
         conn.attach(sessionId);
+      } finally {
+        seeding = false;
       }
     };
 
@@ -766,9 +773,29 @@
   });
 </script>
 
-<div class="term" class:hidden={!active} class:closed bind:this={host}></div>
+<div class="term-wrap" class:hidden={!active}>
+  <div class="term" class:closed bind:this={host}></div>
+  {#if seeding}
+    <div class="term-seed">
+      <span>{$t('terminal.seeding')}</span>
+      <!-- delayMs={0}：这条路径**已知必然慢**（tmux capture + gzip + 可能分片），
+           不需要延迟判断。 -->
+      <ProgressLine delayMs={0} />
+    </div>
+  {/if}
+</div>
 
 <style>
+  .term-wrap { position: relative; width: 100%; height: 100%; }
+  /* 首屏读取历史时的极淡提示。居中偏上，不遮挡将要出现的第一行输出。 */
+  .term-seed {
+    position: absolute; left: 0; right: 0; top: 38%;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 0 24px;
+    color: var(--dim); font-size: 0.72rem;
+    pointer-events: none;
+  }
+  .term-seed :global(.pl) { max-width: 180px; }
   .term {
     width: 100%;
     height: 100%;
