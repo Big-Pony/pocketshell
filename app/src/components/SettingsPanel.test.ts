@@ -242,3 +242,52 @@ test("重看会清掉两套教程的看过标记", async () => {
   expect(localStorage.getItem("ps.kbTutSeen.layered")).toBeNull();
   expect(localStorage.getItem("ps.kbTutSeen.flick")).toBeNull();
 });
+
+// ── 14 期需求 5：通知开关 pending 态 ──
+// 全项目最容易诱发重复点击的位置：点下去 UI 完全不动（cfg 仅在成功后更新），
+// 而 notify.wire 要在 agent 侧读写 CC 的配置文件，重复点会真的重复执行。
+test("通知工具开关点击后立即禁用，避免重复触发 notify.wire", async () => {
+  let releaseWire: ((v: unknown) => void) | null = null;
+  const wireConn = {
+    notifyGetConfig: async () => ({}),
+    notifyWire: vi.fn(() => new Promise((r) => { releaseWire = r; })),
+    notifyUnwire: vi.fn(async () => ({ ok: true })),
+    notifySetConfig: vi.fn(async () => {}),
+  } as any;
+  const { getByText, getAllByText } = render(SettingsPanel, {
+    props: { conn: wireConn, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+  });
+  await fireEvent.click(getByText("通知"));           // 展开通知分区
+  const onBtns = await vi.waitFor(() => {
+    const b = getAllByText("开") as HTMLButtonElement[];
+    expect(b.length).toBeGreaterThan(0);
+    return b;
+  });
+  const first = onBtns[0] as HTMLButtonElement;
+  await fireEvent.click(first);
+  await vi.waitFor(() => expect(first.disabled).toBe(true));
+  releaseWire!({ ok: true });
+  await vi.waitFor(() => expect(first.disabled).toBe(false));
+  // 二次点击在 pending 期间被忽略：只发出过一次 wire
+  expect(wireConn.notifyWire).toHaveBeenCalledTimes(1);
+});
+
+test("webhook 测试期间按钮变「测试中…」并禁用", async () => {
+  let release: ((v: unknown) => void) | null = null;
+  const wh = { id: "w1", name: "群机器人", kind: "wecom", url: "https://x", enabled: true };
+  const whConn = {
+    notifyGetConfig: async () => ({ webhooks: [wh] }),
+    notifyTestWebhook: vi.fn(() => new Promise((r) => { release = r; })),
+    notifySetConfig: vi.fn(async () => {}),
+  } as any;
+  const { getByText, findByText } = render(SettingsPanel, {
+    props: { conn: whConn, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+  });
+  await fireEvent.click(getByText("通知"));
+  const btn = (await findByText("测试发送")) as HTMLButtonElement;
+  await fireEvent.click(btn);
+  expect(await findByText("测试中…")).toBeTruthy();
+  expect(btn.disabled).toBe(true);
+  release!({ ok: true });
+  await findByText("测试发送");
+});

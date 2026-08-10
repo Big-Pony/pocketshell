@@ -226,26 +226,53 @@
 
   async function persistCfg() { await conn.notifySetConfig(cfg); }
 
+  // 进行中的通知操作（14 期需求 5）。notify.wire 要在 agent 侧读写 CC 配置
+  // 文件，重复点会重复执行——而此前点下去 UI 一动不动（cfg 只在成功后更新），
+  // 这是全项目最容易被连点的地方。
+  let pending = $state<Set<string>>(new Set());
+  function markPending(k: string, on: boolean) {
+    const s = new Set(pending);
+    if (on) s.add(k); else s.delete(k);
+    pending = s;  // Svelte 5 不追踪 Set 的原地修改，必须换新对象
+  }
+
   async function toggleTool(tool: "claude" | "codex" | "opencode" | "kimi", on: boolean) {
-    const r = on ? await conn.notifyWire(tool) : await conn.notifyUnwire(tool);
-    if (!r.ok) { wireError = { ...wireError, [tool]: reasonText(r.reason, r.detail) }; return; }
-    wireError = { ...wireError, [tool]: null };
-    cfg = { ...cfg, tools: { ...cfg.tools, [tool]: on } };
-    await persistCfg();
+    if (pending.has(tool)) return;      // 二次点击直接忽略
+    markPending(tool, true);
+    try {
+      const r = on ? await conn.notifyWire(tool) : await conn.notifyUnwire(tool);
+      if (!r.ok) { wireError = { ...wireError, [tool]: reasonText(r.reason, r.detail) }; return; }
+      wireError = { ...wireError, [tool]: null };
+      cfg = { ...cfg, tools: { ...cfg.tools, [tool]: on } };
+      await persistCfg();
+    } finally {
+      markPending(tool, false);
+    }
   }
 
   // 需求 5：接管 CC 的 statusLine 取上下文用量。单独一个开关而不是并进
   // 工具列表——它不产生通知，混在一起用户会以为开了就能收推送。
   let contextError = $state<string | null>(null);
   async function toggleContext(on: boolean) {
-    const r = on ? await conn.contextWire() : await conn.contextUnwire();
-    if (!r.ok) { contextError = reasonText(r.reason, r.detail); return; }
-    contextError = null;
-    cfg = { ...cfg, contextStatusline: on };
-    await persistCfg();
+    if (pending.has("context")) return;
+    markPending("context", true);
+    try {
+      const r = on ? await conn.contextWire() : await conn.contextUnwire();
+      if (!r.ok) { contextError = reasonText(r.reason, r.detail); return; }
+      contextError = null;
+      cfg = { ...cfg, contextStatusline: on };
+      await persistCfg();
+    } finally {
+      markPending("context", false);
+    }
   }
 
   async function toggleWebPush(on: boolean) {
+    if (pending.has("webPush")) return;
+    markPending("webPush", true);
+    try { await toggleWebPushInner(on); } finally { markPending("webPush", false); }
+  }
+  async function toggleWebPushInner(on: boolean) {
     if (!on) {
       await conn.notifyUnsubscribe();
       // 浏览器侧也要退订，否则推送服务里留着一条再不会用到的活订阅。放在
@@ -305,9 +332,18 @@
     cfg = { ...cfg, webhooks: cfg.webhooks.map((w) => (w.id === id ? { ...w, ...patch } : w)) };
     void persistCfg();
   }
+  // 会让 agent 发真实外网 HTTP（企业微信/飞书/Slack），秒级且可能超时，
+  // 此前零反馈（14 期需求 5）。沿用 update.checking 的按钮内文案切换模式。
+  let testingId = $state("");
   async function testWebhook(id: string) {
-    const r = await conn.notifyTestWebhook(id);
-    testMsg = { ...testMsg, [id]: r.ok ? { ok: true, text: tr("notify.webhook.testOk") } : { ok: false, text: r.error || tr("notify.wireFailed") } };
+    if (testingId) return;
+    testingId = id;
+    try {
+      const r = await conn.notifyTestWebhook(id);
+      testMsg = { ...testMsg, [id]: r.ok ? { ok: true, text: tr("notify.webhook.testOk") } : { ok: false, text: r.error || tr("notify.wireFailed") } };
+    } finally {
+      testingId = "";
+    }
   }
 
   // 演示态：这几个入口在沙盘里没有意义（没有真设备、没有真二进制可更新）。
@@ -584,8 +620,8 @@
           {#if wireError[tool]}<div class="err">{wireError[tool]}</div>{/if}
         </div>
         <div class="seg">
-          <button class:on={!cfg.tools[tool]} onclick={() => toggleTool(tool, false)}>{$t('notify.off')}</button>
-          <button class:on={cfg.tools[tool]} onclick={() => toggleTool(tool, true)}>{$t('notify.on')}</button>
+          <button class:on={!cfg.tools[tool]} disabled={pending.has(tool)} onclick={() => toggleTool(tool, false)}>{$t('notify.off')}</button>
+          <button class:on={cfg.tools[tool]} disabled={pending.has(tool)} onclick={() => toggleTool(tool, true)}>{$t('notify.on')}</button>
         </div>
       </div>
     {/each}
@@ -598,8 +634,8 @@
         {#if contextError}<div class="err">{contextError}</div>{/if}
       </div>
       <div class="seg">
-        <button class:on={!cfg.contextStatusline} onclick={() => toggleContext(false)}>{$t('notify.off')}</button>
-        <button class:on={cfg.contextStatusline} onclick={() => toggleContext(true)}>{$t('notify.on')}</button>
+        <button class:on={!cfg.contextStatusline} disabled={pending.has("context")} onclick={() => toggleContext(false)}>{$t('notify.off')}</button>
+        <button class:on={cfg.contextStatusline} disabled={pending.has("context")} onclick={() => toggleContext(true)}>{$t('notify.on')}</button>
       </div>
     </div>
     <p class="nt-hint">{$t('notify.contextDesc')}</p>
@@ -617,8 +653,8 @@
         {/if}
       </div>
       <div class="seg">
-        <button class:on={!cfg.webPush} onclick={() => toggleWebPush(false)}>{$t('notify.off')}</button>
-        <button class:on={cfg.webPush} onclick={() => toggleWebPush(true)}>{$t('notify.on')}</button>
+        <button class:on={!cfg.webPush} disabled={pending.has("webPush")} onclick={() => toggleWebPush(false)}>{$t('notify.off')}</button>
+        <button class:on={cfg.webPush} disabled={pending.has("webPush")} onclick={() => toggleWebPush(true)}>{$t('notify.on')}</button>
       </div>
     </div>
 
@@ -662,7 +698,9 @@
         <textarea class="wh-tpl" rows="2" value={w.template ?? ""} placeholder={$t('notify.webhook.template')}
           onchange={(e) => patchWebhook(w.id, { template: (e.target as HTMLTextAreaElement).value || undefined })}></textarea>
         <div class="wh-actions">
-          <button class="btn" onclick={() => testWebhook(w.id)}>{$t('notify.webhook.test')}</button>
+          <button class="btn" disabled={testingId === w.id} onclick={() => testWebhook(w.id)}>
+            {testingId === w.id ? $t('common.testing') : $t('notify.webhook.test')}
+          </button>
           {#if testMsg[w.id]}<span class="wh-test-msg" class:ok={testMsg[w.id].ok}>{testMsg[w.id].text}</span>{/if}
         </div>
         {#if w.lastError}<div class="err">{$t('notify.webhook.lastError')}: {w.lastError}</div>{/if}
