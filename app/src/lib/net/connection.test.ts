@@ -1534,3 +1534,73 @@ test("sessions 帧的 features 字段被记录，驱动 rpcBin 的能力位回�
   h.deliver({ type: "sessions", sessions: [], features: ["bin"] } as unknown as ServerMsg);
   expect((h.conn as any).features.has("bin")).toBe(true);
 });
+
+// ──────────────────────────────────────────────────────────────
+// 14 期需求 3：下载方向的死线记账（rpc 的 expectBytes）。
+//
+// rpc() 此前只记**请求 JSON**（约 150 字节），56KB 的响应体完全不入账 ——
+// 下载死线因此恒为基线 10s。上传方向的 rpcBin 一直计整帧是对的，这是一处
+// 上下行不对称，且该路径此前**无回归测试**。
+// 窗口提到 16 之后这条更要紧：16 lane 各等一个 56KB 响应体，不修死线的话
+// 要下行 ≥716kbps 才不超时，慢链路上健康的下载会整体失败。
+// ──────────────────────────────────────────────────────────────
+describe("rpc expectBytes 记账（14 期需求 3）", () => {
+  it("不传 expectBytes 时死线仍恰好是基线 10s（既有调用点行为零变化）", async () => {
+    const h = harness();
+    const p = h.conn.rpc("git.status", { cwd: "/x" });
+    const rejected = p.then(() => "resolved", (e: any) => e.code);
+    // 差 1ms 不该超时……
+    h.sched.advance(RPC_BASE_TIMEOUT_MS - 1);
+    expect((h.conn as any).pending.size).toBe(1);
+    // ……整 10s 就该超时。小 rpc 拿到的仍是**恰好** 10s。
+    h.sched.advance(1);
+    expect(await rejected).toBe("rpc_timeout");
+  });
+
+  it("传 expectBytes 时按预期响应体大小放宽死线（满窗下载）", async () => {
+    // 单片 56KB（57344B）还在 BASE_COVERED_BYTES(62500) 之内，按 rpcDeadlineMs
+    // 的设计本就该拿恰好 10s——**真正会挂掉的是满窗**：16 lane 并发时后面的
+    // lane 要等前面的响应体先排空，排队量约 918KB，远超基线覆盖量。
+    // 这也正是修复前的失效形状：响应体不入账 ⇒ 16 个 lane 全都以为只排了
+    // 16×124B ⇒ 每个都拿恰好 10s ⇒ 下行低于约 716kbps 时健康的下载整体失败。
+    const h = harness();
+    const len = 56 * 1024;
+    const W = 16;
+    const ps = Array.from({ length: W }, (_, i) =>
+      h.conn.rpc("fs.downloadChunk", { path: "/f", offset: i * len, len }, { expectBytes: len })
+        .then(() => "resolved", (e: any) => e.code),
+    );
+    // 满窗排队量：16 × (请求字节 + 56KB)。
+    const queued = (h.conn as any).inflightBytes as number;
+    expect(queued).toBeGreaterThan(W * len);
+    // 最后发出的那个 lane 的死线 = rpcDeadlineMs(满窗排队量)，必须远超 10s。
+    const want = rpcDeadlineMs(queued);
+    expect(want, "满窗死线必须超过 10s 基线，否则慢链路上健康的下载会整体失败")
+      .toBeGreaterThan(RPC_BASE_TIMEOUT_MS);
+    // 基线 10s 处：只有**第一个** lane 该超时——它入队时前面什么都没排，
+    // 自己的 56KB 又在基线覆盖量之内，按设计本就拿恰好 10s。其余 15 个都
+    // 排在别人后面，必须活过基线。修复前它们会在这一刻全部倒下。
+    h.sched.advance(RPC_BASE_TIMEOUT_MS);
+    expect((h.conn as any).pending.size, "排在队尾的 lane 必须活过 10s 基线").toBe(W - 1);
+    expect(await ps[0]).toBe("rpc_timeout");
+    // 走到最后一个 lane 的死线，它才该超时（说明死线确实是按排队量算的）。
+    h.sched.advance(want - RPC_BASE_TIMEOUT_MS - 1);
+    expect((h.conn as any).pending.size).toBe(1);
+    h.sched.advance(1);
+    expect(await ps[W - 1]).toBe("rpc_timeout");
+    await Promise.all(ps);
+  });
+
+  it("结算时把 expectBytes 一并释放，不泄漏 inflightBytes", async () => {
+    const h = harness();
+    const len = 56 * 1024;
+    const p = h.conn.rpc("fs.downloadChunk", { path: "/f", offset: 0, len }, { expectBytes: len });
+    expect((h.conn as any).inflightBytes).toBeGreaterThan(len);
+    const id = lastRpcId(h);
+    h.deliver({ type: "response", id, ok: true, result: {} } as any);
+    await p;
+    // 完全释放 —— pending 里存的 bytes 已含 expectBytes，releaseRpc 读的是
+    // 同一个字段，所以 response/超时/断线三条释放路径自动正确。
+    expect((h.conn as any).inflightBytes).toBe(0);
+  });
+});

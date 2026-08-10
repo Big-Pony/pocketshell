@@ -26,7 +26,9 @@ export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
 export const CHUNK_BYTES = 56 * 1024;
 
 export type RpcLike = {
-  rpc(method: string, params?: unknown): Promise<unknown>;
+  // opts.expectBytes：预期响应体字节数，喂给 rpc 死线的排队记账。只有下载
+  // 分片这类"调用方本就知道会拿回多少字节"的路径需要传（见 connection.ts）。
+  rpc(method: string, params?: unknown, opts?: { expectBytes?: number }): Promise<unknown>;
   rpcBin(method: string, params: unknown, blob: Uint8Array): Promise<unknown>;
 };
 export type UploadItem = { name: string; size: number; blob: Blob; destName: string };
@@ -217,7 +219,13 @@ export async function fetchChunksWindowed(
     while (next < windows.length) {
       const i = next++;
       const [offset, len] = windows[i];
-      const r = (await conn.rpc("fs.downloadChunk", { path, offset, len })) as DownloadChunkResult;
+      const r = (await conn.rpc(
+        "fs.downloadChunk",
+        { path, offset, len },
+        // 响应体就是这么多字节，让死线把它算进去。不传的话 16 lane 并发
+        // 每个都以为只排了 150 字节，死线全塌回 10s 下限。
+        { expectBytes: len },
+      )) as DownloadChunkResult;
       // 不需要在这里 slice：handleRpcBin 在 resolve 前已经 slice 过一次真拷贝
       // （因为 blob 要跨帧存活到整个文件下载完）。这里再 slice 是白拷一遍。
       // 若哪天有人「优化」掉 handleRpcBin 里那次 slice，这些 parts 会各自钉住

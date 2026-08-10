@@ -290,13 +290,22 @@ export class Connection {
     this.ws.close();
   }
 
-  rpc(method: string, params?: unknown): Promise<unknown> {
+  /**
+   * @param opts.expectBytes 预期**响应体**的字节数。传输类调用点（下载分片）
+   *   本来就知道要拿多少字节（`len` 就在参数里），由它显式告知，见下方记账注释。
+   *   不传即维持原行为，既有全部调用点零变化。
+   */
+  rpc(method: string, params?: unknown, opts?: { expectBytes?: number }): Promise<unknown> {
     const id = String(++this.rpcSeq);
     // acceptEnc: 声明本端认得 gzip 压缩的响应与二进制帧承载。agent 只在看到
     // 对应值时才用，所以老 agent（忽略未知字段）与新 agent 都能正确工作。
     const msg = { type: "rpc", id, method, params, acceptEnc: ["gzip", "bin"] } as ClientMsg;
     const raw = encode(msg);
-    const bytes = raw.length; // UTF-8 ≈ length here; payloads are base64/ASCII
+    // 出站字节 + **预期入站字节**。后者此前完全不入账，导致下载方向的死线
+    // 恒为 10s：56KB 的响应体在慢链路上根本来不及收完，健康的下载整体失败
+    // （上传方向的 rpcBin 一直计整帧，是对的——这是一处上下行不对称）。
+    // 窗口提到 16 之后尤其致命：16 lane 各等一个 56KB 响应体。
+    const bytes = raw.length + Math.max(0, opts?.expectBytes ?? 0); // UTF-8 ≈ length here; payloads are base64/ASCII
     const startedAt = this.sched.now();
     return new Promise<unknown>((resolve, reject) => {
       // The deadline covers everything queued AHEAD of this call too: on a
