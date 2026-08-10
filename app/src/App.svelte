@@ -990,7 +990,7 @@
   {/if}
   <div class="bottom" class:hidden={fullscreen} style="flex: {1 - topFlex} 1 0;">
     <div class="panel-slot" class:hidden={bottomPanel !== "file"}>
-      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} {treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
+      <FilePanel {conn} onOpenFile={(p) => openFile(p, "code")} onOpenDiff={(p) => openFile(p, "diff")} onCd={(p) => sendActive('cd ' + JSON.stringify(p) + '\n')} {getFocusedPwd} {rootTick} refreshTick={treeTick} onToast={showToast} onToastRich={(title, detail, ms) => showToast(title, { detail, ms })} onNewFile={handleNewFile} />
     </div>
     <div class="panel-slot" class:hidden={bottomPanel !== "task"}>
       <TaskPanel

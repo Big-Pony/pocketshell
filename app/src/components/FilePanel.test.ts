@@ -58,3 +58,27 @@ describe("FilePanel 透传 rootTick", () => {
     });
   });
 });
+
+// 14 期需求 2 附带修复：App 传 {treeTick}、FilePanel 收 refreshTick，
+// 名字对不上导致「新建文件后目录树自动刷新」从未生效。
+// 这条断言锁住 FilePanel → FileTree 的透传链本身是通的，
+// App 侧的传参名由 Step 3 的手工核对保证（App.svelte 整体渲染开销过大，不进单测）。
+describe("FilePanel 透传 refreshTick", () => {
+  it("refreshTick 变化会让 FileTree 重新读目录", async () => {
+    const c = conn();
+    const props = { ...baseProps(), conn: c, refreshTick: 0 };
+    const { rerender } = render(FilePanel, { props });
+    await vi.waitFor(() => {
+      expect(c.rpc.mock.calls.some((x: any[]) => x[0] === "fs.tree")).toBe(true);
+    });
+
+    c.rpc.mockClear();
+    await rerender({ ...props, refreshTick: 1 });
+    await vi.waitFor(() => {
+      expect(
+        c.rpc.mock.calls.some((x: any[]) => x[0] === "fs.tree"),
+        "refreshTick 变化应触发目录重读",
+      ).toBe(true);
+    });
+  });
+});
