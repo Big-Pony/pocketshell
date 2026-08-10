@@ -21,8 +21,8 @@ test("loadSettings returns defaults when nothing stored", () => {
 
 test("saveSettings persists and loadSettings reads back", () => {
   const store = memStore();
-  saveSettings({ layout: "win", kbLayout: "layered", fontSize: 14, historyLines: 500, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" }, store);
-  expect(loadSettings(store)).toEqual({ layout: "win", kbLayout: "layered", fontSize: 14, historyLines: 500, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono" });
+  saveSettings({ layout: "win", kbLayout: "layered", fontSize: 14, historyLines: 500, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono", htmlPreviewWidth: "tablet" }, store);
+  expect(loadSettings(store)).toEqual({ layout: "win", kbLayout: "layered", fontSize: 14, historyLines: 500, vibrate: "off", theme: "cream-light", language: "en", groupTabsByType: false, fontFamily: "ubuntu-mono", htmlPreviewWidth: "tablet" });
 });
 
 test("loadSettings fills missing keys with defaults", () => {
@@ -317,4 +317,23 @@ test("historyLines 合法档位原样保留", () => {
     expect(loadSettings(store).historyLines).toBe(n);
   }
   expect(HISTORY_LINE_CHOICES).toEqual([200, 500, 1000, 2000]);
+});
+
+// 14 期需求 1：HTML 预览宽度档位持久化。默认手机档——日常预览的多半是
+// 自己写的移动端页面，桌面档只在看桌面站时才需要。
+// 注：本文件用 test() 而非 describe/it，故此处随文件风格。
+test("htmlPreviewWidth 默认是手机档", () => {
+  expect(DEFAULT_SETTINGS.htmlPreviewWidth).toBe("phone");
+});
+
+test("htmlPreviewWidth 能存能读", () => {
+  const store = memStore();
+  saveSettings({ ...DEFAULT_SETTINGS, htmlPreviewWidth: "desktop" }, store);
+  expect(loadSettings(store).htmlPreviewWidth).toBe("desktop");
+});
+
+test("htmlPreviewWidth 脏数据回落默认值", () => {
+  const store = memStore();
+  store.setItem("ps.settings", JSON.stringify({ htmlPreviewWidth: "watch" }));
+  expect(loadSettings(store).htmlPreviewWidth).toBe("phone");
 });

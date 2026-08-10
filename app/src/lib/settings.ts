@@ -6,6 +6,8 @@
 import { CUSTOM_PREFIX, isSafeThemeId } from "./theme-css";
 import type { FontId } from "./font";
 import type { KbLayoutId } from "./term/keymap";
+import type { PreviewWidthId } from "./ui/preview-width";
+import { PREVIEW_WIDTHS } from "./ui/preview-width";
 
 const KEY = "ps.settings";
 
@@ -56,6 +58,11 @@ export interface Settings {
   /** 等宽字体 id。与 fonts.css 的 `:root[data-font="…"]` 一一对应。 */
   fontFamily: FontId;
   /**
+   * HTML 预览的渲染宽度档位（14 期需求 1）。默认 phone——日常预览的多半是
+   * 自己写的移动端页面；桌面档是给"看桌面站长什么样"用的。
+   */
+  htmlPreviewWidth: PreviewWidthId;
+  /**
    * 首帧用的缓存值，由 `applyTheme()` 写入，**只被 index.html / demo.html 的内联
    * 防闪烁脚本读**（那段脚本跑在任何 CSS 之前，没法自己算出当前主题的颜色）。
    * 缺失时脚本用硬编码的默认主题兜底，所以它们是可选的、坏了也只是闪一下。
@@ -77,6 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: "zh",
   groupTabsByType: false,     // 默认关闭，维持现状
   fontFamily: "maple-mono",
+  htmlPreviewWidth: "phone",
 };
 
 /**
@@ -144,6 +152,12 @@ function coerceKbLayout(v: unknown): KbLayoutId {
     : DEFAULT_SETTINGS.kbLayout;
 }
 
+function coercePreviewWidth(v: unknown): PreviewWidthId {
+  return typeof v === "string" && PREVIEW_WIDTHS.some((w) => w.id === v)
+    ? (v as PreviewWidthId)
+    : DEFAULT_SETTINGS.htmlPreviewWidth;
+}
+
 /** 首帧缓存值是要直接写进 DOM 的，只收干净的短字符串。
  *  上限 64：最长的字体 URL 是 /fonts/google-sans-code-regular.woff2（36 字符），
  *  32 装不下。 */
@@ -187,6 +201,7 @@ export function loadSettings(store: Storage = localStorage): Settings {
       groupTabsByType: parsed.groupTabsByType === true,
       fontFamily: coerceFont(parsed.fontFamily),
       kbLayout: coerceKbLayout(parsed.kbLayout),
+      htmlPreviewWidth: coercePreviewWidth(parsed.htmlPreviewWidth),
     };
     // 只在真有值时挂上，缺省保持 undefined —— 这样 `toEqual(DEFAULT_SETTINGS)`
     // 之类的断言不会被两个可选字段搅乱。
