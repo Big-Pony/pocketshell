@@ -192,7 +192,10 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     },
     fontSize: {
       label: "Terminal font size",
-      desc: "Pinch-to-zoom also works on the terminal",
+      // Was "Pinch-to-zoom also works on the terminal" — the terminal never
+      // implemented pinch-to-zoom; settings must not describe features that
+      // do not exist (phase 14, req 1).
+      desc: "Text size in the terminal, 10–18",
     },
     historyLines: {
       label: "History lines",

@@ -190,7 +190,9 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     },
     fontSize: {
       label: "终端字号",
-      desc: "也支持在终端区双指缩放",
+      // 原文是「也支持在终端区双指缩放」——终端从未实现双指缩放（多份 spec 里
+      // 一直是未完成切片），设置面板不该描述不存在的功能（14 期需求 1）。
+      desc: "终端文字大小，10–18",
     },
     historyLines: {
       label: "历史加载行数",
