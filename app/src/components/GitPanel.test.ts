@@ -217,3 +217,73 @@ describe("GitPanel 审查入口", () => {
     await waitFor(() => expect(getByText(/\+142/)).toBeTruthy());
   });
 });
+
+// ---------------------------------------------------------------------------
+// 14 期需求 2：Git 面板 cwd 跟随聚焦终端。
+// 项目根书签在 localStorage，响应式靠 App 的 rootTick 计数器广播。
+// 三条断言分别锁住三个曾经的根因：根被冻结成 const / 未接 rootTick / effect 无依赖。
+// ---------------------------------------------------------------------------
+describe("GitPanel 跟随项目根", () => {
+  function cwdConn() {
+    return {
+      rpc: vi.fn(async (m: string) => {
+        if (m === "git.branches") return { current: "main", branches: ["main"] };
+        if (m === "git.log") return { commits: [] };
+        return { files: [] };
+      }),
+    } as any;
+  }
+
+  it("rootTick 变化时按新的项目根重新拉取", async () => {
+    localStorage.setItem("pocketshell.projectRoot", "/repo-a");
+    const conn = cwdConn();
+    const { rerender } = render(GitPanel, {
+      props: { conn, onOpenDiff: () => {}, rootTick: 0 },
+    });
+    await vi.waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(3));
+    expect(conn.rpc.mock.calls[0][1].cwd).toBe("/repo-a");
+
+    conn.rpc.mockClear();
+    localStorage.setItem("pocketshell.projectRoot", "/repo-b");
+    await rerender({ conn, onOpenDiff: () => {}, rootTick: 1 });
+
+    await vi.waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(3));
+    for (const call of conn.rpc.mock.calls) {
+      expect(call[1].cwd, "切根后三个 RPC 都该用新根").toBe("/repo-b");
+    }
+  });
+
+  // 这一条锁的是比「不自动刷新」更隐蔽的缺陷：根被冻结成 const 时，
+  // 手点 ⟳ 刷的也是旧目录——按钮看起来正常响应，数据却是错的。
+  it("切根后点 ⟳ 刷新用的是新根，不是挂载时那个", async () => {
+    localStorage.setItem("pocketshell.projectRoot", "/repo-a");
+    const conn = cwdConn();
+    const { rerender } = render(GitPanel, {
+      props: { conn, onOpenDiff: () => {}, rootTick: 0 },
+    });
+    await vi.waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(3));
+
+    localStorage.setItem("pocketshell.projectRoot", "/repo-b");
+    await rerender({ conn, onOpenDiff: () => {}, rootTick: 1 });
+    await vi.waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(6));
+
+    conn.rpc.mockClear();
+    (await screen.findByLabelText("刷新")).click();
+    await vi.waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(3));
+    expect(conn.rpc.mock.calls[0][1].cwd).toBe("/repo-b");
+  });
+
+  // rootTick 不变时不得重复拉取：effect 会因为任何 $state 变化而重跑，
+  // 少了 lastTick 比对就会在每次 branches/commits 赋值后再打一轮 RPC，无限循环。
+  it("rootTick 不变时不重复拉取", async () => {
+    localStorage.setItem("pocketshell.projectRoot", "/repo-a");
+    const conn = cwdConn();
+    const { rerender } = render(GitPanel, {
+      props: { conn, onOpenDiff: () => {}, rootTick: 3 },
+    });
+    await vi.waitFor(() => expect(conn.rpc).toHaveBeenCalledTimes(3));
+    await rerender({ conn, onOpenDiff: () => {}, rootTick: 3 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(conn.rpc).toHaveBeenCalledTimes(3);
+  });
+});

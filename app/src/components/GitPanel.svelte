@@ -7,10 +7,19 @@
   import GitReview from "./GitReview.svelte";
   import type { ReviewScope } from "../lib/net/protocol";
 
-  let { conn, onOpenDiff }: { conn: Connection; onOpenDiff: (path: string) => void } = $props();
+  let { conn, onOpenDiff, rootTick = 0 }: {
+    conn: Connection;
+    onOpenDiff: (path: string) => void;
+    // App 切换聚焦 tab 时 ++（项目根书签已随之改写）。默认 0 让既有测试与
+    // 任何未透传该 prop 的调用方保持挂载时加载一次的原行为。
+    rootTick?: number;
+  } = $props();
 
-  const root = loadProjectRoot();
-  const noRoot = root === "/";
+  // 根必须是 $state 且在用时重读 localStorage——localStorage 不是响应源，
+  // 冻结成 const 会让「切了 tab 后连 ⟳ 刷新都刷旧目录」（14 期需求 2 根因 A）。
+  // 与 FilePanel.svelte:24 / FileTree.svelte:88 同一模式。
+  let root = $state(loadProjectRoot());
+  const noRoot = $derived(root === "/");
   let branches = $state<{ current: string; branches: string[] }>({ current: "", branches: [] });
   let commits = $state<any[]>([]);
   let changes = $state<{ path: string; status: string }[]>([]);
@@ -52,7 +61,9 @@
   const brHidden = $derived(brOrdered.length - BRANCH_LIMIT);
 
   async function loadAll() {
-    if (noRoot) return;
+    // 每次拉取前重读书签：⟳ 刷新与跟随切根共用这条路径，读旧值就等于刷错目录。
+    root = loadProjectRoot();
+    if (root === "/") return;
     notice = "";
     try {
       // A8: the three reads are independent — run them concurrently instead of
@@ -79,12 +90,19 @@
     try { await loadAll(); } finally { refreshing = false; }
   }
 
-  // Load once on mount. Guarding on `!commits.length && !notice` would re-fire
-  // forever on a repo with zero commits / a clean tree (loadAll succeeds but
-  // leaves commits=[] and notice=""), producing an unbounded git.* rpc storm.
-  // loadMore() re-runs loadAll() explicitly, so the effect only covers mount.
-  let didLoad = false;
-  $effect(() => { if (!noRoot && !didLoad) { didLoad = true; void loadAll(); } });
+  // 挂载时加载一次，此后每当 rootTick 变化（App 切了聚焦 tab、项目根书签
+  // 已改写）重新加载。lastTick 是**普通变量不是 $state**：effect 只应跟踪
+  // rootTick，把「上次见过的值」记成响应式会让它自己触发自己。
+  //
+  // 不能守在 `!commits.length && !notice` 上——空仓库/干净工作树时 loadAll
+  // 成功但两者都为空，会无限重放 git.* rpc。以 tick 为唯一判据即可。
+  let lastTick = -1;
+  $effect(() => {
+    const tick = rootTick;
+    if (tick === lastTick) return;
+    lastTick = tick;
+    void loadAll();
+  });
 </script>
 
 <div class="git">
