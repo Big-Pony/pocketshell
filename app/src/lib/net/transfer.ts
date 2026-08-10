@@ -355,7 +355,10 @@ export function triggerBrowserDownload(blob: Blob, filename: string): void {
 }
 
 export async function downloadFolder(
-  conn: RpcLike, path: string, opts: { onArchiving?: (busy: boolean) => void } = {},
+  conn: RpcLike, path: string,
+  // onProgress 透传给下载阶段（14 期需求 5）：onArchiving 只覆盖 fs.archive，
+  // 而其后整段下载才是最耗时的部分，调用方原先在最长的一段里拿不到任何信号。
+  opts: { onArchiving?: (busy: boolean) => void; onProgress?: (downloaded: number, total: number) => void } = {},
 ): Promise<void> {
   opts.onArchiving?.(true);
   let archivePath: string;
@@ -363,7 +366,7 @@ export async function downloadFolder(
     const r = (await conn.rpc("fs.archive", { path })) as { archivePath: string; size: number };
     archivePath = r.archivePath;
   } finally { opts.onArchiving?.(false); }
-  const blob = await downloadFileBlob(conn, archivePath);
+  const blob = await downloadFileBlob(conn, archivePath, { onProgress: opts.onProgress });
   triggerBrowserDownload(blob, baseName(path) + ".zip");
   try { await conn.rpc("fs.op", { op: "delete", path: archivePath }); } catch { /* best-effort cleanup */ }
 }

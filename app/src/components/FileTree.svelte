@@ -13,6 +13,8 @@
   import ContextMenu from "./ContextMenu.svelte";
   import UploadDialog from "./UploadDialog.svelte";
   import { downloadFileBlob, triggerBrowserDownload, downloadFolder, baseName, MAX_TRANSFER_BYTES } from "../lib/net/transfer";
+  import Skeleton from "./ui/Skeleton.svelte";
+  import ProgressLine from "./ui/ProgressLine.svelte";
 
   let { conn, onOpenFile, onCd, getFocusedPwd, rootTick, refreshTick, onToast, onToastRich, onRefresh, onNewFile }: {
     conn: Connection; onOpenFile: (path: string) => void; onCd: (path: string) => void;
@@ -98,15 +100,38 @@
     if (tick !== lastRefreshTick) { lastRefreshTick = tick; void reloadKeepingExpanded(); }
   });
 
+  // 下载进度（14 期需求 5）。onProgress 钩子 transfer.ts 早就提供了，
+  // 只是从来没有调用方传它——MB 级文件此前全程静默。
+  let dlProgress = $state<number | null>(null);
   async function doDownloadFile(n: FileNode) {
+    dlProgress = 0;
     try {
-      const blob = await downloadFileBlob(conn, n.path);
+      const blob = await downloadFileBlob(conn, n.path, {
+        onProgress: (done, total) => { dlProgress = total > 0 ? done / total : null; },
+      });
       triggerBrowserDownload(blob, n.name);
-    } catch (e: any) { notice = e?.message ?? tr("filetree.error.download"); }
+    } catch (e: any) {
+      notice = e?.message ?? tr("filetree.error.download");
+    } finally {
+      dlProgress = null;
+    }
   }
   async function doDownloadDir(n: FileNode) {
-    try { await downloadFolder(conn, n.path, { onArchiving: (b) => (archiving = b) }); }
-    catch (e: any) { notice = e?.message ?? tr("filetree.error.downloadDir"); }
+    dlProgress = 0;
+    try {
+      await downloadFolder(conn, n.path, {
+        onArchiving: (b) => (archiving = b),
+        // 打包完还有整段下载，那才是最耗时的部分——原实现在 archive 结束就
+        // 收掉了反馈（downloadFolder 的 finally 只覆盖 fs.archive），
+        // 用户在最长的一段里什么都看不到。
+        onProgress: (done, total) => { dlProgress = total > 0 ? done / total : null; },
+      });
+    } catch (e: any) {
+      notice = e?.message ?? tr("filetree.error.downloadDir");
+    } finally {
+      dlProgress = null;
+      archiving = false;
+    }
   }
 
   const view = $derived(filterTree(nodes, query));
@@ -133,7 +158,15 @@
   // Refresh the tree in place: re-fetch the root level and every level that was
   // expanded, keeping the same expansion so newly-created files (e.g. from AI)
   // appear without collapsing the user's view.
+  // 递归刷新中（14 期需求 5）。这是唯一的 N 次串行 RTT 路径（每个展开目录
+  // 一次 await），按钮不禁用就会被连点叠加请求。
+  let reloading = $state(false);
   async function reloadKeepingExpanded() {
+    if (reloading) return;
+    reloading = true;
+    try { await reloadKeepingExpandedInner(); } finally { reloading = false; }
+  }
+  async function reloadKeepingExpandedInner() {
     notice = "";
     const expanded = collectExpandedPaths(nodes);
     const rebuild = async (path: string): Promise<FileNode[]> => {
@@ -154,11 +187,22 @@
     } catch (e: any) { notice = e?.message ?? tr("filetree.error.refresh"); }
   }
 
+  // 展开中的目录路径集合。点了 ▸ 之后 agent 要跑 git status --porcelain，
+  // 大仓耗时不可忽略，此前完全没反应（14 期需求 5）。
+  let expanding = $state<Set<string>>(new Set());
+  function markExpanding(path: string, on: boolean) {
+    // Svelte 5 不追踪 Set 的原地修改，必须换新对象。
+    const s = new Set(expanding);
+    if (on) s.add(path); else s.delete(path);
+    expanding = s;
+  }
   async function toggle(n: FileNode) {
     if (n.type === "file") { onOpenFile(n.path); return; }
     if (n.expanded) { nodes = collapse(nodes, n.path); return; }
+    markExpanding(n.path, true);
     try { nodes = setChildren(nodes, n.path, await loadLevel(n.path)); }
     catch (e: any) { notice = e?.message ?? tr("filetree.error.load"); }
+    finally { markExpanding(n.path, false); }
   }
 
   function openMenu(n: FileNode, anchor: HTMLElement) {
@@ -280,9 +324,17 @@
     <button class="path-text mono" title={root}
       onclick={() => { navigator.clipboard?.writeText(root); onToastRich?.(tr("filetree.copied.title"), root, 2500); }}><bdi>{root}</bdi></button>
     <button class="root-switch" aria-label={$t('filetree.aria.switchRoot')} onclick={openHistory}>⇄</button>
-    <button class="root-refresh" aria-label={$t('filetree.aria.refresh')} onclick={reloadKeepingExpanded}>⟳</button>
+    <button class="root-refresh" aria-label={$t('filetree.aria.refresh')} disabled={reloading}
+      onclick={reloadKeepingExpanded}>⟳</button>
   </div>
   <input class="filter" bind:value={query} placeholder={$t('filetree.filterPh')} />
+  <!-- 树顶的一条细进度（14 期需求 5）：递归刷新与下载共用这块位置。
+       打包阶段走不确定进度，下载阶段有 total 就按比例。都不全屏、都不转圈。 -->
+  {#if dlProgress !== null}
+    <ProgressLine value={archiving ? null : dlProgress} delayMs={0} />
+  {:else if reloading}
+    <ProgressLine />
+  {/if}
   {#if notice}<div class="ft-notice">{notice}</div>{/if}
   <ul class="tree" bind:this={treeEl} onscroll={onScroll}>
     <!-- 合成根节点上方的 ".." 上探行：点击把面板根切到父目录（走 applyRoot，
@@ -315,6 +367,12 @@
         <button class="more" aria-label={$t('common.more')}
           onclick={(e) => { e.stopPropagation(); openMenu(n, e.currentTarget); }}>⋯</button>
       </li>
+      {#if expanding.has(n.path)}
+        <!-- 展开中：在该行下方占住位置。大仓 git status 不是瞬时的。 -->
+        <li class="row-wrap sk-wrap" style="padding-left: {6 + (depth + 1) * 14}px">
+          <Skeleton rows={2} variant="tree" />
+        </li>
+      {/if}
     {/each}
   </ul>
 
@@ -366,11 +424,11 @@
     </div>
   {/if}
 
+  <!-- 14 期需求 5：原来这里是 position:fixed 满屏遮罩 + 旋转 spinner，
+       同时违反用户明确要求的「不要全屏」与「不要转圈」两条。改成路径栏下方
+       一行极淡文字，进度交给树顶那条 ProgressLine，界面不再被锁住。 -->
   {#if archiving}
-    <div class="arch-overlay" role="status" aria-label={$t('filetree.archivingAria')}>
-      <div class="spinner"></div>
-      <div class="arch-txt">{$t('filetree.archiving')}</div>
-    </div>
+    <div class="arch-txt" role="status" aria-label={$t('filetree.archivingAria')}>{$t('filetree.archiving')}</div>
   {/if}
 
   {#if confirmDel}
@@ -484,10 +542,10 @@
   .dlg-btns button.ok { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; font-weight: 700; }
   .dlg-btns button.ok:disabled { opacity: 0.5; }
 
-  .arch-overlay { position: fixed; inset: 0; z-index: 40; background: var(--overlay-bg); display: grid; place-items: center; gap: 10px; }
-  .arch-overlay .arch-txt { color: var(--text); font-size: 0.75rem; text-align: center; }
-  .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  /* 打包提示：一行极淡文字，不遮挡也不锁交互（14 期需求 5 替换全屏遮罩）。 */
+  .arch-txt { color: var(--dim); font-size: 0.68rem; padding: 4px 8px; }
+  /* 展开中的骨架占位行：跟着该目录的层级缩进，视觉上就是"这几行将出现在这里"。 */
+  .sk-wrap { display: block; padding-right: 8px; }
 
   .hist-list { list-style: none; margin: 0 0 14px; padding: 0; max-height: 44vh; overflow-y: auto; text-align: left; }
   .hist-list li { margin-bottom: 5px; }

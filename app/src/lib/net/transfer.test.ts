@@ -194,6 +194,26 @@ test("downloadFolder archives, downloads, then deletes the temp archive", async 
   expect(busy).toEqual([true, false]); // spinner on then off
 });
 
+// 14 期需求 5：onArchiving 只覆盖 fs.archive，其后整段下载才是最耗时的部分。
+// 不透传 onProgress，调用方在最长的一段里拿不到任何信号。
+test("downloadFolder 把 onProgress 透传给下载阶段", async () => {
+  const rpc = vi.fn(async (m: string) => {
+    if (m === "fs.archive") return { archivePath: "/tmp/psarchive-y.zip", size: 4 };
+    if (m === "fs.downloadChunk") return { bytes: new Uint8Array([1, 2, 3, 4]), eof: true, size: 4 };
+    return { ok: true };
+  });
+  const origCreate = URL.createObjectURL; const origRevoke = URL.revokeObjectURL;
+  (URL as any).createObjectURL = vi.fn(() => "blob:y");
+  (URL as any).revokeObjectURL = vi.fn();
+  const seen: [number, number][] = [];
+  await downloadFolder({ rpc } as any, "/a/proj", {
+    onProgress: (done, total) => seen.push([done, total]),
+  });
+  (URL as any).createObjectURL = origCreate; (URL as any).revokeObjectURL = origRevoke;
+  expect(seen.length, "onProgress 从未被调用 —— 没有透传到 downloadFileBlob").toBeGreaterThan(0);
+  expect(seen[seen.length - 1]).toEqual([4, 4]);
+});
+
 // WP-5: windowed upload — concurrency cap, monotonic wire order, closing
 // barrier for the last chunk, cancel, failure, progress. Chunk contents are
 // identifiable because seqBlob sets byte[offset] = offset, so a chunk's first
