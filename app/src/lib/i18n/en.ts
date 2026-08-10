@@ -7,6 +7,10 @@ export default {
     close: "Close",
     more: "More",
     delete: "Delete",
+    loading: "Loading…",
+    saving: "Saving…",
+    applying: "Working…",
+    testing: "Testing…",
   },
   app: {
     status: {

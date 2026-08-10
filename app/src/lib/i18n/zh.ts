@@ -7,6 +7,12 @@ export default {
     close: "关闭",
     more: "更多",
     delete: "删除",
+    // 通用加载文案（14 期需求 5）。既有 12 条场景专属文案不动——
+    // 它们有具体语境（"读取中"/"打包"），通用化反而丢信息。
+    loading: "加载中…",
+    saving: "保存中…",
+    applying: "处理中…",
+    testing: "测试中…",
   },
   app: {
     status: {
