@@ -6,6 +6,7 @@
   import type { DeviceInfo } from "../lib/net/protocol";
   import { parsePairingString } from "../lib/net/pairing";
   import { applyPairing } from "../lib/net/keystore";
+  import Skeleton from "./ui/Skeleton.svelte";
 
   let { conn, onClose, prefill = "" }: { conn: Connection; onClose: () => void; prefill?: string } = $props();
 
@@ -15,9 +16,11 @@
   let deviceName = $state("");
   let error = $state("");
   let devices = $state<DeviceInfo[]>([]);
+  // 加载中 ≠ 空。共用一个条件会让用户先看到一句肯定的错话（14 期需求 5）。
+  let loaded = $state(false);
 
   $effect(() => {
-    const off = conn.onDevices((d) => (devices = d));
+    const off = conn.onDevices((d) => { devices = d; loaded = true; });
     conn.listDevices();
     return off;
   });
@@ -66,7 +69,9 @@
           <button disabled={d.source === "env"} onclick={() => revoke(d)}>{$t('devices.revoke')}</button>
         </div>
       {/each}
-      {#if devices.length === 0}
+      {#if !loaded}
+        <Skeleton rows={2} />
+      {:else if devices.length === 0}
         <div class="dm-empty">{$t('devices.empty')}</div>
       {/if}
     </section>

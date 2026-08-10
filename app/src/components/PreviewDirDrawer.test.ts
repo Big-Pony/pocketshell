@@ -63,3 +63,20 @@ describe("PreviewDirDrawer", () => {
     await waitFor(() => getByText("目录加载失败"));
   });
 });
+
+describe("PreviewDirDrawer 加载态", () => {
+  // 14 期需求 5：fs.tree 回来之前 rows 恒为空，与「目录确实是空的」共用
+  // 一个条件——加载中给出的是肯定的错误结论。
+  it("加载中不显示「空目录」，加载完才显示", async () => {
+    let release: ((v: any) => void) | null = null;
+    const conn = {
+      rpc: vi.fn(() => new Promise((r) => { release = r; })),
+    } as any;
+    const { container } = render(PreviewDirDrawer, {
+      props: { conn, rootDir: "/proj", currentPath: "", open: true, onSelect: () => {}, onClose: () => {} },
+    });
+    expect(container.querySelector(".dempty")).toBeNull();
+    release!({ path: "/proj", nodes: [] });
+    await waitFor(() => expect(container.querySelector(".dempty")).toBeTruthy());
+  });
+});

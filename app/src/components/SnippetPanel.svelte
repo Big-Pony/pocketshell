@@ -5,10 +5,14 @@
   import type { Connection } from "../lib/net/connection";
   import type { Snippet } from "../lib/net/protocol";
   import { mergeSnippets } from "../lib/snippets";
+  import Skeleton from "./ui/Skeleton.svelte";
 
   let { conn, onInsert }: { conn: Connection; onInsert: (text: string) => void } = $props();
 
   let customs = $state<Snippet[]>([]);
+  // 加载中 ≠ 空（14 期需求 5）：listSnippets 是 push 型，回调到达前
+  // groups 恒为空，与「真的没有片段」共用条件就会先给出一句错话。
+  let loaded = $state(false);
   let mode = $state<"use" | "manage">("use");
   let adding = $state(false);
   let editing = $state<Snippet | null>(null);
@@ -27,7 +31,7 @@
   function tapSnippet(s: Snippet) { if (mode === "manage") openEdit(s); else insert(s); }
 
   $effect(() => {
-    const off = conn.onSnippets((s) => (customs = s));
+    const off = conn.onSnippets((s) => { customs = s; loaded = true; });
     conn.listSnippets();
     return off;
   });
@@ -70,7 +74,9 @@
 
   <div class="groups">
     {#if mode === "manage"}<div class="manage-hint">{$t('snippets.manageHint')}</div>{/if}
-    {#if groups.length === 0}
+    {#if !loaded}
+      <Skeleton rows={3} />
+    {:else if groups.length === 0}
       <div class="sp-empty">{$t('snippets.empty')}</div>
     {/if}
     {#each groups as g (g.group)}

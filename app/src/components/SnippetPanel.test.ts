@@ -74,3 +74,24 @@ test("编辑保存走 updateSnippet 而不是 addSnippet", async () => {
     group: "项目", label: "build2", command: "npm run build", autoEnter: true,
   });
 });
+
+// 14 期需求 5：假空态。listSnippets 是 push 型，回调到达前 groups 恒为空，
+// 与「确实没有片段」共用一个条件，于是加载中就先给出一句肯定的错话。
+test("加载中不显示「还没有自定义指令」空态", () => {
+  const conn = { onSnippets: vi.fn(() => () => {}), listSnippets: vi.fn() } as any;
+  const { container } = render(SnippetPanel, { props: { conn, onInsert: () => {} } });
+  expect(container.querySelector(".sp-empty")).toBeNull();
+  expect(container.querySelector(".sk")).not.toBeUndefined();
+});
+
+test("确实加载完且为空时才显示空态", async () => {
+  let cb: ((s: any[]) => void) | null = null;
+  const conn = {
+    onSnippets: vi.fn((f: (s: any[]) => void) => { cb = f; return () => {}; }),
+    listSnippets: vi.fn(),
+  } as any;
+  const { container, findByText } = render(SnippetPanel, { props: { conn, onInsert: () => {} } });
+  cb!([]);
+  await findByText("还没有自定义指令，点右上角 ＋ 添加");
+  expect(container.querySelector(".sp-empty")).toBeTruthy();
+});

@@ -4,6 +4,7 @@
   import { tr } from "../lib/i18n";
   import { Connection } from "../lib/net/connection";
   import { toFileNodes, setChildren, collapse, type FileNode } from "../lib/ui/file-tree";
+  import Skeleton from "./ui/Skeleton.svelte";
 
   let { conn, rootDir, currentPath, open, onSelect, onClose }: {
     conn: Connection; rootDir: string; currentPath: string; open: boolean;
@@ -12,6 +13,9 @@
 
   let nodes = $state<FileNode[]>([]);
   let notice = $state("");
+  // 加载中 ≠ 空目录（14 期需求 5）：fs.tree 回来之前 rows 恒为空，
+  // 与「这个目录确实是空的」共用条件就是给用户一句肯定的错话。
+  let loaded = $state(false);
 
   async function loadLevel(path: string): Promise<FileNode[]> {
     const r = (await conn.rpc("fs.tree", { path })) as { path: string; nodes: any[]; truncated?: boolean };
@@ -23,6 +27,7 @@
     notice = "";
     try { nodes = await loadLevel(rootDir); }
     catch { notice = tr("preview.dirLoadFailed"); nodes = []; }
+    finally { loaded = true; }
   }
 
   async function toggle(n: FileNode) {
@@ -53,7 +58,11 @@
       <button class="dclose" aria-label={$t('preview.exitFullscreen')} onclick={onClose}>✕</button>
     </div>
     {#if notice}<div class="dnotice">{notice}</div>{/if}
-    {#if rows.length === 0 && !notice}<div class="dempty">{$t('preview.dirEmpty')}</div>{/if}
+    {#if !loaded && !notice}
+      <Skeleton rows={4} variant="tree" />
+    {:else if rows.length === 0 && !notice}
+      <div class="dempty">{$t('preview.dirEmpty')}</div>
+    {/if}
     <ul class="tree">
       {#each rows as { n, depth } (n.path)}
         <li>
