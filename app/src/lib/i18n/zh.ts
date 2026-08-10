@@ -616,6 +616,13 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     dir: "目录",
     dirEmpty: "空目录",
     dirLoadFailed: "目录加载失败",
+    // HTML 预览渲染宽度档位（14 期需求 1）
+    width: {
+      title: "渲染宽度",
+      phone: "手机",
+      tablet: "平板",
+      desktop: "桌面",
+    },
   },
   update: {
     badge: "有新版本",

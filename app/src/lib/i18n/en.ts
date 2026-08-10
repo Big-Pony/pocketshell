@@ -613,6 +613,13 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     dir: "Files",
     dirEmpty: "Empty directory",
     dirLoadFailed: "Failed to load directory",
+    // HTML preview render width presets (phase 14, req 1)
+    width: {
+      title: "Render width",
+      phone: "Phone",
+      tablet: "Tablet",
+      desktop: "Desktop",
+    },
   },
   update: {
     badge: "Update available",

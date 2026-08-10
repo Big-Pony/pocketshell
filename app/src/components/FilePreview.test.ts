@@ -1,5 +1,5 @@
 import { render, waitFor } from "@testing-library/svelte";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import FilePreview from "./FilePreview.svelte";
 
 function connStub(overrides: Record<string, any> = {}) {
@@ -137,5 +137,84 @@ describe("FilePreview 底部留白", () => {
     await waitFor(() => {
       expect(container.querySelector(".pv-content.pad-bot")).toBeTruthy();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14 期需求 1：顶栏尺寸按钮 + 底部弹层。
+// 顶栏在 390px 宽下已挤着 预览/源码、目录、退出全屏、⟳，所以收成一个按钮，
+// 点开才展示三档（用户明确要求的形态）。
+// ---------------------------------------------------------------------------
+describe("HTML 预览尺寸切换", () => {
+  // 档位持久化在 localStorage，同文件里的前一条用例会把它写脏，
+  // 每条都从干净状态起（默认手机档）。
+  beforeEach(() => localStorage.clear());
+
+  // html kind 走 fs.read + preview.mint 两条 RPC，默认 stub 的 fs.read 返回 {}
+  // 会让 highlightTo 拿到 undefined，故这里给全。
+  const htmlConn = () =>
+    connStub({
+      rpc: vi.fn(async (m: string) => {
+        if (m === "preview.mint") return { token: "TOK" };
+        if (m === "fs.read") return { content: "<h1>hi</h1>", lang: "html", mtime: 1 };
+        return {};
+      }),
+    });
+
+  const htmlProps = () => ({
+    conn: htmlConn(),
+    path: "/proj/page.html",
+    mode: "code" as const,
+    active: true,
+    base: "/proj",
+    onToast: () => {},
+  });
+
+  it("HTML 渲染态显示尺寸按钮，带当前档位名", async () => {
+    const { findByText } = render(FilePreview, { props: htmlProps() });
+    expect(await findByText(/手机/)).toBeTruthy();
+  });
+
+  it("代码文件不显示尺寸按钮", async () => {
+    const conn = connStub({
+      rpc: vi.fn(async (m: string) => {
+        if (m === "preview.mint") return { token: "TOK" };
+        if (m === "fs.read") return { content: "const a = 1", lang: "javascript", mtime: 1 };
+        return {};
+      }),
+    });
+    const { queryByText, container } = render(FilePreview, {
+      props: { ...htmlProps(), conn, path: "/proj/a.ts" },
+    });
+    await waitFor(() => expect(container.querySelector(".pv-content")).toBeTruthy());
+    expect(queryByText(/手机|平板|桌面/)).toBeNull();
+  });
+
+  it("点按钮弹出三档，选桌面后按钮文案跟着变", async () => {
+    const { findByText, getByText, container } = render(FilePreview, { props: htmlProps() });
+    await fireEvent.click(await findByText(/手机/));
+    await waitFor(() => expect(container.querySelector(".wpick")).toBeTruthy());
+    // 弹层里每行显示 档位名 · 宽度px
+    expect(getByText(/桌面/)).toBeTruthy();
+    expect(container.querySelector(".wpick")!.textContent).toContain("1280px");
+    await fireEvent.click(getByText(/桌面/));
+    await waitFor(() => expect(container.querySelector(".wpick")).toBeNull());
+    expect(await findByText(/桌面/)).toBeTruthy();
+  });
+
+  it("选择持久化到 settings", async () => {
+    const { findByText, getByText } = render(FilePreview, { props: htmlProps() });
+    await fireEvent.click(await findByText(/手机/));
+    await fireEvent.click(getByText(/平板/));
+    await waitFor(() => {
+      const s = JSON.parse(localStorage.getItem("ps.settings") || "{}");
+      expect(s.htmlPreviewWidth).toBe("tablet");
+    });
+  });
+
+  it("源码态不显示尺寸按钮（只在渲染态有意义）", async () => {
+    const { findByText, queryByText } = render(FilePreview, { props: htmlProps() });
+    await fireEvent.click(await findByText("源码"));
+    await waitFor(() => expect(queryByText(/手机|平板|桌面/)).toBeNull());
   });
 });

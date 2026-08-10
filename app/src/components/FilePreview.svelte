@@ -6,6 +6,8 @@
   import { previewKind, previewOrigin, previewUrl, relFromBase } from "../lib/preview";
   import HtmlView from "./HtmlView.svelte";
   import PreviewDirDrawer from "./PreviewDirDrawer.svelte";
+  import { PREVIEW_WIDTHS, widthPxOf, scaleFor, type PreviewWidthId } from "../lib/ui/preview-width";
+  import { loadSettings, saveSettings } from "../lib/settings";
 
   let { conn, path, mode, active, base, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit, onNavigate }: {
     conn: Connection; path: string; mode: "code" | "diff"; active: boolean;
@@ -45,6 +47,23 @@
   let previewFullscreen = $state(false);
   let drawerOpen = $state(false);
   let drawerRoot = $state(""); // anchored to dirOf(path) at fullscreen entry, held for the session
+
+  // HTML 预览渲染宽度（14 期需求 1）。持久化在 settings，默认手机档。
+  let widthId = $state<PreviewWidthId>(loadSettings().htmlPreviewWidth);
+  let widthPickOpen = $state(false);
+  // 内容区可用宽度。缩放要按它算，所以必须实测而非假设 innerWidth——
+  // 全屏与非全屏、有无抽屉时可用宽度不同。
+  let availW = $state(0);
+  let contentEl = $state<HTMLElement | null>(null);
+
+  const widthPx = $derived(widthPxOf(widthId));
+  const previewScale = $derived(scaleFor(widthPx, availW));
+
+  function pickWidth(id: PreviewWidthId) {
+    widthId = id;
+    widthPickOpen = false;
+    saveSettings({ ...loadSettings(), htmlPreviewWidth: id });
+  }
 
   const kind = $derived(previewKind(path));
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
@@ -178,7 +197,21 @@
   $effect(() => { if (active && loaded !== path + mode) { loaded = path + mode; void load(); } });
 
   // Leaving/hiding this tab drops fullscreen + drawer so they can't get stuck off-screen.
-  $effect(() => { if (!active) { previewFullscreen = false; drawerOpen = false; } });
+  $effect(() => { if (!active) { previewFullscreen = false; drawerOpen = false; widthPickOpen = false; } });
+
+  // 容器尺寸随全屏切换/旋屏/键盘弹出而变，用 ResizeObserver 跟住。
+  // jsdom 里 ResizeObserver 可能缺失，故降级为挂载时量一次——
+  // 单测只关心档位与持久化，不验尺寸响应。
+  $effect(() => {
+    const el = contentEl;
+    if (!el) return;
+    const measure = () => { availW = el.clientWidth; };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
 
   // Esc and the browser/hardware Back both exit fullscreen. A pushed history
   // entry lets Back pop it; exiting via the button removes that entry.
@@ -215,6 +248,13 @@
           <span class="pv-label">{$t('preview.videoLabel')}</span>
         {/if}
         <span class="sp"></span>
+        <!-- 尺寸档位：顶栏 390px 下已挤满，故收成一个按钮 + 底部弹层三选一。
+             只在 HTML 渲染态出现——源码态与其他文件类型下这个旋钮没有意义。 -->
+        {#if kind === "html" && view === "render"}
+          <button class="pv-btn wbtn" onclick={() => (widthPickOpen = true)}>
+            ▭ {$t(`preview.width.${widthId}`)}
+          </button>
+        {/if}
         {#if previewFullscreen}
           <button class="pv-btn" onclick={() => (drawerOpen = !drawerOpen)}>{$t('preview.dir')}</button>
           <button class="pv-btn" onclick={() => { previewFullscreen = false; drawerOpen = false; }}>{$t('preview.exitFullscreen')}</button>
@@ -235,7 +275,7 @@
          内容在 iframe 内部滚动，外层留白只会拖出一片死空白。
          判据只看 kind 不掺 mode：上面的模板本就是先按 kind 分派的，
          kind 决定屏幕上真正渲染的是什么，条件与它对齐才不跑偏。 -->
-    <div class="pv-content" data-view={view}
+    <div class="pv-content" data-view={view} bind:this={contentEl}
       class:pad-bot={kind !== "image" && kind !== "video" && !(kind === "html" && view === "render")}>
       {#if kind === "image"}
         <div class="img-wrap">{#if imgSrc}<img src={imgSrc} alt={path} />{/if}</div>
@@ -255,7 +295,7 @@
           buildImageUrl={mdImageUrl}
           onFail={() => { view = "source"; onToast(tr("preview.mdFailed")); }} />
       {:else if kind === "html" && view === "render"}
-        <HtmlView src={htmlSrc} />
+        <HtmlView src={htmlSrc} {widthPx} scale={previewScale} />
       {:else}
         {#if notice}<div class="pv-notice">{notice}</div>{/if}
         {#if mode === "diff"}
@@ -279,6 +319,28 @@
     <PreviewDirDrawer {conn} rootDir={drawerRoot} currentPath={path} open={drawerOpen}
       onSelect={(p) => { drawerOpen = false; onNavigate?.(p); }}
       onClose={() => (drawerOpen = false)} />
+  {/if}
+
+  {#if widthPickOpen}
+    <!-- 形态复用 GitReview 的 .bpick：底部弹出、拇指可达、已验证的入场动画。
+         遮罩用 keydown 监听 Esc 而非 onclick 的键盘等价物——对一块用来退出的
+         空白区域，Enter/Space 的「激活」语义说不通。 -->
+    <div
+      class="wp-mask"
+      role="button"
+      tabindex="-1"
+      aria-label={$t('common.close')}
+      onclick={() => (widthPickOpen = false)}
+      onkeydown={(e) => { if (e.key === "Escape") widthPickOpen = false; }}
+    ></div>
+    <div class="wpick">
+      <div class="wp-title">{$t('preview.width.title')}</div>
+      {#each PREVIEW_WIDTHS as w (w.id)}
+        <button class="wp-item" class:on={w.id === widthId} onclick={() => pickWidth(w.id)}>
+          {$t(`preview.width.${w.id}`)} <span class="wp-sub mono">· {w.px}px</span>
+        </button>
+      {/each}
+    </div>
   {/if}
 </div>
 
@@ -330,4 +392,41 @@
   .dl.del { color: var(--red); }
   .dl.ctx { color: var(--code-gutter); }
   .sign { display: inline-block; width: 1em; user-select: none; }
+
+  /* 尺寸档位按钮：与其他 .pv-btn 同高，宽度随文案自适应 */
+  .wbtn { min-width: auto; padding: 0 8px; font-size: 0.7rem; white-space: nowrap; }
+
+  /* 尺寸选择层：形态与 GitReview 的基线选择层一致（底部弹出、同圆角与阴影）。
+     只有三项，不限高不滚动。 */
+  .wp-mask { position: fixed; inset: 0; z-index: 61; background: var(--overlay-bg); border: 0; }
+  .wpick {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 62;
+    display: flex; flex-direction: column;
+    background: var(--menu-bg);
+    border-top: 1px solid var(--line-strong);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    box-shadow: var(--pop-shadow);
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+    animation: wp-up 0.16s ease-out;
+  }
+  @keyframes wp-up { from { transform: translateY(12px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+  .wp-title {
+    font-family: var(--font-mono);
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--dimmer); font-weight: 600; padding: 4px 14px 8px;
+  }
+  .wp-item {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: 0; padding: 11px 14px;
+    font-size: 0.75rem; color: var(--text);
+  }
+  .wp-item:active { background: var(--keyhi); }
+  .wp-item.on { color: var(--accent); }
+  .wp-sub { color: var(--dim); font-size: 0.66rem; }
+  .mono { font-family: var(--font-mono); }
+
+  /* 前庭障碍用户把动画全关掉，只留静态弹层 */
+  @media (prefers-reduced-motion: reduce) {
+    .wpick { animation: none; }
+  }
 </style>
