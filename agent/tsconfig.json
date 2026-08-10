@@ -8,5 +8,12 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "scripts"]
+  "include": ["src", "scripts"],
+  /* transfer-bench 是开发工具不是产品代码：它跨包 import app 的浏览器侧网络层
+     （Blob / WebSocket / DOM 的 Uint8Array 缓冲区类型），与 agent 的 bun-types
+     环境天然不兼容——那些代码由 app 自己的 typecheck 覆盖，在这里重复检查只会
+     产出一堆 ArrayBufferLike vs ArrayBuffer 的噪音。运行时由 Bun 直接跑，
+     Bun 不做类型检查，所以排除它不影响任何实际保障。
+     （它此前在 spike/ 下压根不在 include 范围内，迁进来才暴露出这一点。） */
+  "exclude": ["scripts/transfer-bench.ts"]
 }
