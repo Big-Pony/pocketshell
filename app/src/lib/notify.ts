@@ -68,6 +68,33 @@ export function needsResubscribe(s: {
   return s.cfgWebPush && !s.hasBrowserSub && s.permission === "granted";
 }
 
+/**
+ * 该不该把本设备的推送订阅上报给 agent（14 期需求 4）。
+ *
+ * 与被它取代的 needsResubscribe 的**唯一差别**：不再看 `hasBrowserSub`。
+ *
+ * 原因是生产环境实证出来的：浏览器"有订阅"不代表和 agent 手里那条是同一个。
+ * 推送服务会轮换 endpoint，轮换后浏览器持新的、agent 持旧的，而协议里没有
+ * 任何 RPC 能让前端读到 agent 存的那条来比对——于是 !hasBrowserSub 恒为 false，
+ * 自愈永远不触发。更糟的是 FCM 对已轮换的 endpoint 在宽限期内仍返回 201，
+ * agent 侧 webPushLastError 一直是 null，两边都以为一切正常。
+ *
+ * 改成无条件上报后，分叉不可能存在：每次连接都对齐一次，
+ * agent 侧 notify.subscribeWebPush 是按设备公钥的幂等 upsert，重复上报无害。
+ *
+ * 两个前提仍然保留：
+ * 1. cfgWebPush —— agent 侧开着。不替用户打开他自己关掉的东西。
+ * 2. permission === "granted" —— **这台设备**曾经同意过。notify.json 是 agent
+ *    全局的、不分设备，只看第 1 条会替一台从没同意过的新设备订阅；而且权限为
+ *    default 时 subscribe() 自己会弹权限框，后台路径绝不能凭空弹窗。
+ */
+export function shouldSyncPush(s: {
+  cfgWebPush: boolean;
+  permission: NotificationPermission;
+}): boolean {
+  return s.cfgWebPush && s.permission === "granted";
+}
+
 export function sessionFromUrl(search: string): string | null {
   const v = new URLSearchParams(search).get("session");
   return v && v.length > 0 ? v : null;

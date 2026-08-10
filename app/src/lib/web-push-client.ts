@@ -64,3 +64,26 @@ export async function unsubscribeBrowser(): Promise<boolean> {
   if (!sub) return false;
   return await sub.unsubscribe();
 }
+
+/**
+ * 把本设备当前的推送订阅上报给 agent（14 期需求 4 的核心）。
+ *
+ * 与 subscribeAndReport 的差别：**有订阅就直接上报那一条，不重新订阅**。
+ * 重新订阅会换掉 endpoint，让本来还能用的订阅失效——我们要的是"对齐"
+ * 而不是"重建"。只有确实没有订阅时才新建。
+ *
+ * 调用方需先用 shouldSyncPush() 确认前提（权限已授予 + agent 侧开着）。
+ */
+export async function syncSubscription(conn: PushConn): Promise<"synced" | "subscribed" | "skipped"> {
+  if (!("serviceWorker" in navigator)) return "skipped";
+  const reg = await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) {
+    // 原样上报。agent 按设备公钥 upsert，重复上报无害；而这一次上报正是
+    // 修好"agent 手里是过期 endpoint"的那一步。
+    await conn.notifySubscribe(existing.toJSON());
+    return "synced";
+  }
+  await subscribeAndReport(conn);
+  return "subscribed";
+}

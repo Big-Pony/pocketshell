@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe, pushSendErrorKey } from "./notify";
+import { urlBase64ToUint8Array, sessionFromUrl, webPushErrorKey, needsResubscribe, shouldSyncPush, pushSendErrorKey } from "./notify";
 
 // agent 侧发送失败的原因（notify.json 的 webPushLastError）。与浏览器订阅失败
 // 是两套完全不同的文本：这些是 Node/undici 的网络错误，不是 DOMException。
@@ -86,5 +86,26 @@ describe("notify pure helpers", () => {
     expect(sessionFromUrl("?session=work")).toBe("work");
     expect(sessionFromUrl("?x=1")).toBeNull();
     expect(sessionFromUrl("?session=a%20b")).toBe("a b");
+  });
+});
+
+// 14 期需求 4：判据从"要不要订阅"改成"该不该上报"。
+// 旧 needsResubscribe 要求 !hasBrowserSub —— 有订阅就判定无事可做，
+// 而这恰恰是僵尸 endpoint 的情形（浏览器有订阅，只是和 agent 手里那条不是同一个）。
+describe("shouldSyncPush", () => {
+  it("权限未授予时不做任何事", () => {
+    expect(shouldSyncPush({ cfgWebPush: true, permission: "default" })).toBe(false);
+    expect(shouldSyncPush({ cfgWebPush: true, permission: "denied" })).toBe(false);
+  });
+
+  it("agent 侧关着推送时不做任何事（不替用户打开）", () => {
+    expect(shouldSyncPush({ cfgWebPush: false, permission: "granted" })).toBe(false);
+  });
+
+  // 关键差异：**不再看浏览器有没有订阅**。
+  // 有订阅也要上报——因为无法判断它和 agent 手里那条是不是同一个，
+  // 而这正是生产环境实证到的失效模式（201 但设备收不到）。
+  it("权限已授予且 agent 侧开着时，无论浏览器有没有订阅都要上报", () => {
+    expect(shouldSyncPush({ cfgWebPush: true, permission: "granted" })).toBe(true);
   });
 });

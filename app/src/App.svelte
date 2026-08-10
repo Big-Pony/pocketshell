@@ -38,8 +38,8 @@
   import { loadProjectRoot, saveProjectRoot, pushRootHistory, loadRootFollow, saveRootFollow } from "./lib/ui/file-tree";
   import { shouldSyncRoot } from "./lib/ui/root-follow";
   import { defaultAgentUrl } from "./lib/net/agent-url";
-  import { sessionFromUrl, needsResubscribe } from "./lib/notify";
-  import { hasBrowserSubscription, subscribeAndReport } from "./lib/web-push-client";
+  import { sessionFromUrl, shouldSyncPush } from "./lib/notify";
+  import { syncSubscription } from "./lib/web-push-client";
   import { lastOutput, PROMPT_RE } from "./lib/term/terminal-output";
   import { OutputAnchors, rowsBack, trimTrailingPrompt } from "./lib/term/output-anchor";
   import type { TermCaptureResult } from "./lib/net/protocol";
@@ -223,28 +223,30 @@
     conn.sendPresence(document.visibilityState === "visible", activeId || null);
   }
 
-  // OTA 更新后 hardReset() 注销 service worker，push 订阅随之消失，而 agent 侧
-  // notify.json 仍记着 webPush=true —— 设置面板显示「开」但收不到任何推送，
-  // 用户得手动关一次再开才恢复。这里在每次连上时校对两侧状态并静默补订阅。
+  // 14 期需求 4：每次连上无条件对齐一次订阅。
+  //
+  // 此前是"判断要不要重新订阅"（needsResubscribe），而判据（浏览器有没有
+  // 订阅）信息量不足以发现 endpoint 分叉——生产实证：设备天天连，agent 侧
+  // push-subs.json 一个月没更新过，而 FCM 对那条已轮换的旧 endpoint 仍返回
+  // 201，两边都以为一切正常。现在不问「要不要」，直接把当前订阅报过去，
+  // agent 按设备公钥幂等 upsert。
   //
   // 静默是刻意的：这不是用户发起的操作，成功了不该打扰，失败了（比如连不上
   // FCM）也不该在刚进门时弹一条看不懂的报错——用户真去开关时 SettingsPanel
   // 会把原因讲清楚。
   //
-  // 判据见 needsResubscribe：要求本机通知权限已是 granted，所以既不会替一台
+  // 判据见 shouldSyncPush：要求本机通知权限已是 granted，所以既不会替一台
   // 从没开过推送的设备订阅（notify.json 是 agent 全局的，新设备也读得到
   // webPush=true），也不会弹出权限框（权限为 default 时 subscribe() 会弹）。
   async function healWebPush() {
     try {
       if (typeof Notification === "undefined") return; // 不支持通知的浏览器
       const cfg = (await conn.notifyGetConfig()) as { webPush?: boolean };
-      const need = needsResubscribe({
+      if (!shouldSyncPush({
         cfgWebPush: cfg?.webPush === true,
-        hasBrowserSub: await hasBrowserSubscription(),
         permission: Notification.permission,
-      });
-      if (!need) return;
-      await subscribeAndReport(conn);
+      })) return;
+      await syncSubscription(conn);
     } catch {
       // 静默：见上。下次连上会再试一次。
     }
@@ -258,7 +260,7 @@
       void refreshGitBranch();   // 重连后补一次，分割条左侧才不会一直空着
       void reloadCustomHints();  // 需求 5：连上/重连后拉一次自定义联想库
       void loadAgentInfo();      // 实例身份：顶栏要显示是哪台服务器
-      void healWebPush();        // OTA 后订阅会被 hardReset 销毁，静默补回
+      void healWebPush();        // 每次连上无条件对齐一次推送订阅（14 期需求 4）
       // Fresh connect (incl. reconnect after a self-restart update): re-check.
       // If we were mid-update and the reconnect shows we're now current, the
       // restart finished successfully — clear the in-progress UI + badge and
