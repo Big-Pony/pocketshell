@@ -38,7 +38,7 @@
     {#if sub === "dir"}
       <FileTree {conn} {onOpenFile} {onCd} {getFocusedPwd} {rootTick} {refreshTick} {onToast} {onToastRich} onRefresh={refreshBranch} {onNewFile} />
     {:else}
-      <GitPanel {conn} {onOpenDiff} />
+      <GitPanel {conn} {onOpenDiff} {rootTick} />
     {/if}
   </div>
 </div>
