@@ -291,3 +291,91 @@ test("webhook 测试期间按钮变「测试中…」并禁用", async () => {
   release!({ ok: true });
   await findByText("测试发送");
 });
+
+// ---------------------------------------------------------------------------
+// 测试推送（14 期需求 4）
+//
+// 成功的定义是**端到端送达**，不是 HTTP 201：生产取证正是"FCM 返回 201 但
+// 设备无声"。这几条钉住"201 且无回报时必须报失败"——没有它，按钮会在真正
+// 失效的情况下报成功，比没有按钮更糟。
+// ---------------------------------------------------------------------------
+
+function pushConn(testPush: () => Promise<{ ok: boolean; error?: string }>) {
+  return {
+    notifyGetConfig: async () => ({ webPush: true }),
+    notifySetConfig: vi.fn(async () => {}),
+    notifyTestPush: testPush,
+  } as any;
+}
+
+/** 模拟 sw.js 的回报：向页面派发一条 SW message。 */
+function fireDiagReceived() {
+  const sw = navigator.serviceWorker as unknown as EventTarget | undefined;
+  const ev = new MessageEvent("message", { data: { type: "push-diag-received" } });
+  sw?.dispatchEvent(ev);
+}
+
+let swListeners: Array<(e: MessageEvent) => void> = [];
+beforeAll(() => {
+  if (!("serviceWorker" in navigator)) {
+    // jsdom 没有 serviceWorker；装一个只支持 add/removeEventListener 的替身。
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        addEventListener: (_t: string, f: (e: MessageEvent) => void) => { swListeners.push(f); },
+        removeEventListener: (_t: string, f: (e: MessageEvent) => void) => { swListeners = swListeners.filter((x) => x !== f); },
+        dispatchEvent: (e: MessageEvent) => { for (const f of [...swListeners]) f(e); return true; },
+      },
+    });
+  }
+});
+
+test("测试推送：SW 回报送达时显示成功", async () => {
+  const { getByText, findByText } = render(SettingsPanel, {
+    props: { conn: pushConn(async () => ({ ok: true })), settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+  });
+  await fireEvent.click(getByText("通知"));
+  await fireEvent.click(await findByText("测试推送"));
+  fireDiagReceived();
+  expect(await findByText("✓ 推送已送达本机")).toBeTruthy();
+});
+
+test("测试推送：推送服务受理了但本机没收到 → 判失败（201 不等于送达）", async () => {
+  vi.useFakeTimers();
+  try {
+    const { getByText, findByText } = render(SettingsPanel, {
+      props: { conn: pushConn(async () => ({ ok: true })), settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+    });
+    await fireEvent.click(getByText("通知"));
+    await fireEvent.click(await findByText("测试推送"));
+    await vi.advanceTimersByTimeAsync(11000); // 越过等待窗口，全程不回报
+    expect(getByText(/本机未收到/)).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("测试推送：发送本身失败时带出原因，不等待", async () => {
+  const { getByText, findByText } = render(SettingsPanel, {
+    props: {
+      conn: pushConn(async () => ({ ok: false, error: "no_subscription" })),
+      settings: base, onChange: () => {}, currentVersion, onCheckUpdate,
+    },
+  });
+  await fireEvent.click(getByText("通知"));
+  await fireEvent.click(await findByText("测试推送"));
+  expect(await findByText(/no_subscription/)).toBeTruthy();
+});
+
+test("推送关着时不显示测试按钮（点了必然失败，摆出来只会误导）", async () => {
+  const offConn = {
+    notifyGetConfig: async () => ({ webPush: false }),
+    notifySetConfig: vi.fn(async () => {}),
+  } as any;
+  const { getByText, queryByText, findByText } = render(SettingsPanel, {
+    props: { conn: offConn, settings: base, onChange: () => {}, currentVersion, onCheckUpdate },
+  });
+  await fireEvent.click(getByText("通知"));
+  await findByText("Web Push");
+  expect(queryByText("测试推送")).toBeNull();
+});
