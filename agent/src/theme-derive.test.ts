@@ -625,7 +625,12 @@ describe("token set matches the app", () => {
     // in app/src/fonts.css because fonts have no derive() step (family name +
     // path, no computation), so this deriver never produces them. app.css.test.ts
     // is what guards that set instead.
-    const NOT_A_THEME_TOKEN = /^--(radius-|safe-|ps-|sw-|boot-|font-|key-gap-|phone-h$)/;
+    //
+    // 14 期需求 5 追加两类：--dur-*/--ease-* 是动效时长与缓动（几何量，与圆角/
+    // 安全区同类，声明在 app.css，由 app.css.test.ts 守住），--i 是 Skeleton.svelte
+    // 内部定义并消费的行序号（用来错开动画相位），同 --phone-h/--key-gap-* 一样是
+    // 组件局部自定义属性，不是颜色。
+    const NOT_A_THEME_TOKEN = /^--(radius-|safe-|ps-|sw-|boot-|font-|key-gap-|dur-|ease-|phone-h$|i$)/;
     const needed = [...referenced].filter((t) => !NOT_A_THEME_TOKEN.test(t)).sort();
     const produced = new Set(TOKEN_NAMES);
 
