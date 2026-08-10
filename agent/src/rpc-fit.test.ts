@@ -7,7 +7,7 @@ import type { SecureChannel } from "./secure-channel";
 import { encode, decodeServer } from "./protocol";
 import { TerminalService } from "./terminal";
 import { fsDiff } from "./fs-service";
-import { unpackBinFrame } from "./binframe";
+import { unpackBinFrame, BIN_FRAME_PREFIX_BYTES } from "./binframe";
 import {
   RPC_FIT_SAFE_BYTES,
   NOISE_MAX_PLAINTEXT_BYTES,
@@ -523,4 +523,54 @@ test("a compressed response too big for one frame, with acceptEnc:['gzip'] only 
 
   srv.stop();
   rmSync(dir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// 14 期需求 3：传输分片从 45KB 提到 56KB，用满二进制帧改造后腾出的帧预算。
+//
+// 这两条断言是**防回潮的关键**——将来任何人往 header 加一个字段，都会在这里
+// 当场翻车，而不是在生产环境上静默退化（见下面为什么是"退化"而不是"抛异常"）。
+//
+// ⚠️ 真正卡死尺寸的不是 Noise 硬上限，是 RPC_FIT_SAFE_BYTES：
+//   server.ts 的 sendRpcBinary 判 `frameBytes <= RPC_FIT_SAFE_BYTES` 才发
+//   二进制帧，超了就**静默回落**到 base64 塞进 dataB64 的老路径——那条路径
+//   4/3 膨胀、还要再走一遍压缩/分片，比不提尺寸更慢，而且没有任何报错。
+//   计划里原定的 60KB 正好踩中这个陷阱：下行帧 61520B > 61440B，Noise 那关
+//   （余量 3999B）过得去，SAFE 这关过不去。故实测后降到 56KB。
+// 因此两条断言都同时检 SAFE 与 NOISE 两道线。
+const TRANSFER_CHUNK_BYTES = 56 * 1024; // 与 app/src/lib/net/transfer.ts 的 CHUNK_BYTES 同值
+
+test("56KB 传输分片的最坏下行 rpcBin 帧仍走二进制快路径（不回落 base64）", () => {
+  // packBinFrame 布局：[1B 魔数][2B 头长][JSON 头][blob 裸字节]，前缀共 3B。
+  const header = JSON.stringify({
+    type: "rpcBin",
+    id: "9".repeat(12),                      // 实际是自增整数，12 位远超真实
+    result: { eof: false, size: 209715200 }, // 200MB = MAX_TRANSFER_BYTES
+  });
+  const frame = BIN_FRAME_PREFIX_BYTES + Buffer.byteLength(header, "utf8") + TRANSFER_CHUNK_BYTES;
+  // 这一条是硬要求：超了就静默回落 base64，提尺寸变成负优化。
+  expect(frame).toBeLessThanOrEqual(RPC_FIT_SAFE_BYTES);
+  expect(frame).toBeLessThanOrEqual(NOISE_MAX_PLAINTEXT_BYTES);
+  // 留够余量：小于 1KB 说明已经贴边，再加任何字段就会翻。
+  expect(RPC_FIT_SAFE_BYTES - frame).toBeGreaterThan(1024);
+});
+
+test("56KB 传输分片的最坏上行 rpcBin 帧仍在 Noise 上限内", () => {
+  const header = JSON.stringify({
+    type: "rpc",
+    id: "9".repeat(12),
+    method: "fs.uploadChunk",                // 传输路径里最长的 method 名
+    params: {
+      uploadId: "u".repeat(64),              // uploadId() 生成的实际更短
+      first: false,
+      last: true,
+      destPath: "/" + "d".repeat(255),       // 单段路径名上限
+    },
+    acceptEnc: ["gzip", "bin"],
+  });
+  const frame = BIN_FRAME_PREFIX_BYTES + Buffer.byteLength(header, "utf8") + TRANSFER_CHUNK_BYTES;
+  // 上行没有 SAFE 那道门（客户端 rpcBin 直接发，不做单帧预算判断），Noise
+  // 硬上限是唯一的墙——越过它 SecureChannel.send 直接抛。
+  expect(frame).toBeLessThanOrEqual(NOISE_MAX_PLAINTEXT_BYTES);
+  expect(NOISE_MAX_PLAINTEXT_BYTES - frame).toBeGreaterThan(1024);
 });

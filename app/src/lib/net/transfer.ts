@@ -8,10 +8,22 @@ export const MAX_TRANSFER_BYTES = 200 * 1024 * 1024;
 
 // Chunk size is bounded by the Noise transport: SecureChannel encrypts each RPC
 // as ONE ChaChaPoly message, and noise-handshake hard-caps ciphertext at 65535
-// bytes (plaintext ≤ 65519). 二阶段起 chunk 走二进制帧尾（不再 base64），一片
-// 45KB 上线约 46KB，帧预算余量很大。**尺寸仍不动**：本轮是纯编码变更，调尺寸
-// 会引入 RTT/内存/背压的新变量，出了问题分不清是编码错还是尺寸错。
-export const CHUNK_BYTES = 45 * 1024;
+// bytes (plaintext ≤ 65519).
+//
+// 14 期需求 3：45KB → 56KB。45KB 是 base64 时代的尺寸（一片 45KB × 4/3 =
+// 上线 61.5KB，正好卡在安全线上）；二进制帧改造后不再有 4/3 膨胀，一片 45KB
+// 上线仅约 46KB，白白空着 15KB 预算。**同样的往返次数多搬 24% 字节**——
+// RTT 受限的链路上这是纯收益。
+//
+// ⚠️ 为什么是 56KB 而不是更大：真正卡死尺寸的**不是** Noise 硬上限（65519），
+// 是 agent 侧 sendRpcBinary 的 `frameBytes <= RPC_FIT_SAFE_BYTES`(61440)——
+// 超了它会**静默回落**到 base64 塞 dataB64 的老路径，4/3 膨胀外加再走一遍
+// 压缩/分片，比不提尺寸还慢，而且没有任何报错。下行最坏帧 = 3(前缀) +
+// 77(rpcBin 头) + chunk，60KB 时是 61520B > 61440B，正好踩进这个陷阱
+// （Noise 那关反而过得去，余量 3999B——所以只看 Noise 会得出错误结论）。
+// 56KB 时下行 57424B、上行 57819B，两道线都留 4KB 以上余量。
+// 最坏帧由 agent/src/rpc-fit.test.ts 的两条断言钉死，加 header 字段会当场翻车。
+export const CHUNK_BYTES = 56 * 1024;
 
 export type RpcLike = {
   rpc(method: string, params?: unknown): Promise<unknown>;
@@ -145,9 +157,9 @@ export function baseName(path: string): string {
 // sendRpcBinary 在两种情况下回落到一阶段的形状——单帧装不下（frameBytes >
 // RPC_FIT_SAFE_BYTES，len 无客户端可控的独立上限）、或客户端没声明 "bin"
 // 能力——把字节 base64 塞进 result.dataB64，走既有的压缩/分片 JSON 链路
-// （见 server.ts 的 sendRpcBinary）。今天的 UI 走不到这条路径（downloadFileBlob
-// 把 CHUNK_BYTES 硬编码在 45KiB，帧预算绰绰有余），但它是会大声失败的死
-// 代码、调大 chunkBytes 即触发，两种形状都要认得。
+// （见 server.ts 的 sendRpcBinary）。今天的 UI 走不到这条路径（CHUNK_BYTES
+// 是 56KiB，最坏下行帧 57424B，仍在 RPC_FIT_SAFE_BYTES 61440 之内、余约 4KB），
+// 但它是会大声失败的死代码、调大 chunkBytes 即触发，两种形状都要认得。
 type DownloadChunkResult = { bytes?: Uint8Array; dataB64?: string; eof: boolean; size: number };
 function downloadChunkBytes(r: DownloadChunkResult): Uint8Array {
   return r.bytes ?? fromB64(r.dataB64 ?? "");
