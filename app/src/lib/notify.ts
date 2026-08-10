@@ -38,7 +38,11 @@ export function pushSendErrorKey(e: string | null | undefined): string | null {
   return null;
 }
 
-// OTA 更新后 App.svelte 会走 hardReset()，其中的 unregisterServiceWorkers()
+// **已被 shouldSyncPush 取代（14 期需求 4），保留仅为记录这段判据的演化。**
+// 它假定"浏览器有订阅"就等于"和 agent 对齐"，而生产实证推翻了这一点。
+//
+// 原始动机：OTA 更新后 App.svelte 会走 hardReset()，其中当时的
+// unregisterServiceWorkers()（现已改为 updateServiceWorkers，不再注销）
 // 连带销毁浏览器的 push 订阅——但 agent 侧 notify.json 的 webPush 仍是 true，
 // push-subs.json 里那条 endpoint 也还在（注销 SW 不会让推送服务返回 410，
 // sendPush 的自动清理兜不住）。结果是设置面板显示「开」而实际收不到推送，
