@@ -1,5 +1,6 @@
 import { describe, it, expect, test } from "vitest";
 import { encodeWriteChunks, saveFile, isConflictError, langExtension } from "./editor";
+import { CHUNK_BYTES } from "./net/transfer";
 
 function decodeAll(chunks: Uint8Array[]): string {
   const total = chunks.reduce((n, p) => n + p.length, 0);
@@ -48,8 +49,12 @@ describe("saveFile", () => {
   });
   it("large file: serial chunks, only the last carries path/expectMtime, same writeId", async () => {
     const c = fakeConn();
-    await saveFile(c, "/a.txt", "x".repeat(100 * 1024), 1);
-    expect(c.calls.length).toBe(3); // 45+45+10 KB
+    // 分片数从 CHUNK_BYTES 推导，不抄死数字 —— 它是传输层的共享常量
+    // （14 期把它从 45KB 提到 56KB 时，写死 3 的断言当场翻车）。
+    // 取 2.5 个分片那么长的文本，保证恰好切成 3 片（首、中、尾）。
+    const text = "x".repeat(Math.floor(CHUNK_BYTES * 2.5));
+    await saveFile(c, "/a.txt", text, 1);
+    expect(c.calls.length).toBe(3);
     expect(c.calls[0]).toMatchObject({ first: true, last: false });
     expect(c.calls[0].path).toBeUndefined();
     expect(c.calls[2]).toMatchObject({ last: true, path: "/a.txt", expectMtime: 1 });

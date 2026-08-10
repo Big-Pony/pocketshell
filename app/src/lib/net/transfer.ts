@@ -54,6 +54,24 @@ function uploadId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * 跨文件共享的窗口预算（14 期需求 3）。
+ *
+ * 原实现 `for (const it of items) await uploadChunksWindowed(...)` 是严格串行，
+ * 文件之间零重叠——每换一个文件管道就空一次（每文件 1~2 个 RTT：上一个文件的
+ * 末尾 barrier 要排空，下一个文件才开始填窗）。
+ *
+ * 跨文件交错之所以安全：agent 的 fsUploadChunk 按 uploadId 分别落到各自的
+ * `psupload-<id>.part`，不同文件的分片互不干扰。**同一文件内部**仍严格按
+ * index 顺序上线（每个文件只有一个发送循环，顺序由它自己保证），末尾 barrier
+ * 也只等本文件的分片结算——两条语义都没变。
+ */
+export type UploadBudget = { size: number; inflight: Set<Promise<void>> };
+
+// 同时在途的文件数。2 就够消掉边界空转（A 在排 barrier 时 B 已经在填窗），
+// 再多只是让预读的分片占更多内存（每个在途文件预读约一个窗口的切片）。
+const FILE_PIPELINE = 2;
+
 export async function uploadFiles(
   conn: RpcLike, dir: string, items: UploadItem[],
   opts: { chunkBytes?: number; windowSize?: number; onProgress?: (uploaded: number, total: number) => void; shouldCancel?: () => boolean } = {},
@@ -61,16 +79,42 @@ export async function uploadFiles(
   const chunk = opts.chunkBytes ?? CHUNK_BYTES;
   const total = items.reduce((s, it) => s + it.size, 0);
   let uploaded = 0;
-  for (const it of items) {
-    const id = uploadId();
-    const destPath = childPath(dir, it.destName);
-    const r = await uploadChunksWindowed(conn, id, it.blob, chunkOffsets(it.size, chunk), destPath, {
-      windowSize: opts.windowSize,
-      shouldCancel: opts.shouldCancel,
-      onChunkDone: (n) => { uploaded += n; opts.onProgress?.(uploaded, total); },
-    });
-    if (r === "cancelled") return;
-  }
+  // 一个共享预算：无论几个文件在途，全局在飞的分片数仍受同一个窗口深度约束。
+  const budget: UploadBudget = {
+    size: Math.max(1, opts.windowSize ?? UPLOAD_WINDOW),
+    inflight: new Set<Promise<void>>(),
+  };
+  const queue = [...items];
+  let firstError: unknown = null;
+  let cancelled = false;
+
+  const runner = async () => {
+    while (firstError === null && !cancelled) {
+      const it = queue.shift();
+      if (it === undefined) return;
+      try {
+        const r = await uploadChunksWindowed(
+          conn, uploadId(), it.blob, chunkOffsets(it.size, chunk), childPath(dir, it.destName),
+          {
+            windowSize: opts.windowSize,
+            shouldCancel: opts.shouldCancel,
+            budget,
+            onChunkDone: (n) => { uploaded += n; opts.onProgress?.(uploaded, total); },
+          },
+        );
+        if (r === "cancelled") { cancelled = true; return; }
+      } catch (e) {
+        // 记下第一个错误并停下：其余 runner 在循环头看到 firstError 也会收手。
+        if (firstError === null) firstError = e;
+        return;
+      }
+    }
+  };
+
+  // runner 自己吞掉异常（存进 firstError），所以这里的 Promise.all 不会抛，
+  // 也不会留下未处理的 rejection。
+  await Promise.all(Array.from({ length: Math.min(FILE_PIPELINE, items.length) }, runner));
+  if (firstError !== null) throw firstError;
 }
 
 // WP-5: upload concurrency, mirroring the download window (A8 below) — but
@@ -99,11 +143,19 @@ export const UPLOAD_WINDOW = 16;
 
 export async function uploadChunksWindowed(
   conn: RpcLike, uploadId: string, blob: Blob, windows: [number, number][], destPath: string,
-  opts: { windowSize?: number; shouldCancel?: () => boolean; onChunkDone?: (bytes: number) => void } = {},
+  opts: {
+    windowSize?: number; shouldCancel?: () => boolean; onChunkDone?: (bytes: number) => void;
+    /** 跨文件共享的窗口预算（见 uploadFiles）。不传即本文件独占一个窗口，行为与从前一致。 */
+    budget?: UploadBudget;
+  } = {},
 ): Promise<"done" | "cancelled"> {
   const n = windows.length;
   if (n === 0) return "done";
   const windowSize = Math.max(1, opts.windowSize ?? UPLOAD_WINDOW);
+  // 共享预算存在时，窗口容量与"在飞集合"都取共享的那一份——多个文件同时
+  // 在途也不会突破同一个窗口深度。
+  const cap = opts.budget?.size ?? windowSize;
+  const shared = opts.budget?.inflight;
 
   // Read pump: at most `windowSize` slice reads outstanding, so memory stays
   // bounded at ~2 windows of chunks instead of the whole file.
@@ -119,15 +171,41 @@ export async function uploadChunksWindowed(
 
   let firstError: unknown = null;
   let cancelled = false;
+  // 本文件自己的在途集合：末尾 barrier 只等**本文件**的分片结算，绝不能等成
+  // 共享集合里别的文件的分片（那样 barrier 语义还在，但会白等）。
   const inflight = new Set<Promise<void>>();
   // Tracked rpc promises never reject (errors land in firstError), so
   // Promise.race/all over `inflight` never throws and nothing is unhandled.
   const track = (p: Promise<unknown>, len: number) => {
     const t = p.then(
-      () => { inflight.delete(t); opts.onChunkDone?.(len); },
-      (e) => { inflight.delete(t); if (firstError === null) firstError = e; },
+      () => { inflight.delete(t); shared?.delete(t); opts.onChunkDone?.(len); },
+      (e) => { inflight.delete(t); shared?.delete(t); if (firstError === null) firstError = e; },
     );
     inflight.add(t);
+    shared?.add(t);
+  };
+
+  // 等窗口腾出位置。共享预算下要等的是**全局**在飞集合——只等自己的会让
+  // 每个文件各开一个满窗，n 个文件就是 n 倍窗口深度。
+  const waitForSlot = async () => {
+    const pool = shared ?? inflight;
+    if (pool.size > 0) await Promise.race(pool);
+  };
+
+  /**
+   * 同步占住一个窗口位置，返回释放函数。
+   *
+   * **必须在任何 await 之前占位**：从"查容量"到"真正把 rpc 记进在飞集合"
+   * 之间隔着一次 `await slots[i]`（读切片），另一个文件的 runner 会在这个
+   * 缝里也通过容量检查——两边都放行，峰值就冲到 cap+1（实测跨文件时 5>4）。
+   * 占位用一个哨兵 promise，它同样能被 Promise.race 唤醒。
+   */
+  const reserveSlot = (): (() => void) => {
+    if (!shared) return () => {};
+    let done!: () => void;
+    const sentinel = new Promise<void>((r) => { done = r; });
+    shared.add(sentinel);
+    return () => { shared.delete(sentinel); done(); };
   };
 
   // Windowed phase: every chunk except the final one.
@@ -135,27 +213,39 @@ export async function uploadChunksWindowed(
   while (i < n - 1) {
     if (firstError !== null) break;
     if (opts.shouldCancel?.()) { cancelled = true; break; } // checked at each window boundary
-    if (inflight.size >= windowSize) { await Promise.race(inflight); continue; }
+    if ((shared ?? inflight).size >= cap) { await waitForSlot(); continue; }
     pumpReads(i + windowSize);
+    // 先占位、再读切片：中间那次 await 是跨文件抢位的窗口期（见 reserveSlot）。
+    const release = reserveSlot();
     try {
       const bytes = await slots[i]!;
       slots[i] = undefined; // free the slice as soon as it is on the wire
       track(conn.rpcBin("fs.uploadChunk", { uploadId, first: i === 0, last: false }, bytes), windows[i][1]);
       i++;
     } catch (e) { firstError = e; break; }
+    finally { release(); } // rpc 已登记进在飞集合，哨兵可以退场了
   }
 
   // Closing barrier: the `last` chunk carries destPath and must be the last
   // frame out — only sent once every other chunk's rpc has fully settled, so
   // the server has all data appended before it commits the temp file.
+  //
+  // 等的是**本文件**的 inflight，不是共享预算里的全局集合：别的文件的分片
+  // 落到别的 .part，与本文件的提交时机无关，等它们只会白等一轮。
   await Promise.all([...inflight]);
   if (firstError === null && !cancelled && opts.shouldCancel?.()) cancelled = true;
   if (firstError === null && !cancelled) {
     pumpReads(n);
     try {
       const bytes = await slots[n - 1]!;
-      await conn.rpcBin("fs.uploadChunk", { uploadId, first: n === 1, last: true, destPath }, bytes);
-      opts.onChunkDone?.(windows[n - 1][1]);
+      // barrier 那一片也要占共享预算的一个位置：它同样是一个在飞的 rpc，
+      // 不记账的话 n 个文件各自的 barrier 会叠加到窗口之上（实测峰值 W+1）。
+      while ((shared?.size ?? 0) >= cap) await waitForSlot();
+      const release = reserveSlot();
+      try {
+        await conn.rpcBin("fs.uploadChunk", { uploadId, first: n === 1, last: true, destPath }, bytes);
+        opts.onChunkDone?.(windows[n - 1][1]);
+      } finally { release(); }
     } catch (e) { firstError = e; }
   }
   if (firstError !== null) throw firstError;
@@ -184,16 +274,31 @@ export async function downloadFileBlob(
   opts: { chunkBytes?: number; windowSize?: number; onProgress?: (downloaded: number, total: number) => void } = {},
 ): Promise<Blob> {
   const chunk = opts.chunkBytes ?? CHUNK_BYTES;
-  // Pre-check size so the user gets a localized error before any real bytes flow.
-  const probe = (await conn.rpc("fs.downloadChunk", { path, offset: 0, len: 0 })) as DownloadChunkResult;
-  if (probe.size > MAX_TRANSFER_BYTES) throw new Error(tr("errors.transfer.tooBig"));
-  if (probe.eof) return new Blob([]);
-  let downloaded = 0;
-  const parts = await fetchChunksWindowed(conn, path, chunkOffsets(probe.size, chunk), opts.windowSize, (n) => {
+  // 14 期需求 3：**不再打零字节前置探针**。原实现为拿 size 先发一个 len:0 的
+  // 请求，白付一个完整 RTT 却不搬一个字节。第一片的响应本来就带 size 字段，
+  // 边取边得知总量即可 —— 小文件（一片装得下）因此从 2 个 RTT 降到 1 个。
+  const head = (await conn.rpc(
+    "fs.downloadChunk", { path, offset: 0, len: chunk }, { expectBytes: chunk },
+  )) as DownloadChunkResult;
+  // 超限校验只是从 probe 挪到第一片响应之后，**没有取消**：用户仍然在搬完
+  // 整个文件之前就拿到本地化错误（最多多花一片的流量，而不是 200MB）。
+  if (head.size > MAX_TRANSFER_BYTES) throw new Error(tr("errors.transfer.tooBig"));
+  const first = downloadChunkBytes(head);
+  // 空文件：与原 probe 分支的 `if (probe.eof) return new Blob([])` 语义等价。
+  // 一片就装完时同理直接返回，不再多跑一轮窗口调度。
+  if (head.size === 0 || head.eof) {
+    opts.onProgress?.(first.length, head.size);
+    return new Blob([first as BlobPart]);
+  }
+  let downloaded = first.length;
+  opts.onProgress?.(downloaded, head.size);
+  // 剩余分片：从第二片起。第一片已经在手上，不重复取。
+  const rest = chunkOffsets(head.size, chunk).slice(1);
+  const parts = await fetchChunksWindowed(conn, path, rest, opts.windowSize, (n) => {
     downloaded += n;
-    opts.onProgress?.(downloaded, probe.size);
+    opts.onProgress?.(downloaded, head.size);
   });
-  return new Blob(parts as BlobPart[]);
+  return new Blob([first, ...parts] as BlobPart[]);
 }
 
 // A8: download concurrency. Chunks used to be fetched strictly serially, so on

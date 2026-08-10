@@ -70,18 +70,17 @@ test("baseName returns last segment, falls back to 'root' for '/'", () => {
   expect(baseName("/")).toBe("root");
 });
 
-test("downloadFileBlob probes size then concatenates chunks until eof", async () => {
+test("downloadFileBlob concatenates chunks until eof（14 期起无前置探针）", async () => {
   const parts = [new Uint8Array([1, 2]), new Uint8Array([3])];
   let call = 0;
-  const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: 3 }; // probe
+  const rpc = vi.fn(async (_m: string, _p: any) => {
     const bytes = parts[call]; const eof = call === parts.length - 1; call++;
     return { bytes, eof, size: 3 };
   });
   const blob = await downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2 });
   const buf = new Uint8Array(await blob.arrayBuffer());
   expect([...buf]).toEqual([1, 2, 3]);
-  expect(rpc).toHaveBeenCalledTimes(3); // probe + 2 chunks
+  expect(rpc).toHaveBeenCalledTimes(2); // 2 chunks，探针已删
 });
 
 test("downloadFileBlob rejects files over MAX_TRANSFER_BYTES with a localized message", async () => {
@@ -91,10 +90,11 @@ test("downloadFileBlob rejects files over MAX_TRANSFER_BYTES with a localized me
 
 // A8: windowed download — concurrency, offset-ordered assembly, failure, progress.
 test("downloadFileBlob fetches chunks concurrently and assembles in offset order despite out-of-order replies", async () => {
-  const size = 8; // 4 windows of 2 bytes
+  // 14 期起第一片是单独取的（它带回 size），并发只发生在其余分片上：
+  // 10 字节 = 1 + 4 片，窗口 4 全部用满。
+  const size = 10;
   let inFlight = 0, maxInFlight = 0;
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size }; // probe
     inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
     // Later offsets resolve FIRST — proves assembly is by offset, not arrival.
     await new Promise((r) => setTimeout(r, (size - p.offset) * 2));
@@ -104,7 +104,7 @@ test("downloadFileBlob fetches chunks concurrently and assembles in offset order
   });
   const blob = await downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2, windowSize: 4 });
   const buf = [...new Uint8Array(await blob.arrayBuffer())];
-  expect(buf).toEqual([0, 0, 2, 2, 4, 4, 6, 6]); // offset order preserved
+  expect(buf).toEqual([0, 0, 2, 2, 4, 4, 6, 6, 8, 8]); // offset order preserved
   expect(maxInFlight).toBe(4); // full window actually in flight
 });
 
@@ -114,7 +114,6 @@ test("downloadFileBlob caps concurrency at the default DOWNLOAD_WINDOW", async (
   const size = DOWNLOAD_WINDOW * 2 * 2; // 2×窗口 个分片，每片 2 字节
   let inFlight = 0, maxInFlight = 0;
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size };
     inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
     await new Promise((r) => setTimeout(r, 1));
     inFlight--;
@@ -126,9 +125,8 @@ test("downloadFileBlob caps concurrency at the default DOWNLOAD_WINDOW", async (
 
 test("downloadFileBlob rejects the whole download when any chunk fails", async () => {
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: 6 };
     if (p.offset === 2) throw new Error("boom");
-    return { bytes: new Uint8Array(p.len), eof: true, size: 6 };
+    return { bytes: new Uint8Array(p.len), eof: p.offset + p.len >= 6, size: 6 };
   });
   await expect(downloadFileBlob({ rpc } as any, "/f.bin", { chunkBytes: 2, windowSize: 2 })).rejects.toThrow("boom");
 });
@@ -136,8 +134,7 @@ test("downloadFileBlob rejects the whole download when any chunk fails", async (
 test("downloadFileBlob reports cumulative progress per completed chunk", async () => {
   const progress: [number, number][] = [];
   const rpc = vi.fn(async (_m: string, p: any) => {
-    if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size: 4 };
-    return { bytes: new Uint8Array(p.len), eof: true, size: 4 };
+    return { bytes: new Uint8Array(p.len), eof: p.offset + p.len >= 4, size: 4 };
   });
   await downloadFileBlob({ rpc } as any, "/f", { chunkBytes: 2, onProgress: (d, t) => progress.push([d, t]) });
   expect(progress.length).toBe(2);
@@ -192,7 +189,8 @@ test("downloadFolder archives, downloads, then deletes the temp archive", async 
   const busy: boolean[] = [];
   await downloadFolder({ rpc } as any, "/a/proj", { onArchiving: (b) => busy.push(b) });
   (URL as any).createObjectURL = origCreate; (URL as any).revokeObjectURL = origRevoke;
-  expect(order).toEqual(["fs.archive", "fs.downloadChunk", "fs.downloadChunk", "fs.op"]); // probe + single chunk
+  // 14 期删掉前置探针后是「归档 → 一片下载 → 清理」，而不是 probe + chunk。
+  expect(order).toEqual(["fs.archive", "fs.downloadChunk", "fs.op"]);
   expect(busy).toEqual([true, false]); // spinner on then off
 });
 
@@ -449,5 +447,160 @@ describe("传输窗口深度（14 期需求 3）", () => {
     );
     // 发 last 的那一刻，前 n-1 片必须已经全部结算。
     expect(order).toEqual([`last@${n - 1}`]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14 期需求 3：删下载前置探针。
+// 原实现为拿 size 先打一个 len:0 的零字节请求，白付一个完整 RTT 却不搬任何
+// 数据。第一片的响应本来就带 size 字段，可以边取边得知总量。
+describe("下载不再有零字节前置探针（14 期需求 3）", () => {
+  const makeConn = (size: number) => {
+    const calls: any[] = [];
+    const conn = {
+      rpc: vi.fn(async (_m: string, p: any) => {
+        calls.push(p);
+        const len = Math.max(0, Math.min(p.len, size - p.offset));
+        return { bytes: new Uint8Array(len), eof: p.offset + len >= size, size };
+      }),
+      rpcBin: vi.fn(),
+    };
+    return { conn, calls };
+  };
+
+  test("不再打零字节探针，且字节完整", async () => {
+    const size = 6;
+    const { conn, calls } = makeConn(size);
+    const blob = await downloadFileBlob(conn as never, "/f", { chunkBytes: 2 });
+    expect(calls.some((p) => p.len === 0), "不该有零字节探针").toBe(false);
+    expect(blob.size).toBe(size);
+    // 3 片，不多不少 —— 探针那一次已经省掉。
+    expect(conn.rpc).toHaveBeenCalledTimes(3);
+  });
+
+  test("空文件：第一片 eof + size:0，返回空 Blob（与原 probe 分支语义等价）", async () => {
+    const { conn, calls } = makeConn(0);
+    const blob = await downloadFileBlob(conn as never, "/empty", { chunkBytes: 2 });
+    expect(blob.size).toBe(0);
+    expect(calls.some((p) => p.len === 0)).toBe(false);
+  });
+
+  test("超限文件仍在搬完之前就报本地化错误（校验时机从 probe 挪到第一片响应）", async () => {
+    // 第一片的响应就带 size，据此立刻判超限——用户看到的仍是本地化文案，
+    // 而不是把 200MB 拉完再说。
+    const size = 200 * 1024 * 1024 + 1;
+    const conn = {
+      rpc: vi.fn(async (p0: string, p: any) => ({
+        bytes: new Uint8Array(Math.min(p.len, 8)), eof: false, size,
+      })),
+      rpcBin: vi.fn(),
+    };
+    await expect(downloadFileBlob(conn as never, "/huge.bin")).rejects.toThrow("文件超过 200MB 上限");
+    // 只打了一次就该收手，不能把整个文件拉完。
+    expect(conn.rpc).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14 期需求 3：多文件上传跨文件填充窗口。
+// 原实现是 `for (const it of items) await uploadChunksWindowed(...)`，严格串行，
+// 文件之间零重叠——每换一个文件管道就空一次（每文件 1~2 个 RTT）。
+//
+// 跨文件交错之所以安全：agent 的 fsUploadChunk 按 uploadId 分别落到各自的
+// `psupload-<id>.part`，不同文件的分片互不干扰。**同一文件内部**仍必须严格
+// 按 index 顺序上线（服务端按到达顺序 append，没有 offset）。
+describe("多文件上传跨文件填充窗口（14 期需求 3）", () => {
+  const mkItems = (count: number, chunksEach: number, chunkBytes: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      name: `f${i}`, destName: `f${i}`,
+      size: chunkBytes * chunksEach,
+      blob: seqBlob(chunkBytes * chunksEach),
+    }));
+
+  test("管道不在文件边界处空转", async () => {
+    let peak = 0, cur = 0;
+    const conn = {
+      rpc: vi.fn(async () => ({})),
+      rpcBin: vi.fn(async () => {
+        cur++; peak = Math.max(peak, cur);
+        await new Promise((r) => setTimeout(r, 3));
+        cur--;
+        return {};
+      }),
+    };
+    // 三个各 2 片的小文件：串行实现的峰值并发只会是 1（每个文件都是
+    // "1 片窗口 + 1 片 barrier"，两者之间必须排空）。
+    await uploadFiles(conn as never, "/dir", mkItems(3, 2, 2), { chunkBytes: 2 });
+    expect(peak, "跨文件应有重叠").toBeGreaterThan(1);
+  });
+
+  test("每个文件内部仍严格按 index 顺序上线，且 last 各自最后", async () => {
+    // 服务端按到达顺序 append 且没有 offset，同一文件乱序 = 文件内容错乱。
+    const perFile = new Map<string, number[]>();
+    const lastAt = new Map<string, number>();
+    const settledOf = new Map<string, number>();
+    const conn = {
+      rpc: vi.fn(async () => ({})),
+      rpcBin: vi.fn(async (_m: string, p: any, bytes: Uint8Array) => {
+        const id = p.uploadId as string;
+        const idx = bytes[0] / 2; // seqBlob: byte[offset] = offset
+        if (!perFile.has(id)) perFile.set(id, []);
+        perFile.get(id)!.push(idx);
+        if (p.last) lastAt.set(id, settledOf.get(id) ?? 0);
+        await new Promise((r) => setTimeout(r, 2));
+        settledOf.set(id, (settledOf.get(id) ?? 0) + 1);
+        return {};
+      }),
+    };
+    const chunksEach = 5;
+    await uploadFiles(conn as never, "/dir", mkItems(3, chunksEach, 2), { chunkBytes: 2 });
+    expect(perFile.size).toBe(3); // 三个文件三个 uploadId，各自独立的 .part
+    for (const [id, order] of perFile) {
+      // 文件内严格递增 0..n-1
+      expect(order).toEqual(Array.from({ length: chunksEach }, (_, i) => i));
+      // 末尾 barrier：发 last 时本文件其余分片必须已全部结算
+      expect(lastAt.get(id)).toBe(chunksEach - 1);
+    }
+  });
+
+  test("任一分片失败仍整体拒绝", async () => {
+    const conn = {
+      rpc: vi.fn(async () => ({})),
+      rpcBin: vi.fn(async (_m: string, _p: any, bytes: Uint8Array) => {
+        if (bytes[0] === 2) throw new Error("boom");
+        return {};
+      }),
+    };
+    await expect(uploadFiles(conn as never, "/dir", mkItems(3, 4, 2), { chunkBytes: 2 }))
+      .rejects.toThrow("boom");
+  });
+
+  test("进度累计仍是全部文件的总和", async () => {
+    const progress: [number, number][] = [];
+    const conn = { rpc: vi.fn(async () => ({})), rpcBin: vi.fn(async () => ({})) };
+    const items = mkItems(3, 4, 2);
+    const total = items.reduce((s, it) => s + it.size, 0);
+    await uploadFiles(conn as never, "/dir", items, { chunkBytes: 2, onProgress: (u, t) => progress.push([u, t]) });
+    expect(progress[progress.length - 1]).toEqual([total, total]);
+  });
+
+  test("跨文件填充**不得**突破共享的窗口深度（n 个文件不等于 n 倍窗口）", async () => {
+    // 这是跨文件填充最容易写错的地方：若每个文件各自开一个满窗，全局在飞
+    // 分片数会变成 文件数 × 窗口深度 —— 内存与 agent 侧压力同步翻倍，而
+    // agent 的 sendRpcResult 路径完全无背压。
+    let peak = 0, cur = 0;
+    const conn = {
+      rpc: vi.fn(async () => ({})),
+      rpcBin: vi.fn(async () => {
+        cur++; peak = Math.max(peak, cur);
+        await new Promise((r) => setTimeout(r, 2));
+        cur--;
+        return {};
+      }),
+    };
+    const W = 4;
+    await uploadFiles(conn as never, "/dir", mkItems(4, 20, 2), { chunkBytes: 2, windowSize: W });
+    expect(peak).toBeLessThanOrEqual(W);
+    expect(peak, "同时也要真的用满窗口").toBe(W);
   });
 });
