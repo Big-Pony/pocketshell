@@ -119,6 +119,30 @@ export class NotificationService {
     if (this.cfg.webhooks.length) saveNotifyConfig(this.cfgFile, this.cfg);
   }
 
+  /**
+   * 向单台设备发一条诊断推送（14 期需求 4）。
+   *
+   * 只回报"推送服务是否受理"（HTTP 层）。**是否真正送达要由前端回报**——
+   * 生产实证：FCM 对已轮换的 endpoint 在宽限期内仍返回 201，
+   * 只看状态码会得出"一切正常"的错误结论。前端据 payload 里的 diag 标记
+   * 在 sw.js 里识别并 postMessage 回页面，超时未回报即判失败。
+   *
+   * 只发给发起请求的这台设备，不广播——测的是"我这台收不收得到"。
+   */
+  async testPushTo(pubKey: string): Promise<{ ok: boolean; error?: string }> {
+    const sub = this.subs.find((s) => s.pubKey === pubKey);
+    if (!sub) return { ok: false, error: "no_subscription" };
+    const payload = JSON.stringify({
+      title: "PocketShell",
+      body: "诊断推送",
+      diag: true,            // 前端据此识别并回报，见 public/sw.js
+      tag: "ps-diag",
+    });
+    const r = await sendPush(this.deps.pushSender, sub, payload);
+    if (r.gone) this.removeSubsForDevice(pubKey);
+    return { ok: r.ok, error: r.error };
+  }
+
   async testWebhook(id: string): Promise<{ ok: boolean; error?: string }> {
     const wh = this.cfg.webhooks.find((w) => w.id === id);
     if (!wh) return { ok: false, error: "not_found" };

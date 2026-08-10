@@ -691,6 +691,10 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       label: "Web Push",
       iosHint: "On iOS, add to Home Screen first to enable push",
       sendFailed: "Last send failed",
+      test: "Test push",
+      testOk: "✓ Push delivered to this device",
+      testNotDelivered: "The push service accepted it, but this device never received it — the subscription may be stale. Toggle Web Push off and on to rebuild it.",
+      testFailed: "Send failed: {err}",
       err: {
         unreachable: "Cannot reach the browser's push service (Chrome uses Google FCM). Not a misconfiguration — check for a firewall or proxy blocking it, a browser without a push backend (e.g. Brave), or a region where FCM needs a VPN.",
         sendUnreachable: "The server running the agent cannot reach the push service (Google FCM), so pushes never go out. Configure a proxy on that server (the agent honors HTTPS_PROXY) — this is unrelated to your phone's own network.",

@@ -74,3 +74,25 @@ test("notify.subscribeWebPush 有设备身份时照常写入", () => {
   expect(seen).toEqual([["PUB", { endpoint: "e" }]]);
   expect(out).toEqual({ kind: "result", result: { ok: true } });
 });
+
+// 14 期需求 4：诊断推送。与 subscribeWebPush 同理，没有设备身份就报错——
+// 这个方法的语义是"发给我这台"，没有身份时无从确定"我"是谁。
+test("notify.testPush 在没有设备身份时报错", async () => {
+  const ctx = {
+    devicePub: null,
+    notify: { testPushTo: async () => { throw new Error("不该被调用"); } },
+  } as unknown as Parameters<(typeof RPC_TABLE)["notify.testPush"]>[0];
+  await expect(Promise.resolve().then(() => RPC_TABLE["notify.testPush"](ctx, {})))
+    .rejects.toThrow("no_device_identity");
+});
+
+test("notify.testPush 只发给发起请求的这台设备", async () => {
+  const seen: string[] = [];
+  const ctx = {
+    devicePub: "PUB",
+    notify: { testPushTo: async (k: string) => { seen.push(k); return { ok: true }; } },
+  } as unknown as Parameters<(typeof RPC_TABLE)["notify.testPush"]>[0];
+  const out = await RPC_TABLE["notify.testPush"](ctx, {});
+  expect(seen).toEqual(["PUB"]);
+  expect(out).toEqual({ kind: "result", result: { ok: true } });
+});

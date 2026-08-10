@@ -699,6 +699,10 @@ curl -fsSL https://pocketshell.net/install.sh | sh
       label: "Web Push",
       iosHint: "iOS 需先“添加到主屏幕”才能开启推送",
       sendFailed: "上次发送失败",
+      test: "测试推送",
+      testOk: "✓ 推送已送达本机",
+      testNotDelivered: "推送已被推送服务受理，但本机未收到——订阅可能已失效。关闭再打开 Web Push 可重建。",
+      testFailed: "发送失败：{err}",
       err: {
         unreachable: "连不上浏览器的推送服务（Chrome 走 Google FCM）。这不是配置问题——国内网络请开代理/VPN 后重试；也可能是浏览器不带推送后端（如 Brave）或防火墙拦截。",
         sendUnreachable: "运行 Agent 的服务器连不上推送服务（Google FCM），推送发不出去。需要在服务器上配置代理（Agent 遵循 HTTPS_PROXY 环境变量），与手机自己的网络无关。",

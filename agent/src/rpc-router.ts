@@ -332,6 +332,15 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   "context.wire": (ctx) => contextWire(ctx, true),
   "context.unwire": (ctx) => contextWire(ctx, false),
 
+  // 诊断推送（14 期需求 4）。只发给**发起请求的这台设备**，不广播——
+  // 测的是"我这台收不收得到"。返回的 ok 只表示推送服务受理了（HTTP 层），
+  // 真正的送达判定由前端等 sw.js 的回报完成：生产实证 FCM 对已轮换的
+  // endpoint 在宽限期内仍返回 201，只看状态码会报出错误的"一切正常"。
+  "notify.testPush": async (ctx) => {
+    if (!ctx.devicePub) throw new Error("no_device_identity");
+    return ok(await ctx.notify.testPushTo(ctx.devicePub));
+  },
+
   "notify.testWebhook": (ctx, p) => {
     // async self-answer, same pattern as update.check/update.apply below:
     // sends its own response and returns `sent` rather than handing a result

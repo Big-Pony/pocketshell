@@ -131,3 +131,59 @@ test("dispatch with webPush on pushes only to the backgrounded device", async ()
   expect(pushedSubs.length).toBe(1);
   expect(pushedSubs[0]).toEqual({ endpoint: "B" });
 });
+
+// ---------------------------------------------------------------------------
+// 诊断推送（14 期需求 4）
+//
+// 只回报"推送服务是否受理"（HTTP 层）。是否真正送达由前端 SW 回报——
+// 生产实证：FCM 对已轮换的 endpoint 在宽限期内仍返回 201，只看状态码
+// 会得出"一切正常"的错误结论。
+// ---------------------------------------------------------------------------
+
+function diagSvc(sender: (sub: unknown, payload: string) => Promise<{ statusCode: number }>) {
+  const dir = mkdtempSync(join(tmpdir(), "ns-diag-"));
+  return new NotificationService({
+    keyDir: dir,
+    getPresences: () => [],
+    broadcastInApp: () => {},
+    pushSender: sender,
+    webhookSend: async () => ({ ok: true }),
+    now: () => 100000,
+  });
+}
+
+test("testPushTo 只发给指定设备，载荷带 diag 标记", async () => {
+  const seen: string[] = [];
+  const subs: unknown[] = [];
+  const s = diagSvc(async (sub, payload) => { subs.push(sub); seen.push(payload); return { statusCode: 201 }; });
+  s.addSub("A", { endpoint: "epA" });
+  s.addSub("B", { endpoint: "epB" });
+  const r = await s.testPushTo("A");
+  expect(r.ok).toBe(true);
+  expect(subs).toEqual([{ endpoint: "epA" }]); // 不广播：测的是"我这台收不收得到"
+  expect(JSON.parse(seen[0]!).diag).toBe(true); // sw.js 据此识别并回报
+});
+
+test("testPushTo 对没有订阅的设备回 no_subscription 而不是假装成功", async () => {
+  const s = diagSvc(async () => { throw new Error("不该被调用"); });
+  const r = await s.testPushTo("NOBODY");
+  expect(r.ok).toBe(false);
+  expect(r.error).toBe("no_subscription");
+});
+
+test("testPushTo 遇 410 清掉死订阅", async () => {
+  const s = diagSvc(async () => { const e: any = new Error("gone"); e.statusCode = 410; throw e; });
+  s.addSub("A", { endpoint: "epA" });
+  const r = await s.testPushTo("A");
+  expect(r.ok).toBe(false);
+  // 订阅已被清掉：再测一次得到的是 no_subscription 而不是又一次 410
+  expect((await s.testPushTo("A")).error).toBe("no_subscription");
+});
+
+test("testPushTo 把发送失败的原因带出来（不吞错）", async () => {
+  const s = diagSvc(async () => { throw new Error("connect ETIMEDOUT"); });
+  s.addSub("A", { endpoint: "epA" });
+  const r = await s.testPushTo("A");
+  expect(r.ok).toBe(false);
+  expect(r.error).toContain("ETIMEDOUT");
+});

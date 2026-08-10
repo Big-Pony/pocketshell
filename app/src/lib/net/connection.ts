@@ -911,6 +911,8 @@ export class Connection {
   notifySubscribe(subscription: unknown): Promise<unknown> { return this.rpc("notify.subscribeWebPush", { subscription }); }
   notifyUnsubscribe(): Promise<unknown> { return this.rpc("notify.unsubscribeWebPush"); }
   notifyTestWebhook(id: string): Promise<{ ok: boolean; error?: string }> { return this.rpc("notify.testWebhook", { id }) as Promise<{ ok: boolean; error?: string }>; }
+  /** 诊断推送（14 期需求 4）。ok 只表示推送服务受理了，送达与否由 sw.js 回报。 */
+  notifyTestPush(): Promise<{ ok: boolean; error?: string }> { return this.rpc("notify.testPush", {}) as Promise<{ ok: boolean; error?: string }>; }
   notifyWire(tool: string): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("notify.wire", { tool }) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
   notifyUnwire(tool: string): Promise<{ ok: boolean; reason?: string; detail?: string }> { return this.rpc("notify.unwire", { tool }) as Promise<{ ok: boolean; reason?: string; detail?: string }>; }
   // 需求 5：接管 Claude Code 的 statusLine 取上下文用量。与 notify.* 分开，

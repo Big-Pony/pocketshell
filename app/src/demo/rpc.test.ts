@@ -127,7 +127,7 @@ test("agent.info 回 instanceName: null", () => {
 test.each([
   "update.check", "update.apply", "notify.getConfig", "notify.setConfig",
   "notify.wire", "notify.unwire", "notify.testWebhook", "notify.subscribeWebPush",
-  "notify.unsubscribeWebPush", "notify.getVapidPublicKey", "context.wire", "context.unwire",
+  "notify.unsubscribeWebPush", "notify.getVapidPublicKey", "notify.testPush", "context.wire", "context.unwire",
   "diag.report", "fs.write", "fs.op", "fs.uploadCheck", "fs.resolveName",
   "fs.uploadChunk", "fs.downloadChunk", "fs.archive", "term.capture", "term.redraw",
 ])("写操作与不支持的 method 回结构化 error 而不是静默丢：%s", (method) => {

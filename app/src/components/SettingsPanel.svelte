@@ -299,6 +299,46 @@
     }
   }
 
+  // 测试推送（14 期需求 4）。**成功的定义是端到端送达，不是 HTTP 201**——
+  // 生产取证正是"FCM 返回 201 但设备无声"（僵尸 endpoint 在宽限期内仍被受理）。
+  // 所以发完要等 sw.js 的回报，超时未回报即判失败：没有这一步等待，按钮会在
+  // 真正失效的情况下报"成功"，比没有按钮更糟。
+  const PUSH_DIAG_TIMEOUT_MS = 10000;
+  let testingPush = $state(false);
+  let pushTestResult = $state<{ ok: boolean; text: string } | null>(null);
+
+  async function testPush() {
+    if (testingPush) return;
+    testingPush = true;
+    pushTestResult = null;
+    // 收到即提前结束等待（而不是无脑等满）：多数情况下推送两三秒就到，
+    // 让用户干等十秒既没必要、也会让人以为卡住了。等满只发生在真失败时。
+    let onDelivered: (() => void) | null = null;
+    const delivered = new Promise<boolean>((resolve) => {
+      onDelivered = () => resolve(true);
+      setTimeout(() => resolve(false), PUSH_DIAG_TIMEOUT_MS);
+    });
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.data?.type === "push-diag-received") onDelivered?.();
+    };
+    navigator.serviceWorker?.addEventListener("message", onMsg);
+    try {
+      const r = await conn.notifyTestPush();
+      if (!r.ok) {
+        pushTestResult = { ok: false, text: tr("notify.webpush.testFailed", { err: r.error ?? "" }) };
+        return;
+      }
+      pushTestResult = (await delivered)
+        ? { ok: true, text: tr("notify.webpush.testOk") }
+        : { ok: false, text: tr("notify.webpush.testNotDelivered") };
+    } catch (e) {
+      pushTestResult = { ok: false, text: tr("notify.webpush.testFailed", { err: e instanceof Error ? e.message : String(e) }) };
+    } finally {
+      navigator.serviceWorker?.removeEventListener("message", onMsg);
+      testingPush = false;
+    }
+  }
+
   function setIncludeSummary(on: boolean) {
     cfg = { ...cfg, includeSummary: on };
     void persistCfg();
@@ -657,6 +697,15 @@
         <button class:on={cfg.webPush} disabled={pending.has("webPush")} onclick={() => toggleWebPush(true)}>{$t('notify.on')}</button>
       </div>
     </div>
+    <!-- 只在推送开着时才有意义；关着的时候点它必然失败，摆出来只会误导。 -->
+    {#if cfg.webPush}
+      <div class="wh-actions">
+        <button class="btn" disabled={testingPush} onclick={testPush}>
+          {testingPush ? $t('common.testing') : $t('notify.webpush.test')}
+        </button>
+        {#if pushTestResult}<span class="wh-test-msg" class:ok={pushTestResult.ok}>{pushTestResult.text}</span>{/if}
+      </div>
+    {/if}
 
     <div class="nsub webhook-head">
       <span>{$t('notify.webhook.label')}</span>
