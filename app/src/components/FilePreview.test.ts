@@ -218,3 +218,23 @@ describe("HTML 预览尺寸切换", () => {
     await waitFor(() => expect(queryByText(/手机|平板|桌面/)).toBeNull());
   });
 });
+
+// 14 期需求 5：每次点开文件必经 fs.read（服务端上限 512KB/5000 行）+ 主线程
+// hljs，此前全程空白。text 变体模拟代码行。
+describe("FilePreview 加载态", () => {
+  it("首次加载代码文件显示骨架，内容到达后消失", async () => {
+    let resolveRead: ((v: unknown) => void) | null = null;
+    const conn = connStub({
+      rpc: vi.fn((m: string) => {
+        if (m === "fs.read") return new Promise((r) => { resolveRead = r; });
+        return Promise.resolve({});
+      }),
+    });
+    const { container } = render(FilePreview, {
+      props: { conn, path: "/p/a.ts", mode: "code", active: true, onToast: () => {} },
+    });
+    await waitFor(() => expect(container.querySelector(".sk")).toBeTruthy());
+    resolveRead!({ content: "const a = 1", lang: "ts", mtime: 1, truncated: false });
+    await waitFor(() => expect(container.querySelector(".sk")).toBeNull());
+  });
+});

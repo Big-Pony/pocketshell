@@ -5,6 +5,7 @@
   import { loadProjectRoot } from "../lib/ui/file-tree";
   import { orderBranches, visibleBranches, BRANCH_LIMIT } from "../lib/ui/branch-list";
   import GitReview from "./GitReview.svelte";
+  import Skeleton from "./ui/Skeleton.svelte";
   import type { ReviewScope } from "../lib/net/protocol";
 
   let { conn, onOpenDiff, rootTick = 0 }: {
@@ -26,6 +27,9 @@
   let limit = $state(30);
   let notice = $state("");
   let refreshing = $state(false);
+  // 首次挂载路径此前没有任何反馈——同一个 loadAll()，⟳ 刷新有 refreshing
+  // 让按钮禁用，挂载却是一片空面板（14 期需求 5）。
+  let firstLoad = $state(true);
 
   // 全屏审查页。null = 未打开。GitReview 自带 position:fixed，
   // 所以在这里内联渲染即可盖满视口，不用改 App.svelte 的挂载结构。
@@ -78,6 +82,8 @@
       changes = (s as any).files;
     } catch (e: any) {
       notice = e?.code === "rpc_error" && /not_a_repo/.test(e?.message) ? tr("git.notRepo") : (e?.message ?? tr("git.loadFailed"));
+    } finally {
+      firstLoad = false;
     }
   }
   async function loadMore() { limit += 30; await loadAll(); }
@@ -110,6 +116,10 @@
     <div class="hint">{$t('git.needRoot')}</div>
   {:else}
     {#if notice}<div class="gn">{notice}</div>{/if}
+    {#if firstLoad}
+      <!-- 14 期需求 5：首次挂载的三条并发 git RPC 期间此前是一片空面板。 -->
+      <Skeleton rows={4} />
+    {:else}
     <div class="sec">
       <div class="st-row">
         <span class="st">{$t('git.branches')}</span>
@@ -162,6 +172,7 @@
       {/each}
       <button class="more" onclick={loadMore}>{$t('git.loadMore')}</button>
     </div>
+    {/if}
   {/if}
 </div>
 

@@ -8,6 +8,7 @@
   import PreviewDirDrawer from "./PreviewDirDrawer.svelte";
   import { PREVIEW_WIDTHS, widthPxOf, scaleFor, type PreviewWidthId } from "../lib/ui/preview-width";
   import { loadSettings, saveSettings } from "../lib/settings";
+  import Skeleton from "./ui/Skeleton.svelte";
 
   let { conn, path, mode, active, base, onToast, onEditingChange, onDirtyChange, autoEdit, onAutoEdit, onNavigate }: {
     conn: Connection; path: string; mode: "code" | "diff"; active: boolean;
@@ -110,7 +111,15 @@
     return previewUrl(origin(), mdToken, relFromBase(scope, abs));
   }
 
+  // 内容加载中（fs.read + 主线程 hljs）。此前全程空白，是最高频路径之一。
+  // 包一层而不是在 loadInner 里逐条 return 前置位——那个函数有 5 处早退。
+  let loadingContent = $state(false);
   async function load() {
+    loadingContent = true;
+    try { await loadInner(); } finally { loadingContent = false; }
+  }
+
+  async function loadInner() {
     notice = "";
     plain = false;
     canEdit = false;
@@ -296,6 +305,10 @@
           onFail={() => { view = "source"; onToast(tr("preview.mdFailed")); }} />
       {:else if kind === "html" && view === "render"}
         <HtmlView src={htmlSrc} {widthPx} scale={previewScale} />
+      {:else if loadingContent}
+        <!-- 14 期需求 5：fs.read + 高亮期间此前是纯空白。Skeleton 自带 300ms
+             延迟，小文件（局域网 50ms）不会闪。 -->
+        <Skeleton rows={8} variant="text" />
       {:else}
         {#if notice}<div class="pv-notice">{notice}</div>{/if}
         {#if mode === "diff"}

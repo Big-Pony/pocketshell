@@ -287,3 +287,19 @@ describe("GitPanel 跟随项目根", () => {
     expect(conn.rpc).toHaveBeenCalledTimes(3);
   });
 });
+
+// 14 期需求 5：首次挂载路径此前零反馈——同一个 loadAll()，⟳ 刷新有 refreshing
+// 让按钮禁用，挂载却是一片空面板。
+describe("GitPanel 首次加载", () => {
+  it("首次挂载显示骨架，数据到达后消失", async () => {
+    let resolve: ((v: unknown) => void) | null = null;
+    const conn = makeConn(vi.fn((m: string) => {
+      if (m === "git.branches") return new Promise((r) => { resolve = r; });
+      return Promise.resolve(m === "git.log" ? { commits: [] } : { files: [] });
+    }));
+    const { container } = render(GitPanel, { props: { conn, onOpenDiff: () => {}, rootTick: 0 } });
+    await waitFor(() => expect(container.querySelector(".sk")).toBeTruthy());
+    resolve!({ current: "main", branches: ["main"] });
+    await waitFor(() => expect(container.querySelector(".sk")).toBeNull());
+  });
+});
