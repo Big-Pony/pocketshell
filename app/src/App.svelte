@@ -422,6 +422,12 @@
     // notification's URL via postMessage instead of a navigation when a window
     // was already open (see public/sw.js notificationclick).
     const onSwMessage = (e: MessageEvent) => {
+      // SW 在 pushsubscriptionchange 里转发过来的新 endpoint（14 期需求 4）。
+      // 直接走既有的已认证 RPC 上报，不需要新协议、更不需要让 SW 自己发 HTTP。
+      if (e.data?.type === "push-subscription-changed") {
+        void conn.notifySubscribe(e.data.subscription).catch(() => {});
+        return;
+      }
       if (e.data?.type !== "notification-nav") return;
       const sid = new URLSearchParams(new URL(e.data.url, location.origin).search).get("session");
       if (sid) enterSession(sid);

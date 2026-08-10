@@ -89,6 +89,9 @@ export async function unsubscribeBrowser(): Promise<boolean> {
  */
 export async function syncSubscription(conn: PushConn): Promise<"synced" | "subscribed" | "skipped"> {
   if (!("serviceWorker" in navigator)) return "skipped";
+  // 先清掉 SW 在无活动页面时存下的待补报订阅（14 期需求 4 的二级降级）。
+  // 读完即删——补报失败也不重试，因为紧接着的无条件上报会覆盖它。
+  await flushPendingSubscription(conn);
   const reg = await navigator.serviceWorker.ready;
   const existing = await reg.pushManager.getSubscription();
   if (existing) {
@@ -99,4 +102,31 @@ export async function syncSubscription(conn: PushConn): Promise<"synced" | "subs
   }
   await subscribeAndReport(conn);
   return "subscribed";
+}
+
+/**
+ * 取出并清除 SW 存下的待补报订阅（pushsubscriptionchange 的二级降级）。
+ *
+ * 库/表/键名与 `public/sw.js` 的写入端逐字对应（PENDING_DB / PENDING_STORE /
+ * PENDING_KEY）；sw-cache.mirror.test.ts 钉住了这三对名字不漂移——那边无构建
+ * 无类型检查，名字对不上会静默地"写进去永远没人读"。
+ */
+async function flushPendingSubscription(conn: PushConn): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open("ps-push", 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore("pending"); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const json = await new Promise<unknown>((resolve) => {
+      const tx = db.transaction("pending", "readwrite");
+      const store = tx.objectStore("pending");
+      const get = store.get("sub");
+      get.onsuccess = () => { store.delete("sub"); resolve(get.result ?? null); };
+      get.onerror = () => resolve(null);
+    });
+    if (json) await conn.notifySubscribe(json);
+  } catch { /* 补报是尽力而为；紧接着的无条件上报才是主路径 */ }
 }

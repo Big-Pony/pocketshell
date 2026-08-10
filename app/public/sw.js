@@ -96,6 +96,22 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = {}; }
+
+  // 诊断推送（14 期需求 4）：回报给页面，证明链路真正打通。
+  // **仍然要 showNotification** —— 部分浏览器要求每次 push 都显示通知，
+  // 否则记一次"静默推送"违规，累计过多会吊销订阅权限。为了静默而冒
+  // 吊销风险不划算，所以显示一条极简的、tag 固定因而不会堆积的通知。
+  if (d.diag) {
+    e.waitUntil((async () => {
+      const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const c of all) c.postMessage({ type: "push-diag-received" });
+      await self.registration.showNotification("PocketShell", {
+        body: d.body || "诊断推送已送达", tag: "ps-diag",
+      });
+    })());
+    return;
+  }
+
   const title = d.title || "PocketShell";
   const body = d.body || "";
   const sessionId = d.sessionId || "";
@@ -111,5 +127,75 @@ self.addEventListener("notificationclick", (e) => {
     const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of all) { if ("focus" in c) { await c.focus(); c.postMessage({ type: "notification-nav", url }); return; } }
     if (self.clients.openWindow) await self.clients.openWindow(url);
+  })());
+});
+
+// ---------------------------------------------------------------------------
+// pushsubscriptionchange（14 期需求 4）
+//
+// W3C 规定：推送服务作废或轮换订阅时，浏览器在这里派发事件。这是重新订阅
+// 并把新 endpoint 交给 agent 的**唯一标准时机**。此前没有这个处理，于是
+// 轮换后浏览器持新 endpoint、agent 持旧的，双方都不知道——而 FCM 对已轮换
+// 的旧 endpoint 在宽限期内仍返回 201，agent 侧连错误都看不到。
+//
+// SW 拿不到页面里的 Noise/WS 连接，也不能自己发 HTTP 给 agent（那要新增一条
+// 无认证的公网路由，正是 VULN-001 的形状）。所以走两级降级：
+//   一级：转发给活动页面，由它用已认证的 RPC 上报。
+//   二级：没有活动页面时落 IndexedDB，页面下次启动连上时补报。
+// ---------------------------------------------------------------------------
+
+// 待补报的订阅。用 IndexedDB 而不是 Cache API——后者存的是 Response，
+// 塞一个 JSON 进去要绕一圈；而 localStorage 在 SW 里根本不可用。
+//
+// 这三个名字与 src/lib/web-push-client.ts 的读取端逐字对应，漂移了就是
+// "写进去永远没人读"且全程无报错。sw-cache.mirror.test.ts 钉住了这一点。
+const PENDING_DB = "ps-push";
+const PENDING_STORE = "pending";
+const PENDING_KEY = "sub";
+
+function openPendingDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PENDING_DB, 1);
+    req.onupgradeneeded = () => { req.result.createObjectStore(PENDING_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function stashPendingSubscription(json) {
+  try {
+    const db = await openPendingDb();
+    await new Promise((resolve, reject) => {
+      // db.transaction / objectStore / put 都是**同步**返回的 IDB API，
+      // 完成信号只在 tx 的 oncomplete 上——别在这里加 await。
+      const tx = db.transaction(PENDING_STORE, "readwrite");
+      tx.objectStore(PENDING_STORE).put(json, PENDING_KEY);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* 存不下就算了，页面下次连上的无条件上报仍会对齐 */ }
+}
+
+self.addEventListener("pushsubscriptionchange", (e) => {
+  e.waitUntil((async () => {
+    // newSubscription 在部分浏览器上为空，那就自己用旧 key 重订一次
+    let sub = e.newSubscription || null;
+    if (!sub && e.oldSubscription) {
+      try {
+        sub = await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: e.oldSubscription.options.applicationServerKey,
+        });
+      } catch { /* 拿不到就交给页面下次连上时的无条件上报兜底 */ }
+    }
+    if (!sub) return;
+    const json = sub.toJSON();
+
+    const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (all.length > 0) {
+      for (const c of all) c.postMessage({ type: "push-subscription-changed", subscription: json });
+      return;
+    }
+    await stashPendingSubscription(json);
   })());
 });
