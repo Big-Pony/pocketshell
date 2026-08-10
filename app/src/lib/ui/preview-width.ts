@@ -10,12 +10,42 @@
 
 export type PreviewWidthId = "phone" | "tablet" | "desktop";
 
-/** 顺序即底部弹层里的显示顺序。px 取常见响应式断点。 */
-export const PREVIEW_WIDTHS: { id: PreviewWidthId; px: number }[] = [
-  { id: "phone", px: 390 },
-  { id: "tablet", px: 768 },
-  { id: "desktop", px: 1280 },
+/**
+ * 顺序即底部弹层里的显示顺序。px 取常见响应式断点。
+ *
+ * `icon` 是 24×24 线性图标的路径集合，渲染时套 BottomBar 同款 <svg> 外壳
+ * （fill:none / stroke:currentColor / stroke-width:2）。
+ *
+ * 为什么不用字符图标：初版按钮写的是 `▭`（U+25AD），两处翻车——内置的 5 套
+ * 等宽字体里有 4 套（含默认的 maple-mono）压根没有这个字形，得掉进系统兜底
+ * 字体去渲染，各家安卓的粗细与基线都不一样；而且它本身就是个没有特征的空心
+ * 方块，三个档位共用它等于图标不传递任何信息。BottomBar 早先把 `▶ 🗀 ⌨ ⚡ ⚙`
+ * 换成内联 SVG 正是同一个原因。
+ *
+ * 三个图标按**宽度**区分（手机 6 → 平板 12 → 桌面 20），一眼能看出选中的是哪档。
+ */
+export const PREVIEW_WIDTHS: { id: PreviewWidthId; px: number; icon: string[] }[] = [
+  {
+    id: "phone",
+    px: 390,
+    icon: ["M9 2h6a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z", "M11 19h2"],
+  },
+  {
+    id: "tablet",
+    px: 768,
+    icon: ["M6 2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z", "M10 19h4"],
+  },
+  {
+    id: "desktop",
+    px: 1280,
+    icon: ["M3 4h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z", "M8 21h8", "M12 17v4"],
+  },
 ];
+
+/** 当前档位的图标路径。找不到时回落手机档——与 widthPxOf 的兜底方向一致。 */
+export function iconOf(id: PreviewWidthId): string[] {
+  return (PREVIEW_WIDTHS.find((w) => w.id === id) ?? PREVIEW_WIDTHS[0]).icon;
+}
 
 export function widthPxOf(id: PreviewWidthId): number {
   return PREVIEW_WIDTHS.find((w) => w.id === id)?.px ?? 390;

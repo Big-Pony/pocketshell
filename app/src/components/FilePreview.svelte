@@ -6,7 +6,7 @@
   import { previewKind, previewOrigin, previewUrl, relFromBase } from "../lib/preview";
   import HtmlView from "./HtmlView.svelte";
   import PreviewDirDrawer from "./PreviewDirDrawer.svelte";
-  import { PREVIEW_WIDTHS, widthPxOf, scaleFor, type PreviewWidthId } from "../lib/ui/preview-width";
+  import { PREVIEW_WIDTHS, widthPxOf, scaleFor, iconOf, type PreviewWidthId } from "../lib/ui/preview-width";
   import { loadSettings, saveSettings } from "../lib/settings";
   import Skeleton from "./ui/Skeleton.svelte";
 
@@ -266,7 +266,11 @@
              只在 HTML 渲染态出现——源码态与其他文件类型下这个旋钮没有意义。 -->
         {#if kind === "html" && view === "render"}
           <button class="pv-btn wbtn" onclick={() => (widthPickOpen = true)}>
-            ▭ {$t(`preview.width.${widthId}`)}
+            <svg class="wic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              {#each iconOf(widthId) as d (d)}<path {d} />{/each}
+            </svg>
+            {$t(`preview.width.${widthId}`)}
           </button>
         {/if}
         {#if previewFullscreen}
@@ -357,6 +361,10 @@
       <div class="wp-title">{$t('preview.width.title')}</div>
       {#each PREVIEW_WIDTHS as w (w.id)}
         <button class="wp-item" class:on={w.id === widthId} onclick={() => pickWidth(w.id)}>
+          <svg class="wic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            {#each w.icon as d (d)}<path {d} />{/each}
+          </svg>
           {$t(`preview.width.${w.id}`)} <span class="wp-sub mono">· {w.px}px</span>
         </button>
       {/each}
@@ -413,8 +421,16 @@
   .dl.ctx { color: var(--code-gutter); }
   .sign { display: inline-block; width: 1em; user-select: none; }
 
-  /* 尺寸档位按钮：与其他 .pv-btn 同高，宽度随文案自适应 */
-  .wbtn { min-width: auto; padding: 0 8px; font-size: 0.7rem; white-space: nowrap; }
+  /* 尺寸档位按钮：与其他 .pv-btn 同高，宽度随文案自适应。
+     inline-flex 让 SVG 与文字同行居中——.pv-btn 默认的行内布局下图标会贴基线。 */
+  .wbtn {
+    min-width: auto; padding: 0 8px; font-size: 0.7rem; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  /* 图标尺寸与 BottomBar 的 .ic 同规格。flex 容器里必须锁死 flex-shrink，
+     否则窄屏下会被压扁成竖条。 */
+  .wic { width: 15px; height: 15px; flex: 0 0 auto; }
+  .wp-item .wic { width: 17px; height: 17px; }
 
   /* 尺寸选择层：形态与 GitReview 的基线选择层一致（底部弹出、同圆角与阴影）。
      只有三项，不限高不滚动。 */
@@ -435,8 +451,9 @@
     font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--dimmer); font-weight: 600; padding: 4px 14px 8px;
   }
+  /* flex 而非 block：图标要与文字同行居中对齐，block 下 <svg> 会自己占一行 */
   .wp-item {
-    display: block; width: 100%; text-align: left;
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
     background: transparent; border: 0; padding: 11px 14px;
     font-size: 0.75rem; color: var(--text);
   }

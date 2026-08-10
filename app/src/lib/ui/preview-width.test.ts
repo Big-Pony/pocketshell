@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PREVIEW_WIDTHS, widthPxOf, scaleFor } from "./preview-width";
+import { PREVIEW_WIDTHS, widthPxOf, scaleFor, iconOf } from "./preview-width";
 
 describe("预览宽度档位", () => {
   it("三档顺序固定为 手机/平板/桌面", () => {
@@ -10,6 +10,33 @@ describe("预览宽度档位", () => {
     expect(widthPxOf("phone")).toBe(390);
     expect(widthPxOf("tablet")).toBe(768);
     expect(widthPxOf("desktop")).toBe(1280);
+  });
+
+  // 初版按钮用字符 `▭`（U+25AD）当图标，两处翻车：内置 5 套等宽字体里 4 套
+  // （含默认的 maple-mono）没有这个字形，掉进系统兜底字体渲染成豆腐块；
+  // 且它本身是个无特征方块，三档共用等于图标不传信息。BottomBar 早先把
+  // `▶ 🗀 ⌨ ⚡ ⚙` 换成内联 SVG 是同一个教训。这两条锁死不许回潮。
+  it("图标是 SVG 路径而非字符——字体缺字形会渲染成豆腐块", () => {
+    for (const w of PREVIEW_WIDTHS) {
+      expect(w.icon.length).toBeGreaterThan(0);
+      // 合法的 path d 以移动指令开头；字符图标不可能满足
+      for (const d of w.icon) expect(d).toMatch(/^[Mm]/);
+    }
+  });
+
+  it("三档图标各不相同——否则按钮无法表达当前选中哪档", () => {
+    const keys = PREVIEW_WIDTHS.map((w) => w.icon.join("|"));
+    expect(new Set(keys).size).toBe(PREVIEW_WIDTHS.length);
+  });
+
+  it("iconOf 取到对应档位的图标", () => {
+    expect(iconOf("desktop")).toEqual(PREVIEW_WIDTHS[2].icon);
+  });
+
+  // 非法 id 回落手机档而不是抛错/返回空数组：空数组会渲染出一个没有任何
+  // 路径的 <svg>，即一块看不见的空白，比回落到错误档位更难排查。
+  it("iconOf 遇到非法档位回落手机档", () => {
+    expect(iconOf("nope" as never)).toEqual(PREVIEW_WIDTHS[0].icon);
   });
 });
 
