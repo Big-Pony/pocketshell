@@ -35,6 +35,14 @@
   --radius-xl: 10px;
   --safe-bottom: env(safe-area-inset-bottom);
   --safe-top: env(safe-area-inset-top);
+
+  /* ── 动效（几何量，非颜色；颜色令牌一律由 theme-derive.ts 生成）──────────
+     取值来自既有 11 处 transition 的统计惯例：交互反馈 0.15s、结构位移 0.16~0.2s。
+     新组件引用这些令牌而不是再抄一遍数字；既有声明保持原样不动。 */
+  --dur-fast: 0.15s;    /* 交互反馈：按下、hover、颜色切换 */
+  --dur-base: 0.18s;    /* 结构位移：弹层入场、抽屉滑动 */
+  --ease-out: ease-out;
+  --ease-breathe: ease-in-out;  /* 呼吸循环专用，配 alternate 使用 */
 }
 
 /* highlight.js token colors → --code-* (file preview, follows theme) */
@@ -94,10 +102,15 @@ button, input, select, textarea {
 .grow { flex: 1; }
 .none { display: none; }
 
-/* R6: honor prefers-reduced-motion — kill the infinite pulse loops on tab
-   status dots (.dot-run/.dot-wait in TopTabs/TaskPanel) and the BottomBar
-   badge (.dot) so the page can go fully idle. Loading spinners (FileTree
-   .spinner) stay: they are transient feedback, not idle decoration. */
+/* R6 + 14 期需求 5：honor prefers-reduced-motion。
+   杀掉 tab 状态点（TopTabs/TaskPanel 的 .dot-run/.dot-wait）与 BottomBar
+   徽标（.dot）的无限脉冲，让页面能真正 idle。
+
+   **加载反馈同样停动画**（14 期定调，与此前"transient feedback 应保留"的
+   写法相反）：前庭障碍用户要的就是「别动」，而骨架屏的形状信息、进度条的
+   存在感都不依赖动画——静态灰块与静态细条已经把"这里在等"说清楚了。
+   两个加载原子（components/ui/Skeleton、ProgressLine）各自在组件内处理，
+   FileTree 的全屏转圈遮罩已在需求 5b 中被替换掉。 */
 @media (prefers-reduced-motion: reduce) {
   .dot-run, .dot-wait, .dot {
     animation: none !important;

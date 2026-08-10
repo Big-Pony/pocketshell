@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, describe } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { FONTS } from "./lib/font";
@@ -168,7 +168,10 @@ test("app.css 只留非颜色令牌，颜色一律来自 theme-tokens.css", () =
   // 切换——正是这套体系要消灭的那类 bug。圆角与安全区是全主题共用的几何量。
   const { themes } = rootBlocks(APP_CSS);
   expect([...themes.keys()]).toEqual([DEFAULT_THEME]); // app.css 只剩一个无属性 :root
+  // 动效令牌（--dur-*/--ease-*）是几何量不是颜色，与圆角/安全区同类，
+  // 故留在 app.css（14 期需求 5）。
   expect(declaredTokens(themes.get(DEFAULT_THEME)!).sort()).toEqual([
+    "--dur-base", "--dur-fast", "--ease-breathe", "--ease-out",
     "--radius-lg", "--radius-md", "--radius-sm", "--radius-xl", "--safe-bottom", "--safe-top",
   ]);
 });
@@ -324,4 +327,17 @@ test("tab 栏会话名走等宽令牌 —— 与任务面板里的同一个名�
   expect(tabRule, "TopTabs 里没找到 .tab 规则").not.toBeNull();
   expect(tabRule![0], ".tab 没有走 --font-mono，会话名会掉回正文字体")
     .toMatch(/font-family:\s*var\(--font-mono\)/);
+});
+
+// 14 期需求 5：动效令牌。现状是 11 处 transition 各写字面值，
+// 统计出的惯例是 交互 0.15s / 位移 0.16~0.2s。把它们变成令牌，
+// 新组件引用令牌而非再抄一遍数字。
+// 注意：这是**几何量不是颜色**，所以放 app.css 而非走 theme-derive 生成，
+// 与 CLAUDE.md 第 4 条不冲突。
+describe("动效令牌", () => {
+  test("app.css 的 :root 里定义了四个动效令牌", () => {
+    for (const token of ["--dur-fast", "--dur-base", "--ease-out", "--ease-breathe"]) {
+      expect(APP_CSS, `缺令牌 ${token}`).toContain(token + ":");
+    }
+  });
 });
