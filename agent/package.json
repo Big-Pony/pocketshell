@@ -13,7 +13,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "gen:embedded": "bun run scripts/gen-embedded.ts",
-    "build:bin": "bun run scripts/build-bin.ts"
+    "build:bin": "bun run scripts/build-bin.ts",
+    "bench:transfer": "bun run scripts/transfer-bench.ts"
   },
   "devDependencies": {
     "@types/web-push": "^3.6.4",
