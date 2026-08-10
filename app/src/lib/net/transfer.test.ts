@@ -109,7 +109,9 @@ test("downloadFileBlob fetches chunks concurrently and assembles in offset order
 });
 
 test("downloadFileBlob caps concurrency at the default DOWNLOAD_WINDOW", async () => {
-  const size = 20; // 10 windows of 2 bytes
+  // 分片数必须多于窗口深度，否则测的是"文件不够长"而不是"窗口封顶"
+  // （14 期把窗口从 4 提到 16，原本的 10 片就不够了）。
+  const size = DOWNLOAD_WINDOW * 2 * 2; // 2×窗口 个分片，每片 2 字节
   let inFlight = 0, maxInFlight = 0;
   const rpc = vi.fn(async (_m: string, p: any) => {
     if (p.len === 0) return { bytes: new Uint8Array(0), eof: false, size };
@@ -203,7 +205,10 @@ const idxOf = (bytes: Uint8Array, chunkBytes: number) => bytes[0] / chunkBytes;
 
 describe("windowed upload (WP-5)", () => {
   test("uploadFiles caps concurrency at UPLOAD_WINDOW and sends in index order despite out-of-order replies", async () => {
-    const size = 16, chunkBytes = 2, n = 8;
+    // 分片数必须多于窗口深度（末尾 barrier 那片不参与窗口，所以要 n-1 ≥ 窗口），
+    // 否则测的是"文件不够长"而不是"窗口封顶"——14 期把窗口从 4 提到 16 时
+    // 原本的 8 片当场不够用了。
+    const chunkBytes = 2, n = UPLOAD_WINDOW * 2, size = chunkBytes * n;
     let inFlight = 0, maxInFlight = 0;
     const sentOrder: number[] = [];
     const rpcBin = vi.fn(async (_m: string, _p: any, bytes: Uint8Array) => {
@@ -217,7 +222,7 @@ describe("windowed upload (WP-5)", () => {
       return { written: 0 };
     });
     await uploadFiles({ rpcBin } as any, "/d", [{ name: "f", size, blob: seqBlob(size), destName: "f" }], { chunkBytes });
-    expect(sentOrder).toEqual([0, 1, 2, 3, 4, 5, 6, 7]); // strictly monotonic
+    expect(sentOrder).toEqual(Array.from({ length: n }, (_, i) => i)); // strictly monotonic
     expect(maxInFlight).toBe(UPLOAD_WINDOW); // full window actually in flight
   });
 
@@ -368,4 +373,81 @@ test("fs.downloadChunk 回落到 dataB64（单帧装不下或客户端没声明 
   const blob = await downloadFileBlob(conn as any, "/a");
   const got = new Uint8Array(await blob.arrayBuffer());
   expect(Array.from(got)).toEqual(Array.from(EVIL));
+});
+
+// ---------------------------------------------------------------------------
+// 14 期需求 3：窗口 4→16。吞吐天花板 = 窗口 × 分片 ÷ RTT，与链路带宽无关——
+// 用户实测"开 VPN 也一样"正是这个特征。
+// RTT=150ms 下：4×46080/0.15 ≈ 1.17MB/s → 16×57344/0.15 ≈ 5.8MB/s。
+describe("传输窗口深度（14 期需求 3）", () => {
+  test("上传/下载窗口都是 16", () => {
+    expect(UPLOAD_WINDOW).toBe(16);
+    expect(DOWNLOAD_WINDOW).toBe(16);
+  });
+
+  test("上传并发真的用满窗口且不越界", async () => {
+    let peak = 0, cur = 0;
+    const conn = {
+      rpc: vi.fn(async () => ({})),
+      rpcBin: vi.fn(async () => {
+        cur++; peak = Math.max(peak, cur);
+        await new Promise((r) => setTimeout(r, 5));
+        cur--;
+        return {};
+      }),
+    };
+    // 40 片：足够多，窗口能被填满好几轮。用 2 字节的假分片跑，省内存——
+    // 窗口调度与分片真实大小无关。
+    const chunkBytes = 2, n = 40;
+    const blob = seqBlob(chunkBytes * n);
+    await uploadChunksWindowed(
+      conn as never, "uid", blob,
+      chunkOffsets(blob.size, chunkBytes), "/dst",
+    );
+    expect(peak).toBeLessThanOrEqual(UPLOAD_WINDOW);
+    expect(peak, "应真的用满窗口而不是仍旧 4 路").toBeGreaterThan(4);
+  });
+
+  test("下载并发真的用满窗口且不越界", async () => {
+    const chunkBytes = 2, n = 40, size = chunkBytes * n;
+    let peak = 0, cur = 0;
+    const conn = {
+      rpc: vi.fn(async (_m: string, p: any) => {
+        cur++; peak = Math.max(peak, cur);
+        await new Promise((r) => setTimeout(r, 5));
+        cur--;
+        return { bytes: new Uint8Array(p.len), eof: p.offset + p.len >= size, size };
+      }),
+    };
+    await downloadFileBlob(conn as never, "/f.bin", { chunkBytes });
+    expect(peak).toBeLessThanOrEqual(DOWNLOAD_WINDOW);
+    expect(peak, "应真的用满窗口而不是仍旧 4 路").toBeGreaterThan(4);
+  });
+
+  // last:true 那片携带 destPath，agent 收到即把临时文件提交为正式文件
+  // （fs-service.ts 的 copyFileSync）。它必须在其余所有分片**结算之后**才发
+  // 出——否则会提交出内容不完整的文件，且**失败是静默的**（文件就在那里，
+  // 只是短了一截）。这条断言锁住这个语义，防止后来者把末尾 barrier
+  // "优化"进窗口调度。窗口提到 16 之后尤其要紧：一次能有 16 片在飞。
+  test("last 分片在所有其他分片结算后才发出（末尾 barrier 不可优化）", async () => {
+    const order: string[] = [];
+    let settled = 0;
+    const conn = {
+      rpc: vi.fn(async () => ({})),
+      rpcBin: vi.fn(async (_m: string, p: any) => {
+        if (p.last) order.push(`last@${settled}`);
+        await new Promise((r) => setTimeout(r, 3));
+        settled++;
+        return {};
+      }),
+    };
+    const chunkBytes = 2, n = 10;
+    const blob = seqBlob(chunkBytes * n);
+    await uploadChunksWindowed(
+      conn as never, "uid", blob,
+      chunkOffsets(blob.size, chunkBytes), "/dst",
+    );
+    // 发 last 的那一刻，前 n-1 片必须已经全部结算。
+    expect(order).toEqual([`last@${n - 1}`]);
+  });
 });

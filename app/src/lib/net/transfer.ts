@@ -81,7 +81,19 @@ export async function uploadFiles(
 // order, no matter how reads or rpcs interleave. Up to `windowSize` rpcs are
 // in flight at once; any chunk failure stops new sends and rejects the whole
 // upload (the half-written temp file is swept server-side, as before).
-export const UPLOAD_WINDOW = 4;
+//
+// 14 期需求 3：4 → 16。吞吐天花板 = 窗口 × 分片 ÷ RTT，与链路带宽无关
+// （用户实测"开 VPN 也一样"正是这个特征）。RTT=150ms 的公网链路上
+// 4×45KB 只能跑 1.17MB/s（限速中继实测 1.05MB/s，与算式吻合），
+// 16×56KB 的天花板是 5.8MB/s。
+//
+// 16 由两条约束夹出，不是拍的：
+//   内存 —— 16 × 56KB = 896KB in-flight，手机可接受（整个文件本来就驻留内存）。
+//   死线 —— 满载 inflightBytes ≈ 918KB → rpcDeadlineMs 约 147s，仍在
+//           RPC_MAX_TIMEOUT_MS(5min) 之内。
+// 不再往上：sendRpcResult 路径**完全无背压**（server.ts 自述"客户端的 rpc
+// 超时是唯一兜底"），窗口过深会让 agent 无节制往 socket 灌。
+export const UPLOAD_WINDOW = 16;
 
 export async function uploadChunksWindowed(
   conn: RpcLike, uploadId: string, blob: Blob, windows: [number, number][], destPath: string,
@@ -189,7 +201,11 @@ export async function downloadFileBlob(
 // and are thus re-assembled in OFFSET order even when RPCs resolve out of
 // order. Any chunk failure rejects the whole batch — same all-or-nothing
 // semantics as the old serial loop.
-export const DOWNLOAD_WINDOW = 4;
+// 14 期需求 3：4 → 16，推导与内存/死线两条约束见 UPLOAD_WINDOW 上方的注释。
+// 下行侧还有一条上行没有的前提：**必须与 rpc() 的 expectBytes 记账同批落地**。
+// 16 lane 各等一个 56KB 的响应体，若响应体不入账、死线恒为 10s，要下行
+// ≥716kbps 才不超时——不修死线光提窗口，慢链路下载失败率反而上升。
+export const DOWNLOAD_WINDOW = 16;
 
 export async function fetchChunksWindowed(
   conn: RpcLike, path: string, windows: [number, number][], windowSize = DOWNLOAD_WINDOW,
