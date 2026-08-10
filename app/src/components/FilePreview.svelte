@@ -176,12 +176,17 @@
     }
   }
 
+  // CM6 是最大的懒 chunk，弱网首次可秒级；此前点「编辑」后按钮无态、
+  // 界面完全不动（14 期需求 5）。
+  let loadingEditor = $state(false);
   async function startEdit() {
-    if (!canEdit || editing) return;
+    if (!canEdit || editing || loadingEditor) return;
     enterView = view; // remember where to land when the editor closes
+    loadingEditor = true;
     try {
       FileEditorComp = (await import("./FileEditor.svelte")).default; // lazy chunk boundary
     } catch { onToast(tr("editor.loadFailed")); return; }
+    finally { loadingEditor = false; }
     editing = true;
     onEditingChange?.(true);
   }
@@ -269,7 +274,9 @@
           <button class="pv-btn" onclick={() => { previewFullscreen = false; drawerOpen = false; }}>{$t('preview.exitFullscreen')}</button>
         {:else}
           {#if kind !== "image" && kind !== "video" && canEdit}
-            <button class="pv-btn" onclick={startEdit}>{$t('editor.edit')}</button>
+            <button class="pv-btn" disabled={loadingEditor} onclick={startEdit}>
+              {loadingEditor ? $t('common.loading') : $t('editor.edit')}
+            </button>
           {/if}
           <button class="pv-btn" aria-label={$t('preview.fullscreen')} onclick={enterFullscreen}>⛶</button>
         {/if}
