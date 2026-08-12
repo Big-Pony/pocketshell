@@ -460,6 +460,17 @@ export class TerminalService {
       // phone and the input line stays visible. Also dodges the fullscreen
       // renderer's CJK-copy-corruption bug. (tmux 3.0+; `-e` before the command.)
       args.push("-e", "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1");
+      // `-e TERMUX_VERSION=1`: Reasonix (the DeepSeek agent CLI) only offers its
+      // mobile-friendly renderer ("nativeScrollback": no alt-screen, no mouse
+      // capture, transcript printed into the normal buffer) when it detects a
+      // Termux terminal via TERMUX_VERSION / TERMUX_APP_PID / TERMUX__PREFIX.
+      // Our sessions are not Termux, so seed the variable to make Reasonix take
+      // that path — same mechanism as the Claude Code seed above, so touch
+      // scrollback works on the phone. Verified zero impact on the other tools
+      // that share these sessions: Claude Code gates every TERMUX_VERSION read
+      // on `TERMUX_VERSION && PREFIX` (PREFIX stays unset here), and Codex has
+      // no TERMUX references at all. See docs/reasonix-移动端手势滚动问题.md.
+      args.push("-e", "TERMUX_VERSION=1");
       // Notification hook wiring: seed POCKETSHELL_NOTIFY_* so a hook running
       // inside this session can identify it as a PocketShell session and POST to
       // the loopback notify endpoint. Absent outside PocketShell => hook exits 0.

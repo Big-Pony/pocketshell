@@ -490,6 +490,27 @@ test.skipIf(!hasTmux)("ensure() does not inject LANG at new-session when there i
   expect(created.some((a) => a.startsWith("LANG="))).toBe(false);
 });
 
+test.skipIf(!hasTmux)("ensure() seeds TERMUX_VERSION=1 so Reasonix uses its mobile nativeScrollback renderer", () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("has-session")) return fail();
+      return ok();
+    },
+  });
+  term.ensure("t-reasonix");
+  term.dispose();
+
+  const created = calls.find((a) => a.includes("new-session"))!;
+  const eIdx = created.indexOf("TERMUX_VERSION=1");
+  expect(eIdx).toBeGreaterThan(0);
+  expect(created[eIdx - 1]).toBe("-e"); // must be preceded by its own -e flag
+  // It must not set PREFIX: Claude Code only reacts to TERMUX_VERSION when
+  // PREFIX is set too, so keeping PREFIX unset preserves its behaviour.
+  expect(created.some((a) => a.startsWith("PREFIX="))).toBe(false);
+});
+
 // --- WP-3a: async list() / scan() behaviour --------------------------------
 
 test("list() runs per-session capture probes concurrently (not serially)", async () => {
