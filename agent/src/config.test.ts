@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { loadConfig, buildPairingString, resolveTlsMaterial, advertiseToHttp, resolveAdvertise, OFFICIAL_UPDATE_REPO } from "./config";
 import { toB64 } from "./bytes";
-import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync, readFileSync as _rf } from "node:fs";
+import { rmSync, mkdtempSync, statSync, existsSync, writeFileSync, mkdirSync, readFileSync as _rf } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -272,4 +272,48 @@ test("env overrides port and workspace root", () => {
   const c = loadConfig({ POCKETSHELL_PORT: "9001", POCKETSHELL_WORKSPACE: "/srv/proj" });
   expect(c.listen.port).toBe(9001);
   expect(c.workspaceRoot).toBe("/srv/proj");
+});
+
+// 回填 advertise 的设计前提（2026-08-16 隧道方案 §3.5）：
+// config.ts:155 是 `env.POCKETSHELL_ADVERTISE ?? file.advertise` —— env 赢。
+// 而 --advertise 是 install 的必填项，所以每台由 install 装出的机器，unit 里
+// 都有 Environment=POCKETSHELL_ADVERTISE=...（真机核实：开发服务器
+// `systemctl cat pocketshell` 含该行）。
+//
+// 结论：tunnel setup **不能**靠写 agent.json 回填 advertise，必须改写 unit
+// 里的 Environment=。这条测试就是那个结论的机器可读版本——它一旦变红，说明
+// 优先级语义被改了，tunnel-runner 的回填策略必须跟着重新设计。
+test("env POCKETSHELL_ADVERTISE overrides agent.json (why tunnel setup rewrites the unit, not agent.json)", () => {
+  const keyDir = tmpKeyDir();
+  mkdirSync(keyDir, { recursive: true });
+  writeFileSync(
+    join(keyDir, "agent.json"),
+    JSON.stringify({ advertise: "wss://from-file.example", host: "127.0.0.1", port: 8722 }),
+  );
+
+  const fromFile = loadConfig({ POCKETSHELL_KEY_DIR: keyDir });
+  expect(resolveAdvertise(fromFile)).toBe("wss://from-file.example");
+
+  const fromEnv = loadConfig({
+    POCKETSHELL_KEY_DIR: keyDir,
+    POCKETSHELL_ADVERTISE: "wss://from-env.example",
+  });
+  expect(resolveAdvertise(fromEnv)).toBe("wss://from-env.example");
+
+  rmSync(keyDir, { recursive: true, force: true });
+});
+
+// 第二道障碍：persistAgentJson 的 `if (existsSync(file)) return; // never clobber
+// user edits`。tunnel setup 跑的时候 agent.json 必然已存在，所以就算绕开优先级
+// 问题，写也写不进去。
+test("loadConfig never rewrites an existing agent.json", () => {
+  const keyDir = tmpKeyDir();
+  mkdirSync(keyDir, { recursive: true });
+  const original = JSON.stringify({ advertise: "wss://handwritten.example" });
+  writeFileSync(join(keyDir, "agent.json"), original);
+
+  loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_ADVERTISE: "wss://from-env.example" });
+
+  expect(_rf(join(keyDir, "agent.json"), "utf8")).toBe(original);
+  rmSync(keyDir, { recursive: true, force: true });
 });
