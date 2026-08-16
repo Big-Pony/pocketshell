@@ -9,10 +9,11 @@
 import { existsSync, copyFileSync, writeFileSync, readFileSync, mkdirSync, realpathSync, chmodSync, rmSync, symlinkSync, lstatSync, readlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  parseInstallArgv, resolvePlan, renderSystemdUnit, renderLaunchdPlist,
+  parseInstallArgv, resolvePlan,
   LINUX_BIN_DIR, LINUX_SYMLINK,
   type InstallPlan,
 } from "./cli-install";
+import { renderUnitFor } from "./cli-tunnel";
 import { ensureTmux, realTmuxDeps } from "./ensure-tmux";
 
 const PAIR_RE = /pocketshell-pair:[A-Za-z0-9_-]+/g;
@@ -119,7 +120,7 @@ function installBinary(plan: InstallPlan): string[] {
 /** Writes the unit, backing up any existing one first. Returns log lines. */
 function writeUnit(plan: InstallPlan): string[] {
   const lines: string[] = [];
-  const text = plan.platform === "linux" ? renderSystemdUnit(plan) : renderLaunchdPlist(plan);
+  const text = renderUnitFor(plan);
   if (existsSync(plan.unitPath)) {
     const bak = backupPath(plan.unitPath, stampNow());
     copyFileSync(plan.unitPath, bak);

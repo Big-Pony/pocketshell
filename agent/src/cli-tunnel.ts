@@ -4,6 +4,11 @@
 // 本文件只放**纯逻辑**：argv 解析、tailscale 输出解析、origin 推导、unit 的
 // 解析与重渲染。所有副作用（spawn、读写文件、重启服务）在 tunnel-runner.ts。
 // 沿用 cli-install.ts / install-runner.ts 已有的切分方式。
+import {
+  renderSystemdUnit, renderLaunchdPlist,
+  SYSTEMD_UNIT_NAME, LAUNCHD_LABEL, LINUX_SYMLINK,
+  type InstallPlan,
+} from "./cli-install";
 
 /** Funnel 只允许 443 / 8443 / 10000；固定 443，这样 advertise 不用带端口号。 */
 export const FUNNEL_PORT = 443;
@@ -109,4 +114,103 @@ export function originFromEnv(env: Record<string, string>): OriginResult {
   // 0.0.0.0 / :: 是绑定通配符，不是可连接地址（同 install-runner.ts:137 的 waitReady）。
   const target = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
   return { ok: true, url: `http://${target}:${port}`, port };
+}
+
+/** 按平台分派到既有渲染器。install-runner 的 writeUnit 也用它。 */
+export function renderUnitFor(plan: InstallPlan): string {
+  return plan.platform === "linux" ? renderSystemdUnit(plan) : renderLaunchdPlist(plan);
+}
+
+function xmlUnescape(s: string): string {
+  // 顺序要紧：&amp; 必须最后还原，否则 "&amp;lt;" 会被两步还原成 "<"。
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
+function planFromSystemdUnit(text: string, unitPath: string): InstallPlan | null {
+  const user = /^User=(.*)$/m.exec(text)?.[1]?.trim();
+  const home = /^WorkingDirectory=(.*)$/m.exec(text)?.[1]?.trim();
+  const binPath = /^ExecStart=(.*)$/m.exec(text)?.[1]?.trim();
+  if (!user || !home || !binPath) return null;
+
+  const env: Record<string, string> = {};
+  for (const m of text.matchAll(/^Environment=([A-Za-z0-9_]+)=(.*)$/gm)) env[m[1]!] = m[2]!;
+
+  return {
+    platform: "linux",
+    user,
+    home,
+    keyDir: env.POCKETSHELL_KEY_DIR ?? `${home}/.pocketshell`,
+    binPath,
+    binOwner: user,
+    symlinkPath: LINUX_SYMLINK,
+    unitPath,
+    label: SYSTEMD_UNIT_NAME,
+    env,
+  };
+}
+
+function planFromLaunchdPlist(text: string, unitPath: string): InstallPlan | null {
+  const pick = (key: string): string | undefined => {
+    const m = new RegExp(`<key>${key}</key><string>([^<]*)</string>`).exec(text);
+    return m ? xmlUnescape(m[1]!) : undefined;
+  };
+  const label = pick("Label");
+  const home = pick("WorkingDirectory");
+  const binPath = xmlUnescape(/<array><string>([^<]*)<\/string><\/array>/.exec(text)?.[1] ?? "");
+  if (!label || !home || !binPath) return null;
+
+  // EnvironmentVariables 里的条目缩进四格，顶层的缩进两格 —— 见
+  // renderLaunchdPlist 的 envLines。靠缩进区分，避免把 Label 当环境变量读进来。
+  const env: Record<string, string> = {};
+  for (const m of text.matchAll(/^ {4}<key>([A-Za-z0-9_]+)<\/key><string>([^<]*)<\/string>$/gm)) {
+    env[m[1]!] = xmlUnescape(m[2]!);
+  }
+  // PATH 是渲染器从 tmuxDir 合成的，不是真正的服务环境变量；抽出来别放回 env，
+  // 否则重渲染会多出一条 PATH 行。
+  const path = env.PATH;
+  delete env.PATH;
+
+  return {
+    platform: "darwin",
+    // plist 里没有 User 字段（LaunchAgent 天然跑在调用者的用户域下）。这里从
+    // home 兜一个值纯粹是为了满足类型；renderLaunchdPlist 一个字都不读它。
+    user: home.split("/").filter(Boolean).pop() ?? "",
+    home,
+    keyDir: env.POCKETSHELL_KEY_DIR ?? `${home}/.pocketshell`,
+    binPath,
+    unitPath,
+    label,
+    logPath: pick("StandardOutPath"),
+    tmuxDir: path ? path.split(":")[0] : undefined,
+    env,
+  };
+}
+
+/**
+ * 把一份已装好的 unit 反解回 InstallPlan，好让我们用**既有渲染器**改写它，
+ * 而不是做文本替换。反解不出来就返回 null，调用方给手工指引。
+ */
+export function planFromUnit(
+  text: string, unitPath: string, platform: "linux" | "darwin",
+): InstallPlan | null {
+  return platform === "linux"
+    ? planFromSystemdUnit(text, unitPath)
+    : planFromLaunchdPlist(text, unitPath);
+}
+
+/** 只换 advertise，其余原样。返回新对象，不改入参。 */
+export function planWithAdvertise(plan: InstallPlan, advertise: string): InstallPlan {
+  return { ...plan, env: { ...plan.env, POCKETSHELL_ADVERTISE: advertise } };
+}
+
+/**
+ * 「解析 → 重渲染」能否逐字节复现原文。
+ *
+ * 这是改写 unit 的**准入条件**：能复现，说明这份文件确实是我们写的、我们的
+ * 模型完整覆盖了它的内容，改一个值不会顺手抹掉别的东西；复现不了，说明有人
+ * 手工加过行（KillMode=、After=、ExecStartPre= 之类），此时宁可拒绝改写。
+ * 精神同 persistAgentJson 的 `never clobber user edits`。
+ */
+export function canSafelyRewrite(text: string, plan: InstallPlan): boolean {
+  return renderUnitFor(plan) === text;
 }
