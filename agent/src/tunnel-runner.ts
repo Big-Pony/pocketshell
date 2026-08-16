@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import {
   dnsNameFromStatus, advertiseFromDnsName, funnelState,
   originFromEnv, planFromUnit, planWithAdvertise, canSafelyRewrite, renderUnitFor,
+  ipsFromDigOutput, isTailscaleIp, PUBLIC_RESOLVERS,
   FUNNEL_PORT,
 } from "./cli-tunnel";
 import { decideTailscaleInstall } from "./dep-install";
@@ -33,8 +34,13 @@ export interface TunnelDeps {
   readFile: (path: string) => string | null;
   writeFile: (path: string, text: string) => void;
   copyFile: (from: string, to: string) => void;
-  /** GET 一个公网 URL，返回状态码；连不上返回 null。 */
-  fetchStatus: (url: string) => Promise<number | null>;
+  /**
+   * GET 一个公网 URL，返回状态码；连不上返回 null。
+   *
+   * `forceIp` 非空时必须**绕开本机 DNS**、直连该 IP，同时保持 Host 与 SNI 仍是
+   * 原域名（Funnel 边缘靠 SNI 认人，改了就认不出是谁）。见 checkPublic 的注释。
+   */
+  fetchStatus: (url: string, forceIp?: string) => Promise<number | null>;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   log: (line: string) => void;
@@ -45,6 +51,47 @@ export function unitPathFor(platform: string, home: string): string | null {
   if (platform === "linux") return `/etc/systemd/system/${SYSTEMD_UNIT_NAME}.service`;
   if (platform === "darwin") return `${home}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist`;
   return null;
+}
+
+/**
+ * 公网自检：确认外面的人（你的手机）真能连上这个地址。
+ *
+ * **为什么不能直接 fetch 这个 hostname**（2026-08-17 真机踩坑，一度把一条配好
+ * 的隧道判成失败）：自检从 agent 本机发起，而那台机器**在 tailnet 里**。
+ * MagicDNS 会把 `<host>.ts.net` 解析成它自己的 100.x 内网地址，而不是 Funnel
+ * 的公网入口；连过去 TLS 当场被拒，0.077 秒返回 000 —— 看起来像「公网不通」，
+ * 其实是「本机看不见公网入口」。同一时刻从 tailnet 外面 curl 是 200。
+ *
+ * 所以：先用公共 DNS 解析出真实边缘 IP，再强制连它（Host 与 SNI 保持原域名，
+ * Funnel 边缘靠 SNI 认人）。真机验证：dig @1.1.1.1 得 208.111.34.11 /
+ * 208.111.35.209，--resolve 过去同一台机器立刻 200。
+ *
+ * 解析不出边缘 IP 时**回落为直连**（不带 forceIp）：不在 tailnet 里的机器本来
+ * 就该走这条路，而这也让「dig 缺失」不至于直接判失败。
+ */
+async function checkPublic(deps: TunnelDeps, publicHost: string): Promise<number | null> {
+  const edgeIps: string[] = [];
+  for (const resolver of PUBLIC_RESOLVERS) {
+    const r = await deps.run(["dig", "+short", "+time=3", "+tries=1", publicHost, `@${resolver}`]);
+    // 退出码同样不作数：dig 拿不到答案时也可能是 0。看解析结果本身。
+    const ips = ipsFromDigOutput(r.stdout).filter((ip) => !isTailscaleIp(ip));
+    if (ips.length > 0) { edgeIps.push(...ips); break; }
+  }
+  if (edgeIps.length === 0) {
+    // 没绕成就直连。可能是没装 dig、公共 DNS 被墙，也可能这台机器本来就不在
+    // tailnet 里（那样直连就是对的）。
+    return poll(deps, 24, 5000, async () => {
+      const code = await deps.fetchStatus(`https://${publicHost}/`);
+      return code !== null && code < 500 ? code : null;
+    });
+  }
+  return poll(deps, 24, 5000, async () => {
+    for (const ip of edgeIps) {
+      const code = await deps.fetchStatus(`https://${publicHost}/`, ip);
+      if (code !== null && code < 500) return code;
+    }
+    return null;
+  });
 }
 
 /** 反复探测直到 read() 返回非 null，或次数用尽。 */
@@ -178,10 +225,7 @@ export async function runTunnelSetup(deps: TunnelDeps): Promise<number> {
   // 公网自检：这是唯一能证明「用户的手机真能连上」的判据。首次证书签发实测
   // 60s+，所以给两分钟而不是几秒。
   deps.log("Checking the public address from the outside (the first HTTPS certificate can take a minute)…");
-  const reachable = await poll(deps, 24, 5000, async () => {
-    const code = await deps.fetchStatus(`https://${publicHost}/`);
-    return code !== null && code < 500 ? code : null;
-  });
+  const reachable = await checkPublic(deps, publicHost);
   if (reachable === null) {
     deps.error(`Funnel is configured, but https://${publicHost}/ did not answer within two minutes.`);
     deps.error("Nothing was changed in the service config. Check `tailscale funnel status` and try again later — certificate issuance is rate-limited and can need a long wait after repeated failures.");
@@ -296,11 +340,27 @@ export function realTunnelDeps(): TunnelDeps {
     readFile: (p) => { try { return existsSync(p) ? readFileSync(p, "utf8") : null; } catch { return null; } },
     writeFile: (p, text) => writeFileSync(p, text, { mode: 0o644 }),
     copyFile: (from, to) => copyFileSync(from, to),
-    async fetchStatus(url) {
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: "manual" });
-        return res.status;
-      } catch { return null; }
+    async fetchStatus(url, forceIp) {
+      if (!forceIp) {
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: "manual" });
+          return res.status;
+        } catch { return null; }
+      }
+      // fetch 没有「域名不变、强制走某个 IP」的开关，而这正是绕开 MagicDNS 所
+      // 需要的（Host 与 SNI 必须仍是原域名，Funnel 边缘靠 SNI 认人）。curl 的
+      // --resolve 正好是这个语义。仍然是 argv 数组，没有 shell。
+      const host = new URL(url).hostname;
+      const proc = Bun.spawn(
+        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10",
+         "--resolve", `${host}:443:${forceIp}`, url],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const out = await new Response(proc.stdout).text();
+      await proc.exited;
+      const code = Number(out.trim());
+      // curl 连不上时打印 000 —— 那不是一个 HTTP 状态码，别当成功。
+      return Number.isInteger(code) && code >= 100 ? code : null;
     },
     sleep: (ms) => Bun.sleep(ms),
     now: () => Date.now(),

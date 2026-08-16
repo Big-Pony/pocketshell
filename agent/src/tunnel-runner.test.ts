@@ -27,6 +27,8 @@ interface Harness {
   interactive: string[][];
   written: Array<{ path: string; text: string }>;
   out: string[];
+  /** 每次公网自检的 (url, forceIp)，用来断言自检确实绕开了本机 DNS。 */
+  fetched: Array<{ url: string; forceIp?: string }>;
 }
 
 /** 假 spawn：按 argv 前缀查表；每个键可给一串响应，按调用次序消费，用尽则重复最后一个。 */
@@ -42,6 +44,7 @@ function harness(over: {
   const interactive: string[][] = [];
   const written: Array<{ path: string; text: string }> = [];
   const out: string[] = [];
+  const fetched: Array<{ url: string; forceIp?: string }> = [];
   const counters: Record<string, number> = {};
   const responses = over.responses ?? {};
   const publicStatus = over.publicStatus ?? [200];
@@ -78,13 +81,16 @@ function harness(over: {
     readFile: (p) => (p.endsWith(".service") ? (over.unit === undefined ? renderUnitFor(PLAN) : over.unit) : null),
     writeFile: (path, text) => { written.push({ path, text }); },
     copyFile: () => {},
-    async fetchStatus() { return publicStatus[Math.min(publicCalls++, publicStatus.length - 1)]; },
+    async fetchStatus(url, forceIp) {
+      fetched.push({ url, forceIp });
+      return publicStatus[Math.min(publicCalls++, publicStatus.length - 1)];
+    },
     async sleep() {},
     now: () => 1_755_300_000_000,
     log: (l) => out.push(l),
     error: (l) => out.push(l),
   };
-  return { deps, ran, interactive, written, out };
+  return { deps, ran, interactive, written, out, fetched };
 }
 
 const names = (calls: string[][]) => calls.map((c) => c.join(" "));
@@ -298,4 +304,70 @@ test("the final message hands over the public URL and the pairing string", async
   const out = h.out.join("\n");
   expect(out).toContain("https://box.tailc8ab3b.ts.net");
   expect(out).toContain("pocketshell-pair:ABCdef123");
+});
+
+// --- 公网自检必须绕开 MagicDNS（2026-08-17 真机回归）------------------------
+// 真机上第一次跑 tunnel setup 时，Funnel 明明已经起来（外网 curl 200），自检却
+// 判定「两分钟没应答」并中止回填。根因：自检从 agent 本机发起，而那台机器在
+// tailnet 里，MagicDNS 把 hostname 解析成它自己的 100.113.189.97，连过去 TLS
+// 当场被拒（0.077s 返回 000）。这一组测试锁住修法：先用公共 DNS 拿边缘 IP，
+// 再强制连它。
+
+test("self-check resolves through public DNS and forces the edge IP", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+      "dig +short": [{ stdout: "208.111.34.11\n208.111.35.209\n" }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+  // 查的是公共解析器，不是本机 DNS。
+  const dig = h.ran.find((c) => c[0] === "dig");
+  expect(dig).toBeDefined();
+  expect(dig!.some((w) => w === "@1.1.1.1")).toBe(true);
+  // 自检带上了边缘 IP。
+  expect(h.fetched.length).toBeGreaterThan(0);
+  expect(h.fetched[0]!.forceIp).toBe("208.111.34.11");
+  expect(h.fetched[0]!.url).toBe("https://box.tailc8ab3b.ts.net/");
+});
+
+test("self-check discards the tailnet IP MagicDNS would hand back", async () => {
+  // 若公共解析器（被劫持时）也回 100.x，那不是公网入口，必须弃用而不是拿去连。
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+      "dig +short": [{ stdout: "100.113.189.97\n" }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+  expect(h.fetched.every((f) => f.forceIp !== "100.113.189.97")).toBe(true);
+});
+
+test("self-check falls back to a plain fetch when dig yields nothing", async () => {
+  // 没装 dig / 公共 DNS 不可达 / 这台机器根本不在 tailnet 里 —— 都不该判失败。
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+      "dig +short": [{ code: 1, stdout: "" }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+  expect(h.fetched.length).toBeGreaterThan(0);
+  expect(h.fetched[0]!.forceIp).toBeUndefined();
+});
+
+test("a second edge IP is tried when the first one does not answer", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+      "dig +short": [{ stdout: "208.111.34.11\n208.111.35.209\n" }],
+    },
+    publicStatus: [null, 200],
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+  expect(h.fetched.map((f) => f.forceIp)).toEqual(["208.111.34.11", "208.111.35.209"]);
 });

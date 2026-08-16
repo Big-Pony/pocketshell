@@ -232,3 +232,42 @@ test("canSafelyRewrite says no for a hand-edited unit", () => {
   const edited = renderUnitFor(plan).replace("Restart=always", "KillMode=process\nRestart=always");
   expect(canSafelyRewrite(edited, plan)).toBe(false);
 });
+
+// --- 公网自检要绕开 MagicDNS（2026-08-17 真机踩坑）---------------------------
+// agent 本机在 tailnet 里，MagicDNS 把 <host>.ts.net 解析成它自己的 100.x 内网
+// 地址而非 Funnel 公网入口，连过去 TLS 当场被拒（0.077s 返回 000）——一个配好的
+// 隧道被判成失败。真机验证：dig @1.1.1.1 拿到 208.111.34.11/208.111.35.209，
+// curl --resolve 强制连过去，同一台机器立刻拿到 200。
+import { ipsFromDigOutput, isTailscaleIp, PUBLIC_RESOLVERS } from "./cli-tunnel";
+
+test("ipsFromDigOutput keeps the IPv4 lines dig actually printed", () => {
+  expect(ipsFromDigOutput("208.111.34.11\n208.111.35.209\n"))
+    .toEqual(["208.111.34.11", "208.111.35.209"]);
+});
+
+test("ipsFromDigOutput drops CNAME lines, warnings and blanks", () => {
+  const out = ";; communications error\nfunnel.ts.net.\n208.111.34.11\n\n";
+  expect(ipsFromDigOutput(out)).toEqual(["208.111.34.11"]);
+});
+
+test("ipsFromDigOutput rejects malformed octets rather than passing them to curl", () => {
+  expect(ipsFromDigOutput("999.1.1.1\n1.2.3\n1.2.3.4.5\n")).toEqual([]);
+  expect(ipsFromDigOutput("")).toEqual([]);
+});
+
+test("isTailscaleIp spots the CGNAT range MagicDNS hands back", () => {
+  expect(isTailscaleIp("100.113.189.97")).toBe(true);   // 真机实测值
+  expect(isTailscaleIp("100.64.0.1")).toBe(true);       // 下边界
+  expect(isTailscaleIp("100.127.255.254")).toBe(true);  // 上边界
+});
+
+test("isTailscaleIp does not swallow public addresses that merely start with 100", () => {
+  expect(isTailscaleIp("100.63.0.1")).toBe(false);      // 刚好在范围外
+  expect(isTailscaleIp("100.128.0.1")).toBe(false);
+  expect(isTailscaleIp("208.111.34.11")).toBe(false);   // 真实边缘 IP
+  expect(isTailscaleIp("")).toBe(false);
+});
+
+test("PUBLIC_RESOLVERS has a fallback, not a single point of failure", () => {
+  expect(PUBLIC_RESOLVERS.length).toBeGreaterThan(1);
+});

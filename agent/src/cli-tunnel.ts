@@ -65,6 +65,33 @@ export function advertiseFromDnsName(dnsName: string): string | null {
   return host.length > 0 ? `wss://${host}` : null;
 }
 
+/** 绕开本机 DNS 用的公共解析器。两个，第一个不通就换第二个。 */
+export const PUBLIC_RESOLVERS = ["1.1.1.1", "8.8.8.8"];
+
+/**
+ * `dig +short` 的输出 → IPv4 列表。
+ *
+ * 为什么需要它：公网自检从 agent 本机发起，而那台机器**在 tailnet 里**，
+ * MagicDNS 会把 `<host>.ts.net` 解析成它自己的 100.x 内网地址，而不是 Funnel
+ * 的公网入口。连过去 TLS 当场被拒（2026-08-17 真机：0.077s 返回 000），于是
+ * 一个明明配好的隧道被判成失败。
+ *
+ * 所以自检必须走公共 DNS 拿到边缘 IP，再用 curl --resolve 强制连它。
+ * dig 也可能吐出 CNAME 行或告警，这里只挑纯 IPv4 行。
+ */
+export function ipsFromDigOutput(out: string): string[] {
+  const v4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$/;
+  return out.split("\n").map((l) => l.trim()).filter((l) => v4.test(l));
+}
+
+/** tailscale 分配的 100.64.0.0/10（CGNAT）地址——即 tailnet 内网，不是公网入口。 */
+export function isTailscaleIp(ip: string): boolean {
+  const m = /^(\d+)\.(\d+)\./.exec(ip.trim());
+  if (!m) return false;
+  const a = Number(m[1]!), b = Number(m[2]!);
+  return a === 100 && b >= 64 && b <= 127;
+}
+
 export type FunnelState =
   | "none"        // 完全没有 serve 配置
   | "elsewhere"   // 有配置，但没指向我们的端口
