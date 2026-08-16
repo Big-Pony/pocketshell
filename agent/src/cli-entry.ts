@@ -59,6 +59,18 @@ export function runInstallUninstall(cliArgv: string[]): void {
   })();
 }
 
+// 隧道子命令同样永不启动服务器（与 install/devices 分支同形）。动态 import
+// 让默认启动路径不为这条路加载解析器。
+export function runTunnelSubcommand(cliArgv: string[]): void {
+  void (async () => {
+    const { parseTunnelArgv } = await import("./cli-tunnel");
+    const action = parseTunnelArgv(cliArgv);
+    if (action.cmd === "error") { console.error(action.message); process.exit(1); }
+    const { runTunnelSetup, realTunnelDeps } = await import("./tunnel-runner");
+    process.exit(await runTunnelSetup(realTunnelDeps()));
+  })();
+}
+
 export function runNotifySubcommand(cliArgv: string[]): void {
   void (async () => {
     try {
@@ -229,6 +241,8 @@ export function runCli(argv: string[], startServer: StartServerFn): void {
   } else if (cliArgv[0] === "devices" || cliArgv[0] === "pair") {
     // CLI subcommand path never boots the server.
     void runCliDevices(cliArgv).then((code) => process.exit(code));
+  } else if (cliArgv[0] === "tunnel") {
+    runTunnelSubcommand(cliArgv);
   } else if (argv.includes("--version")) {
     console.log(AGENT_VERSION);
     process.exit(0);

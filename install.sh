@@ -91,11 +91,20 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) say "Note: ${BIN_DIR} is not on your PATH — use the full path below, or add it to PATH first."; say "" ;;
 esac
-say "Next, install it as a service that starts on boot (swap in your own domain):"
+say "Next, install it as a service that starts on boot:"
 if [ "$os_part" = "darwin" ]; then
   say "    pocketshell-agent install --advertise wss://your.domain --name my-mac"
 else
   say "    sudo pocketshell-agent install --advertise wss://your.domain --name my-server"
 fi
 say ""
-say "No reverse proxy yet? See https://github.com/${REPO}/blob/main/DEPLOYMENT.md"
+say "No domain? Use a placeholder, then let PocketShell get you a public HTTPS address:"
+if [ "$os_part" = "darwin" ]; then
+  say "    pocketshell-agent install --advertise ws://127.0.0.1:8722 --name my-mac"
+  say "    pocketshell-agent tunnel setup"
+else
+  say "    sudo pocketshell-agent install --advertise ws://127.0.0.1:8722 --name my-server"
+  say "    sudo pocketshell-agent tunnel setup"
+fi
+say ""
+say "Other ways to expose it: https://github.com/${REPO}/blob/main/DEPLOYMENT.md"
