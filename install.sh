@@ -87,24 +87,49 @@ installed_version="$("$BIN_DIR/pocketshell-agent" --version 2>/dev/null || echo 
 say ""
 say "✓ Installed pocketshell-agent ${installed_version} -> ${BIN_DIR}/pocketshell-agent"
 say ""
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) say "Note: ${BIN_DIR} is not on your PATH — use the full path below, or add it to PATH first."; say "" ;;
-esac
+# The command below is printed as an absolute path unless the bare name is
+# certain to resolve. Two separate reasons it may not:
+#   1. $BIN_DIR (~/.local/bin for a non-root install) is often not on PATH;
+#   2. even when it is, `sudo` resets PATH to secure_path, which NEVER includes
+#      a home directory — so `sudo pocketshell-agent …` fails on a machine where
+#      `pocketshell-agent …` works.
+# The old text said "use the full path below" while printing a bare name, which
+# left every non-root Linux user staring at `sudo: pocketshell-agent: command
+# not found` on their very first step.
+BIN="$BIN_DIR/pocketshell-agent"
+if [ "$os_part" != "darwin" ] && [ "$(id -u)" != "0" ]; then
+  # Non-root Linux: the service commands go through sudo, so secure_path decides
+  # — and it never has $HOME in it. Always print the absolute path.
+  SUDO="sudo "
+else
+  SUDO=""
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) BIN="pocketshell-agent" ;;
+    *) ;;
+  esac
+fi
+
 say "Next, install it as a service that starts on boot:"
 if [ "$os_part" = "darwin" ]; then
-  say "    pocketshell-agent install --advertise wss://your.domain --name my-mac"
+  say "    ${BIN} install --advertise wss://your.domain --name my-mac"
 else
-  say "    sudo pocketshell-agent install --advertise wss://your.domain --name my-server"
+  say "    ${SUDO}${BIN} install --advertise wss://your.domain --name my-server"
 fi
 say ""
 say "No domain? Use a placeholder, then let PocketShell get you a public HTTPS address:"
 if [ "$os_part" = "darwin" ]; then
-  say "    pocketshell-agent install --advertise ws://127.0.0.1:8722 --name my-mac"
-  say "    pocketshell-agent tunnel setup"
+  say "    ${BIN} install --advertise ws://127.0.0.1:8722 --name my-mac"
+  say "    ${BIN} tunnel setup"
 else
-  say "    sudo pocketshell-agent install --advertise ws://127.0.0.1:8722 --name my-server"
-  say "    sudo pocketshell-agent tunnel setup"
+  say "    ${SUDO}${BIN} install --advertise ws://127.0.0.1:8722 --name my-server"
+  say "    ${SUDO}${BIN} tunnel setup"
 fi
 say ""
+# Linux `install` drops a symlink in /usr/local/bin, which IS in sudo's
+# secure_path — so the long path is only needed for this one first command.
+# macOS gets no symlink, so no such promise is made there.
+if [ "$os_part" != "darwin" ]; then
+  say "(That long path is only needed once — installing the service puts pocketshell-agent on your PATH.)"
+  say ""
+fi
 say "Other ways to expose it: https://github.com/${REPO}/blob/main/DEPLOYMENT.md"
