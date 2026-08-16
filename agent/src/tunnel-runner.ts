@@ -14,10 +14,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   dnsNameFromStatus, advertiseFromDnsName, funnelState,
-  originFromEnv, planFromUnit, FUNNEL_PORT,
+  originFromEnv, planFromUnit, planWithAdvertise, canSafelyRewrite, renderUnitFor,
+  FUNNEL_PORT,
 } from "./cli-tunnel";
 import { decideTailscaleInstall } from "./dep-install";
-import { LAUNCHD_LABEL, SYSTEMD_UNIT_NAME } from "./cli-install";
+import { backupPath, extractPairingString, pairedDeviceCount } from "./install-runner";
+import { LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, type InstallPlan } from "./cli-install";
 
 export interface TunnelDeps {
   platform: string;
@@ -187,9 +189,87 @@ export async function runTunnelSetup(deps: TunnelDeps): Promise<number> {
   }
   deps.log(`✓ https://${publicHost}/ answered (HTTP ${reachable}).`);
 
-  // advertise 回填在 Task 6 接上；在那之前先把地址告诉用户。
+  const code = await backfillAdvertise(deps, plan, unitText, advertise);
+  if (code !== 0) return code;
+
+  // 重启会重新铸一个开机配对码（仅当还没有已配对设备时，见 config.ts 的
+  // pairingMode）。把它读出来直接交给用户，省掉一次「再跑一条命令」。
+  const log = plan.platform === "linux"
+    ? (await deps.run(["journalctl", "-u", plan.label, "--since", "-2 min", "-o", "cat", "--no-pager"])).stdout
+    : (deps.readFile(plan.logPath ?? "") ?? "");
+  const pairing = extractPairingString(log);
+
   deps.log("");
-  deps.log(`Your public address: https://${publicHost}`);
+  deps.log(`✓ Done. Open this on your phone:  https://${publicHost}`);
+  deps.log("");
+  if (pairing) {
+    deps.log("Paste this pairing string into the app (valid for 300s):");
+    deps.log("");
+    deps.log(`  ${pairing}`);
+  } else if (pairedDeviceCount(plan.keyDir) > 0) {
+    deps.log("Your already-paired devices keep working. To add another phone, run:");
+    deps.log(`  ${plan.binPath} pair`);
+  } else {
+    deps.log("To get a pairing string, run:");
+    deps.log(`  ${plan.binPath} pair`);
+  }
+  deps.log("");
+  deps.log("Add it to your home screen there and you get push notifications too — that needs the HTTPS address you now have.");
+  return 0;
+}
+
+function stampNow(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/**
+ * 把公网地址写回服务配置。
+ *
+ * **为什么改 unit 而不是 agent.json**：config.ts:155 是
+ * `env.POCKETSHELL_ADVERTISE ?? file.advertise` —— env 赢。而 --advertise 是
+ * install 的必填项，所以每台装过的机器 unit 里都有那行 Environment=，写
+ * agent.json 永远被它盖掉（config.test.ts 有一条测试钉死这个优先级）。第二道
+ * 障碍是 persistAgentJson 的 `never clobber user edits`：agent.json 此刻必然
+ * 已存在，走那条路写也写不进去。
+ *
+ * 改 env 本身不引入任何反常优先级 —— 我们改的正是那个最高优先级的来源。
+ */
+export async function backfillAdvertise(
+  deps: TunnelDeps, plan: InstallPlan, unitText: string, advertise: string,
+): Promise<number> {
+  const manualHint = [
+    `Set this in ${plan.unitPath} by hand:`,
+    `    POCKETSHELL_ADVERTISE=${advertise}`,
+    plan.platform === "linux"
+      ? "then: sudo systemctl daemon-reload && sudo systemctl restart pocketshell"
+      : `then: launchctl bootout gui/$(id -u)/${plan.label}; launchctl bootstrap gui/$(id -u) ${plan.unitPath}`,
+  ].join("\n");
+
+  if (!canSafelyRewrite(unitText, plan)) {
+    deps.error(`The service config at ${plan.unitPath} has been edited by hand, so it will not be rewritten automatically (that would drop your changes).`);
+    deps.error(manualHint);
+    return 1;
+  }
+
+  const bak = backupPath(plan.unitPath, stampNow(deps.now()));
+  deps.copyFile(plan.unitPath, bak);
+  deps.writeFile(plan.unitPath, renderUnitFor(planWithAdvertise(plan, advertise)));
+  deps.log(`Updated the service config (previous one kept at ${bak}).`);
+
+  if (plan.platform === "linux") {
+    const reload = await deps.run(["systemctl", "daemon-reload"]);
+    if (reload.code !== 0) { deps.error(`systemctl daemon-reload failed:\n${reload.stderr}`); deps.error(manualHint); return 1; }
+    const restart = await deps.run(["systemctl", "restart", plan.label]);
+    if (restart.code !== 0) { deps.error(`Could not restart the service:\n${restart.stderr}`); deps.error(manualHint); return 1; }
+  } else {
+    const uid = deps.euid;
+    await deps.run(["launchctl", "bootout", `gui/${uid}/${plan.label}`]);
+    const boot = await deps.run(["launchctl", "bootstrap", `gui/${uid}`, plan.unitPath]);
+    if (boot.code !== 0) { deps.error(`Could not restart the service:\n${boot.stderr}`); deps.error(manualHint); return 1; }
+  }
+  deps.log("Service restarted on the new address.");
   return 0;
 }
 

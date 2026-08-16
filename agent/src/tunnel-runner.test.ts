@@ -214,3 +214,88 @@ test("authorization steps go through runInteractive, never the capturing runner"
   expect(names(h.interactive)).toContain("tailscale up");
   expect(names(h.ran)).not.toContain("tailscale up");
 });
+
+test("backfill rewrites POCKETSHELL_ADVERTISE in the unit and backs the old one up", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+
+  const unitWrite = h.written.find((w) => w.path === PLAN.unitPath);
+  expect(unitWrite).toBeDefined();
+  expect(unitWrite!.text).toContain("Environment=POCKETSHELL_ADVERTISE=wss://box.tailc8ab3b.ts.net");
+  expect(unitWrite!.text).not.toContain("ws://127.0.0.1:8722");
+  // 其余配置一字不动。
+  expect(unitWrite!.text).toContain("Environment=POCKETSHELL_PORT=8722");
+  expect(unitWrite!.text).toContain("Environment=POCKETSHELL_KEY_DIR=/home/myt/.pocketshell");
+});
+
+test("backfill reloads and restarts the service", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+    },
+  });
+  await runTunnelSetup(h.deps);
+  expect(names(h.ran)).toContain("systemctl daemon-reload");
+  expect(names(h.ran)).toContain("systemctl restart pocketshell");
+});
+
+test("backfill refuses to touch a hand-edited unit", async () => {
+  // 复现不出原文 = 有人加过行 = 重写会抹掉它。宁可给手工指引。
+  const edited = renderUnitFor(PLAN).replace("Restart=always", "KillMode=process\nRestart=always");
+  const h = harness({
+    unit: edited,
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(1);
+  expect(h.written).toEqual([]);
+  // 必须把该填的值直接给出来，让用户能一行手工改完。
+  expect(h.out.join("\n")).toContain("POCKETSHELL_ADVERTISE=wss://box.tailc8ab3b.ts.net");
+});
+
+test("backfill does not run when the public self-check failed", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+    },
+    publicStatus: [null],
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(1);
+  expect(h.written).toEqual([]);
+  expect(names(h.ran)).not.toContain("systemctl restart pocketshell");
+});
+
+test("a failed restart is reported, not glossed over", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+      "systemctl restart": [{ code: 1 }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(1);
+  expect(h.out.join("\n")).toContain("restart");
+});
+
+test("the final message hands over the public URL and the pairing string", async () => {
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+      "journalctl -u pocketshell": [{ stdout: "blah pocketshell-pair:ABCdef123 blah" }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+  const out = h.out.join("\n");
+  expect(out).toContain("https://box.tailc8ab3b.ts.net");
+  expect(out).toContain("pocketshell-pair:ABCdef123");
+});
