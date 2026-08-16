@@ -138,6 +138,8 @@ The script detects your platform, downloads the matching binary, verifies its SH
 
 **Step 2 — turn it into a service that starts on boot**
 
+*If you own a domain* (pointed at this machine through Caddy/Nginx or a tunnel):
+
 ```bash
 # Linux
 sudo pocketshell-agent install --advertise wss://your.domain --name my-server
@@ -145,6 +147,21 @@ sudo pocketshell-agent install --advertise wss://your.domain --name my-server
 # macOS — no sudo: a LaunchAgent lives in your user domain
 pocketshell-agent install --advertise wss://your.domain --name my-mac
 ```
+
+*If you don't* — install with a placeholder address, then let PocketShell get you a
+real HTTPS one through Tailscale Funnel:
+
+```bash
+sudo pocketshell-agent install --advertise ws://127.0.0.1:8722 --name my-server
+sudo pocketshell-agent tunnel setup
+```
+
+`tunnel setup` asks you to approve two things in a browser, then puts this machine on
+`https://<host>.<tailnet>.ts.net`, writes that address back into the service config and
+prints a fresh pairing string. Real certificate, so the app installs to your home screen
+and Web Push works — at roughly half the bandwidth of a direct connection. See
+[Option E](./DEPLOYMENT.md#option-e--tailscale-funnel-no-domain-needed) for the numbers
+and caveats.
 
 This writes the systemd/launchd service config → enables it at boot and starts it now → and **prints the pairing string right there on a first install**.
 
@@ -263,7 +280,7 @@ Two delivery channels, both can be on:
 
 ## 🌐 Deployment
 
-Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)**, which covers four setups:
+Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)**, which covers five setups:
 
 | Setup | When to use it |
 |---|---|
@@ -271,6 +288,7 @@ Need access from outside your LAN? See **[DEPLOYMENT.md](./DEPLOYMENT.md)**, whi
 | Caddy / Nginx reverse proxy | A server with a public IP and a domain |
 | Cloudflare Tunnel | Home connection with no public IP, no open ports |
 | frp relay | No public IP, but you want to own the whole path |
+| [Tailscale Funnel](./DEPLOYMENT.md#option-e--tailscale-funnel-no-domain-needed) | Real HTTPS with no domain of your own — one command |
 
 The guide also includes systemd / launchd service examples and a troubleshooting table.
 

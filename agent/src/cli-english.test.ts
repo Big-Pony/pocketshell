@@ -32,6 +32,9 @@ function stripComments(src: string, shell = false): string {
 const FILES: Array<{ path: string; shell?: boolean }> = [
   { path: "src/cli-install.ts" },
   { path: "src/install-runner.ts" },
+  { path: "src/cli-tunnel.ts" },
+  { path: "src/tunnel-runner.ts" },
+  { path: "src/dep-install.ts" },
   { path: "../install.sh", shell: true },
 ];
 

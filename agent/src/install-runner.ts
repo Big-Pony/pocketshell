@@ -185,8 +185,9 @@ function printSuccess(plan: InstallPlan, pairing: string | null, paired: number)
       : `  tail -n 30 ${plan.logPath}`);
   }
   console.log("");
-  console.log(`No reverse proxy yet (so your phone can reach this from outside)? See the deployment guide, option B:`);
-  console.log(`  https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT-CN.md`);
+  console.log(`Need a public address so your phone can reach this from outside?`);
+  console.log(`  No domain:  sudo pocketshell-agent tunnel setup`);
+  console.log(`  Have one:   https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT.md`);
   console.log("");
   console.log(`Uninstall: pocketshell-agent uninstall`);
 }

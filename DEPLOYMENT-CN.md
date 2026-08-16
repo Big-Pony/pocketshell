@@ -4,7 +4,7 @@
 
 ---
 
-本文介绍把 PocketShell Agent 暴露给手机访问的四种方式，按复杂度从低到高排列：
+本文介绍把 PocketShell Agent 暴露给手机访问的五种方式，按复杂度从低到高排列：
 
 | 方式 | 适用场景 | 需要 |
 |---|---|---|
@@ -12,6 +12,7 @@
 | [B. 服务器直接部署 + 域名](#方式-b服务器直接部署--域名caddy--nginx) | Agent 跑在有公网 IP 的服务器上，有域名 | Caddy 或 Nginx |
 | [C. Cloudflare Tunnel](#方式-ccloudflare-tunnel无公网-ip) | 家里/内网机器，无公网 IP | Cloudflare 账号 + 域名 |
 | [D. frp 中转服务器](#方式-dfrp-中转服务器无公网-ip自控链路) | 无公网 IP，但有一台 VPS，想完全自控链路 | VPS + 域名 |
+| [E. Tailscale Funnel](#方式-etailscale-funnel无需域名) | 想要真 HTTPS，但手上没有域名 | Tailscale 账号 |
 
 ### 开始前：三个关键概念
 
@@ -202,6 +203,39 @@ POCKETSHELL_ADVERTISE=wss://ps.example.com \
 ```
 
 配了 `proxyBindAddr = "127.0.0.1"` 后，frps 的 `18092` 落地口只绑在 VPS 本机、必须经 Caddy 转发才可达，公网只暴露 443（记得防火墙同时放行/限制 `7000` 仅供 frpc 连接）。可选再把域名套上 Cloudflare 代理（橙云），获得 CDN 与源站 IP 隐藏——WebSocket 会自动直通。
+
+---
+
+### 方式 E：Tailscale Funnel（无需域名）
+
+手上没有域名时，这是拿到真 HTTPS 地址的最短路径：
+
+```bash
+sudo pocketshell-agent install --advertise ws://127.0.0.1:8722
+sudo pocketshell-agent tunnel setup
+```
+
+过程里你需要在浏览器上点两次授权（把这台机器登进 tailnet、给 tailnet 开启
+Funnel 能力），其余全自动。最终拿到 `https://<host>.<tailnet>.ts.net`，是真
+证书——所以 App 能装到桌面，Web Push 也能用。
+
+选它之前值得知道的几件事：
+
+- **带宽有上限。** 2026-08-16 实测：同一台机器、同一个客户端，走 Funnel 约
+  2.5 MB/s，直连约 4.7 MB/s——大致减半。终端使用完全感觉不到；传一个 10 MB
+  的附件约 4 秒，100 MB 约 40 秒。Tailscale 官方只说「不可配置的带宽限制」，
+  没有公布具体数字。
+- **Funnel 仍是 beta**，且公网端口恒为 443（Funnel 只允许 443、8443、10000）。
+- **流量会经过 Tailscale 的中继**，但端到端始终是 Noise 密文，中继读不到内容。
+- **第一张证书要签一分钟以上。** 反复失败会被 Let's Encrypt 限流，届时得等很久。
+- Funnel 下**不支持 `POCKETSHELL_TLS=1`**：TLS 由 Funnel 自己终结，Agent 应该
+  在回环上说明文 HTTP。
+
+用 curl 测公网地址时记得加 `--http1.1`。HTTP/2 下 `Connection: Upgrade` 属于被
+禁止的逐跳头部，会被丢掉，于是 WebSocket 检查看起来失败了，实际上是好的。
+
+macOS 上 `tunnel setup` **不会替你装 Tailscale**：先自行安装
+（`brew install tailscale`，或装 App Store 版），再**不加 sudo** 跑 `tunnel setup`。
 
 ---
 
