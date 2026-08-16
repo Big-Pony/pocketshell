@@ -371,3 +371,38 @@ test("a second edge IP is tried when the first one does not answer", async () =>
   expect(await runTunnelSetup(h.deps)).toBe(0);
   expect(h.fetched.map((f) => f.forceIp)).toEqual(["208.111.34.11", "208.111.35.209"]);
 });
+
+test("backfill also writes agent.json, or `pair` hands out the wrong address", async () => {
+  // 真机回归（2026-08-17）：只改 unit 时，pocketshell-agent pair 吐出的配对串
+  // addr 是 ws://127.0.0.1:8722（手机去连它自己），配对必失败。unit 的
+  // Environment= 只喂服务进程，pair 是独立进程读不到。
+  const h = harness({
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(0);
+
+  const json = h.written.find((w) => w.path === "/home/myt/.pocketshell/agent.json");
+  expect(json).toBeDefined();
+  expect(JSON.parse(json!.text).advertise).toBe("wss://box.tailc8ab3b.ts.net");
+
+  // 两处写的必须是同一个值，否则服务与 CLI 会各说各话。
+  const unit = h.written.find((w) => w.path === PLAN.unitPath)!;
+  expect(unit.text).toContain("Environment=POCKETSHELL_ADVERTISE=wss://box.tailc8ab3b.ts.net");
+});
+
+test("a refused unit rewrite does not leave agent.json half-updated", async () => {
+  // 手工改过的 unit 不予改写；此时 agent.json 也不能动，否则两处不一致。
+  const edited = renderUnitFor(PLAN).replace("Restart=always", "KillMode=process\nRestart=always");
+  const h = harness({
+    unit: edited,
+    responses: {
+      "tailscale status": [{ stdout: STATUS_UP }],
+      "tailscale funnel status": [{ stdout: FUNNEL_ON }],
+    },
+  });
+  expect(await runTunnelSetup(h.deps)).toBe(1);
+  expect(h.written).toEqual([]);
+});

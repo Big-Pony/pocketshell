@@ -271,3 +271,41 @@ test("isTailscaleIp does not swallow public addresses that merely start with 100
 test("PUBLIC_RESOLVERS has a fallback, not a single point of failure", () => {
   expect(PUBLIC_RESOLVERS.length).toBeGreaterThan(1);
 });
+
+// --- advertise 也要落进 agent.json（2026-08-17 真机回归）--------------------
+// 只改 unit 的 Environment= 是不够的：那些变量只注入**服务进程**，而 `pair` /
+// `devices` 是独立进程，systemd 不给它们。真机后果是 `pocketshell-agent pair`
+// 吐出的配对串里 addr 回落成 ws://127.0.0.1:8722 —— 手机拿到后去连它自己，
+// 配对必然失败，且失败在手机侧，服务器日志一片干净（无 channel fail、无
+// handshake_fail、audit.log 一条不增），极难排查。
+import { withAdvertiseJson } from "./cli-tunnel";
+
+test("withAdvertiseJson sets advertise on a fresh config", () => {
+  const out = withAdvertiseJson("", "wss://box.ts.net");
+  expect(JSON.parse(out)).toEqual({ advertise: "wss://box.ts.net" });
+});
+
+test("withAdvertiseJson keeps every other field the operator had", () => {
+  const before = JSON.stringify({ host: "127.0.0.1", port: 8722, tls: false }, null, 2);
+  const out = JSON.parse(withAdvertiseJson(before, "wss://box.ts.net"));
+  expect(out).toEqual({ host: "127.0.0.1", port: 8722, tls: false, advertise: "wss://box.ts.net" });
+});
+
+test("withAdvertiseJson replaces a stale advertise rather than duplicating it", () => {
+  const before = JSON.stringify({ advertise: "ws://127.0.0.1:8722", port: 8722 });
+  const out = JSON.parse(withAdvertiseJson(before, "wss://box.ts.net"));
+  expect(out.advertise).toBe("wss://box.ts.net");
+  expect(out.port).toBe(8722);
+});
+
+test("withAdvertiseJson treats an unparseable file as empty instead of throwing", () => {
+  // 宁可用一份只含 advertise 的新文件，也不要让 tunnel setup 崩在这里。
+  expect(JSON.parse(withAdvertiseJson("{ not json", "wss://box.ts.net")))
+    .toEqual({ advertise: "wss://box.ts.net" });
+});
+
+test("withAdvertiseJson ends with a newline and is indented (it is hand-editable)", () => {
+  const out = withAdvertiseJson("", "wss://box.ts.net");
+  expect(out.endsWith("\n")).toBe(true);
+  expect(out).toContain("\n  ");
+});

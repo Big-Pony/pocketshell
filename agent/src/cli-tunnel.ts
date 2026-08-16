@@ -235,6 +235,34 @@ export function planWithAdvertise(plan: InstallPlan, advertise: string): Install
 }
 
 /**
+ * 把 advertise 写进 agent.json 的内容，其余字段原样保留。
+ *
+ * **为什么改了 unit 还要改这里**（2026-08-17 真机踩坑）：unit 里的
+ * `Environment=` 只注入**服务进程**。而 `pocketshell-agent pair` / `devices`
+ * 是独立进程，systemd 不给它们那些变量，它们只能读 agent.json。真机后果是
+ * `pair` 吐出的配对串里 addr 回落成 `ws://127.0.0.1:8722`，手机拿到后去连
+ * 它自己 —— 配对必然失败，而且失败在手机侧，服务器日志一片干净，极难排查。
+ *
+ * 优先级不受影响：config.ts:155 仍是 `env ?? file`，服务进程照旧以 unit 里的
+ * 值为准，这里只是给读不到 env 的子进程兜底。两处写的是同一个值。
+ *
+ * 不走 persistAgentJson：那个函数有 `if (existsSync(file)) return`
+ * （never clobber user edits），而这里必须能改一份已存在的文件。所以只改
+ * advertise 这一个键，其余逐字保留 —— 这才是对「别动用户编辑」的正确遵守。
+ */
+export function withAdvertiseJson(current: string, advertise: string): string {
+  let obj: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(current);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      obj = parsed as Record<string, unknown>;
+    }
+  } catch { /* 空文件或坏文件：当作空对象，别崩在这里 */ }
+  obj.advertise = advertise;
+  return JSON.stringify(obj, null, 2) + "\n";
+}
+
+/**
  * 「解析 → 重渲染」能否逐字节复现原文。
  *
  * 这是改写 unit 的**准入条件**：能复现，说明这份文件确实是我们写的、我们的

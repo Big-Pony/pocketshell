@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import {
   dnsNameFromStatus, advertiseFromDnsName, funnelState,
   originFromEnv, planFromUnit, planWithAdvertise, canSafelyRewrite, renderUnitFor,
-  ipsFromDigOutput, isTailscaleIp, PUBLIC_RESOLVERS,
+  ipsFromDigOutput, isTailscaleIp, PUBLIC_RESOLVERS, withAdvertiseJson,
   FUNNEL_PORT,
 } from "./cli-tunnel";
 import { decideTailscaleInstall } from "./dep-install";
@@ -301,6 +301,14 @@ export async function backfillAdvertise(
   deps.copyFile(plan.unitPath, bak);
   deps.writeFile(plan.unitPath, renderUnitFor(planWithAdvertise(plan, advertise)));
   deps.log(`Updated the service config (previous one kept at ${bak}).`);
+
+  // 同一个值也写进 agent.json：unit 的 Environment= 只喂服务进程，而
+  // `pocketshell-agent pair` / `devices` 是独立进程，读不到它，只能读这个文件。
+  // 漏了这一步的真机后果是 pair 吐出的配对串 addr 回落成 ws://127.0.0.1:8722，
+  // 手机去连它自己 —— 配对必失败，且服务器日志一片干净（见 withAdvertiseJson）。
+  const jsonPath = join(plan.keyDir, "agent.json");
+  deps.writeFile(jsonPath, withAdvertiseJson(deps.readFile(jsonPath) ?? "", advertise));
+  deps.log(`Updated ${jsonPath} so the pair/devices commands hand out the same address.`);
 
   if (plan.platform === "linux") {
     const reload = await deps.run(["systemctl", "daemon-reload"]);
