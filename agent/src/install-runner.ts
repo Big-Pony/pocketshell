@@ -91,10 +91,10 @@ function installBinary(plan: InstallPlan): string[] {
   const alreadyThere = existsSync(plan.binPath) && realpathSync(plan.binPath) === src;
   if (alreadyThere) {
     // Copying a file onto itself truncates the running binary to 0 bytes.
-    lines.push(`二进制已在目标位置，跳过复制：${plan.binPath}`);
+    lines.push(`Binary is already at the target path, skipping copy: ${plan.binPath}`);
   } else {
     replaceBinary(src, plan.binPath);
-    lines.push(`已安装二进制：${plan.binPath}`);
+    lines.push(`Installed binary: ${plan.binPath}`);
   }
   // Hand the binary's directory to the service user: OTA writes a temp file
   // beside the binary and renames over it, which needs directory write access
@@ -102,8 +102,8 @@ function installBinary(plan: InstallPlan): string[] {
   if (plan.binOwner) {
     const dir = dirname(plan.binPath);
     const r = Bun.spawnSync(["chown", "-R", `${plan.binOwner}:`, dir]);
-    if (r.exitCode === 0) lines.push(`已把 ${dir} 交给 ${plan.binOwner}（应用内更新需要写这个目录）`);
-    else lines.push(`警告：chown ${dir} 失败，应用内更新可能因权限不足而失败`);
+    if (r.exitCode === 0) lines.push(`Handed ${dir} to ${plan.binOwner} (in-app updates need to write there)`);
+    else lines.push(`Warning: chown ${dir} failed; in-app updates may fail for lack of permission`);
   }
   // Keep the command on the global PATH — `sudo pocketshell-agent uninstall`
   // resolves through root's PATH, which does not include the install dir.
@@ -111,7 +111,7 @@ function installBinary(plan: InstallPlan): string[] {
     mkdirSync(dirname(plan.symlinkPath), { recursive: true });
     rmSync(plan.symlinkPath, { force: true }); // may be a stale real binary
     symlinkSync(plan.binPath, plan.symlinkPath);
-    lines.push(`已建立命令链接：${plan.symlinkPath} → ${plan.binPath}`);
+    lines.push(`Linked command: ${plan.symlinkPath} -> ${plan.binPath}`);
   }
   return lines;
 }
@@ -123,11 +123,11 @@ function writeUnit(plan: InstallPlan): string[] {
   if (existsSync(plan.unitPath)) {
     const bak = backupPath(plan.unitPath, stampNow());
     copyFileSync(plan.unitPath, bak);
-    lines.push(`已备份原有服务配置：${bak}`);
+    lines.push(`Backed up the existing service config: ${bak}`);
   }
   mkdirSync(dirname(plan.unitPath), { recursive: true });
   writeFileSync(plan.unitPath, text, { mode: 0o644 });
-  lines.push(`已写入服务配置：${plan.unitPath}`);
+  lines.push(`Wrote service config: ${plan.unitPath}`);
   return lines;
 }
 
@@ -160,40 +160,40 @@ function printSuccess(plan: InstallPlan, pairing: string | null, paired: number)
     .replace(/^wss:\/\//, "https://")
     .replace(/^ws:\/\//, "http://");
   console.log("");
-  console.log(`✓ PocketShell 已装成系统服务，开机自动启动。`);
+  console.log(`✓ PocketShell is installed as a system service and starts on boot.`);
   console.log("");
-  console.log(`  服务用户    ${plan.user}`);
-  console.log(`  密钥目录    ${plan.keyDir}`);
-  console.log(`  访问地址    ${appUrl}`);
+  console.log(`  service user  ${plan.user}`);
+  console.log(`  key dir       ${plan.keyDir}`);
+  console.log(`  app URL       ${appUrl}`);
   console.log("");
   if (pairing) {
-    console.log(`手机打开上面的地址，粘贴这个配对串（有效期 300 秒）：`);
+    console.log(`Open that URL on your phone and paste this pairing string (valid for 300s):`);
     console.log("");
     console.log(`  ${pairing}`);
   } else if (paired > 0) {
     // Not a failure: the agent deliberately skips minting a boot code when the
     // registry is non-empty, so no string exists to print. Pointing at the log
     // here would send the operator hunting for something never written.
-    console.log(`这台机器上已有 ${paired} 台配对过的设备，可以直接用，无需重新配对。`);
-    console.log(`要加一台新手机，运行：`);
+    console.log(`This machine already has ${paired} paired device(s) — they keep working, no need to pair again.`);
+    console.log(`To add another phone, run:`);
     console.log(`  ${plan.binPath} pair`);
   } else {
-    console.log(`服务已启动，但没能自动取到配对串。手动查看：`);
+    console.log(`The service started, but the pairing string could not be captured automatically. Check it manually:`);
     console.log(plan.platform === "linux"
       ? `  journalctl -u ${plan.label} -n 30`
       : `  tail -n 30 ${plan.logPath}`);
   }
   console.log("");
-  console.log(`如果还没配反向代理（让手机能从外网访问），见部署指南「方式 B」：`);
+  console.log(`No reverse proxy yet (so your phone can reach this from outside)? See the deployment guide, option B:`);
   console.log(`  https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT-CN.md`);
   console.log("");
-  console.log(`卸载：pocketshell-agent uninstall`);
+  console.log(`Uninstall: pocketshell-agent uninstall`);
 }
 
 export async function runInstall(argv: string[]): Promise<number> {
   const action = parseInstallArgv(argv);
   if (action.cmd === "error") { console.error(action.message); return 1; }
-  if (action.cmd !== "install") { console.error("内部错误：runInstall 收到非 install 动作"); return 1; }
+  if (action.cmd !== "install") { console.error("internal error: runInstall received a non-install action"); return 1; }
 
   // --- read-only phase: nothing below this point has touched the system yet ---
   const r = resolvePlan({
@@ -212,8 +212,8 @@ export async function runInstall(argv: string[]): Promise<number> {
   ensureTmux(realTmuxDeps());
 
   if (plan.user === "root" && plan.platform === "linux") {
-    console.log("提示：服务将以 root 身份运行，手机连上后拿到的是 root shell。");
-    console.log("      想用普通用户，加 --user <用户名> 重新运行。");
+    console.log("Note: the service will run as root, so a connected phone gets a root shell.");
+    console.log("      To use a regular account, re-run with --user <username>.");
   }
 
   // --- mutating phase ---
@@ -222,23 +222,23 @@ export async function runInstall(argv: string[]): Promise<number> {
 
   if (plan.platform === "linux") {
     const reload = await run(["systemctl", "daemon-reload"]);
-    if (reload.code !== 0) { console.error(`systemctl daemon-reload 失败：\n${reload.stderr}`); return 1; }
+    if (reload.code !== 0) { console.error(`systemctl daemon-reload failed:\n${reload.stderr}`); return 1; }
     const up = await run(["systemctl", "enable", "--now", plan.label]);
     if (up.code !== 0) {
-      console.error(`启动服务失败：\n${up.stderr}`);
+      console.error(`Failed to start the service:\n${up.stderr}`);
       const st = await run(["systemctl", "status", plan.label, "--no-pager", "-l"]);
       console.error(st.stdout.split("\n").slice(-20).join("\n"));
       return 1;
     }
-    console.log(`已启用并启动服务：${plan.label}.service`);
+    console.log(`Enabled and started the service: ${plan.label}.service`);
   } else {
     return await bootstrapLaunchd(plan);
   }
 
   const ready = await waitReady(plan.env.POCKETSHELL_HOST, Number(plan.env.POCKETSHELL_PORT));
   if (!ready) {
-    console.error(`服务已注册，但 15 秒内没能在 ${plan.env.POCKETSHELL_HOST}:${plan.env.POCKETSHELL_PORT} 上响应。`);
-    console.error(`查看日志：journalctl -u ${plan.label} -n 30`);
+    console.error(`The service is registered, but did not respond on ${plan.env.POCKETSHELL_HOST}:${plan.env.POCKETSHELL_PORT} within 15s.`);
+    console.error(`View logs: journalctl -u ${plan.label} -n 30`);
     return 1;
   }
   // Read the code the service minted at boot. Do NOT call the `pair`
@@ -281,9 +281,10 @@ export function execStartFromUnit(unitText: string): string | null {
 //
 // Why not just derive it from HOME: uninstall runs under sudo on Linux, so the
 // calling process's HOME is root's while the service runs as someone else. The
-// 2026-07-30 acceptance run printed "密钥目录 /root/.pocketshell" for a service
-// whose keys actually lived in /home/myt/.pocketshell — a path that did not
-// even exist. Returns null when the unit predates this field, so the caller can
+// 2026-07-30 acceptance run printed "密钥目录 /root/.pocketshell" (the CLI was
+// Chinese back then; it now prints "key dir") for a service whose keys actually
+// lived in /home/myt/.pocketshell — a path that did not even exist. Returns
+// null when the unit predates this field, so the caller can
 // fall back to a generic hint instead of inventing a path.
 export function keyDirFromUnit(unitText: string): string | null {
   const systemd = /^Environment=POCKETSHELL_KEY_DIR=(.+)$/m.exec(unitText);
@@ -302,15 +303,15 @@ async function bootstrapLaunchd(plan: InstallPlan): Promise<number> {
   await run(["launchctl", "bootout", `${domain}/${plan.label}`]);
   const boot = await run(["launchctl", "bootstrap", domain, plan.unitPath]);
   if (boot.code !== 0) {
-    console.error(`launchctl bootstrap 失败：\n${boot.stderr || boot.stdout}`);
+    console.error(`launchctl bootstrap failed:\n${boot.stderr || boot.stdout}`);
     return 1;
   }
-  console.log(`已注册并启动服务：${plan.label}`);
+  console.log(`Registered and started the service: ${plan.label}`);
 
   const ready = await waitReady(plan.env.POCKETSHELL_HOST, Number(plan.env.POCKETSHELL_PORT));
   if (!ready) {
-    console.error(`服务已注册，但 15 秒内没能在 ${plan.env.POCKETSHELL_HOST}:${plan.env.POCKETSHELL_PORT} 上响应。`);
-    console.error(`查看日志：tail -n 30 ${plan.logPath}`);
+    console.error(`The service is registered, but did not respond on ${plan.env.POCKETSHELL_HOST}:${plan.env.POCKETSHELL_PORT} within 15s.`);
+    console.error(`View logs: tail -n 30 ${plan.logPath}`);
     return 1;
   }
   printSuccess(plan, extractPairingString(await readServiceLog(plan)), pairedDeviceCount(plan.keyDir));
@@ -321,11 +322,11 @@ export async function runUninstall(): Promise<number> {
   const platform = process.platform;
   if (platform === "linux") {
     if (typeof process.geteuid === "function" && process.geteuid() !== 0) {
-      console.error("uninstall 需要 root 权限。请改用：sudo pocketshell-agent uninstall");
+      console.error("uninstall needs root. Run it as: sudo pocketshell-agent uninstall");
       return 1;
     }
     const unitPath = "/etc/systemd/system/pocketshell.service";
-    if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
+    if (!existsSync(unitPath)) { console.log("No installed service found; nothing to uninstall."); return 0; }
     // Read the keyDir out before deleting the unit — it is the only record of
     // which user's keys this service was using (see keyDirFromUnit).
     const unitText = readFileSync(unitPath, "utf8");
@@ -336,12 +337,12 @@ export async function runUninstall(): Promise<number> {
     await run(["systemctl", "disable", "--now", "pocketshell"]);
     rmSync(unitPath, { force: true });
     await run(["systemctl", "daemon-reload"]);
-    console.log(`已停止并移除服务：${unitPath}`);
+    console.log(`Stopped and removed the service: ${unitPath}`);
     // Remove our PATH symlink, but only if it still points at our binary —
     // never touch an unrelated file someone else put there.
     if (symlinkTargetOk(LINUX_SYMLINK, binPath)) {
       rmSync(LINUX_SYMLINK, { force: true });
-      console.log(`已移除命令链接：${LINUX_SYMLINK}`);
+      console.log(`Removed the command link: ${LINUX_SYMLINK}`);
     }
     printKeepNotice(binPath, keyDir);
     return 0;
@@ -349,29 +350,29 @@ export async function runUninstall(): Promise<number> {
   if (platform === "darwin") {
     const home = process.env.HOME ?? "";
     const unitPath = `${home}/Library/LaunchAgents/com.pocketshell.agent.plist`;
-    if (!existsSync(unitPath)) { console.log("没有找到已安装的服务，无需卸载。"); return 0; }
+    if (!existsSync(unitPath)) { console.log("No installed service found; nothing to uninstall."); return 0; }
     const uid = typeof process.getuid === "function" ? process.getuid() : 0;
     const keyDir = keyDirFromUnit(readFileSync(unitPath, "utf8"));
     await run(["launchctl", "bootout", `${launchdDomain(uid)}/com.pocketshell.agent`]);
     rmSync(unitPath, { force: true });
-    console.log(`已停止并移除服务：${unitPath}`);
+    console.log(`Stopped and removed the service: ${unitPath}`);
     printKeepNotice(`${home}/.local/bin/pocketshell-agent`, keyDir);
     return 0;
   }
-  console.error(`不支持的平台：${platform}`);
+  console.error(`Unsupported platform: ${platform}`);
   return 1;
 }
 
 function printKeepNotice(binPath: string, keyDir: string | null): void {
   console.log("");
-  console.log("以下内容已保留（里面有密钥与已配对设备，删掉所有手机都要重新配对）：");
+  console.log("The following were kept (they hold your keys and paired devices — delete them and every phone must pair again):");
   if (keyDir) {
-    console.log(`  密钥目录  ${keyDir}`);
+    console.log(`  key dir     ${keyDir}`);
   } else {
     // Never guess: an invented path is worse than admitting we don't know.
-    console.log(`  密钥目录  服务配置里没有记录，通常是服务运行用户 home 下的 .pocketshell`);
+    console.log(`  key dir     not recorded in the service config; usually .pocketshell under the service user\x27s home`);
   }
-  console.log(`  二进制    ${binPath}`);
+  console.log(`  binary      ${binPath}`);
   console.log("");
-  console.log("确实要彻底清除，手动删除上面两个路径即可。");
+  console.log("To wipe it completely, delete those paths by hand.");
 }
