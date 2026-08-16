@@ -78,10 +78,14 @@ export type FunnelState =
  * 判不出来时返回 "elsewhere"（保守），调用方会连原始输出一起打印给用户，
  * 绝不静默继续（spec §8）。
  */
-export function funnelState(statusOut: string, port: number): FunnelState {
+export function funnelState(statusOut: string, origin: string): FunnelState {
   const text = statusOut.trim();
   if (text.length === 0 || /No serve config/i.test(text)) return "none";
-  const re = new RegExp(`127\\.0\\.0\\.1:${port}(?![0-9])`);
+  // 匹配整个 origin（含 host），不是只匹配端口：用户可能用 --host 绑在
+  // 192.168.1.5 上，只认 127.0.0.1 会让「明明配对了」被判成 elsewhere，
+  // 于是 setup 反复轮询后报失败——配置其实是好的。
+  // 尾部的 (?![0-9]) 防子串误伤：端口 8722 不能匹配到 18722 上。
+  const re = new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9])`);
   return re.test(text) ? "ours" : "elsewhere";
 }
 

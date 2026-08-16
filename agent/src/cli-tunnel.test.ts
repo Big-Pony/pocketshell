@@ -52,22 +52,32 @@ test("advertiseFromDnsName refuses empty or dot-only input", () => {
   expect(advertiseFromDnsName("  ")).toBeNull();
 });
 
+const ORIGIN = "http://127.0.0.1:8722";
+
 test("funnelState reports none when tailscale has no serve config", () => {
-  expect(funnelState("No serve config\n", 8722)).toBe("none");
-  expect(funnelState("", 8722)).toBe("none");
-  expect(funnelState("   \n", 8722)).toBe("none");
+  expect(funnelState("No serve config\n", ORIGIN)).toBe("none");
+  expect(funnelState("", ORIGIN)).toBe("none");
+  expect(funnelState("   \n", ORIGIN)).toBe("none");
 });
 
-test("funnelState reports ours only when the config points at our port", () => {
+test("funnelState reports ours only when the config points at our origin", () => {
   const out = "https://box.tailc8ab3b.ts.net (Funnel on)\n|-- / proxy http://127.0.0.1:8722\n";
-  expect(funnelState(out, 8722)).toBe("ours");
-  expect(funnelState(out, 9000)).toBe("elsewhere");
+  expect(funnelState(out, ORIGIN)).toBe("ours");
+  expect(funnelState(out, "http://127.0.0.1:9000")).toBe("elsewhere");
 });
 
 test("funnelState does not confuse 8722 with 18722", () => {
   // 子串匹配的经典陷阱：端口 8722 不能匹配到 18722 上。
   const out = "|-- / proxy http://127.0.0.1:18722\n";
-  expect(funnelState(out, 8722)).toBe("elsewhere");
+  expect(funnelState(out, ORIGIN)).toBe("elsewhere");
+});
+
+test("funnelState matches a non-loopback bind (matching on port alone would not)", () => {
+  // 回归：早先版本只匹配 127.0.0.1:<port>，用户若 --host 192.168.1.5，
+  // funnel 明明已配好却被判成 elsewhere，setup 轮询到超时后误报失败。
+  const out = "|-- / proxy http://192.168.1.5:8722\n";
+  expect(funnelState(out, "http://192.168.1.5:8722")).toBe("ours");
+  expect(funnelState(out, ORIGIN)).toBe("elsewhere");
 });
 
 test("originFromEnv builds the loopback origin from the unit's env", () => {
