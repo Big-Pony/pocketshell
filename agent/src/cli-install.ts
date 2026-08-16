@@ -17,15 +17,15 @@ export type InstallAction =
   | { cmd: "error"; message: string };
 
 export const INSTALL_USAGE = [
-  "用法：",
-  "  pocketshell-agent install --advertise <地址> [--name <实例名>] [--user <用户>] [--host <绑定地址>] [--port <端口>]",
+  "Usage:",
+  "  pocketshell-agent install --advertise <address> [--name <instance>] [--user <user>] [--host <bind-addr>] [--port <port>]",
   "  pocketshell-agent uninstall",
   "",
-  "  --advertise  必填。写进配对串的对外地址，手机据此连接。ws:// 或 wss:// 开头。",
-  "  --name       实例名，装多台时用来区分（显示在 PWA 图标与 App 顶栏）。",
-  "  --user       服务运行用户。Linux 默认取 sudo 的发起者，macOS 取当前用户。",
-  "  --host       绑定地址，默认 127.0.0.1（配反代时用它；手机直连局域网填 0.0.0.0）。",
-  "  --port       端口，默认 8722。",
+  "  --advertise  Required. The external address baked into the pairing string, which is how your phone connects. Must start with ws:// or wss://.",
+  "  --name       Instance name, to tell several installs apart (shown on the PWA icon and in the app's top bar).",
+  "  --user       User the service runs as. Defaults to whoever invoked sudo on Linux, or the current user on macOS.",
+  "  --host       Bind address, default 127.0.0.1 (keep it behind a reverse proxy; use 0.0.0.0 for a phone connecting straight over the LAN).",
+  "  --port       Port, default 8722.",
 ].join("\n");
 
 /** Rejects values that could break out of a unit file line or corrupt a plist. */
@@ -40,7 +40,7 @@ export function parseInstallArgv(argv: string[]): InstallAction {
   const rest = argv.slice(1);
 
   if (sub === "uninstall") {
-    if (rest.length > 0) return { cmd: "error", message: `uninstall 不接受参数：${rest[0]}\n\n${INSTALL_USAGE}` };
+    if (rest.length > 0) return { cmd: "error", message: `uninstall takes no arguments, got: ${rest[0]}\n\n${INSTALL_USAGE}` };
     return { cmd: "uninstall" };
   }
   if (sub !== "install") return { cmd: "error", message: INSTALL_USAGE };
@@ -49,16 +49,16 @@ export function parseInstallArgv(argv: string[]): InstallAction {
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
     if (!NEEDS_VALUE.has(flag)) {
-      return { cmd: "error", message: `未知参数：${flag}\n\n${INSTALL_USAGE}` };
+      return { cmd: "error", message: `Unknown flag: ${flag}\n\n${INSTALL_USAGE}` };
     }
     const value = rest[i + 1];
     // A missing value, or one that looks like the next flag, is a typo — not an
     // empty string the user meant.
     if (value === undefined || value.startsWith("--")) {
-      return { cmd: "error", message: `${flag} 需要一个值\n\n${INSTALL_USAGE}` };
+      return { cmd: "error", message: `${flag} needs a value\n\n${INSTALL_USAGE}` };
     }
     if (!validateEnvValue(value)) {
-      return { cmd: "error", message: `${flag} 的值不能包含换行或控制字符（会写坏服务配置文件）` };
+      return { cmd: "error", message: `${flag} value must not contain newlines or control characters (they would corrupt the service config file)` };
     }
     raw[flag] = value;
     i++;
@@ -69,16 +69,16 @@ export function parseInstallArgv(argv: string[]): InstallAction {
     return {
       cmd: "error",
       message:
-        "缺少 --advertise。\n" +
-        "它决定配对串里写的是哪个地址——不填的话手机拿到配对串也连不上这台机器。\n" +
-        "例：--advertise wss://ps.example.com（走反代/隧道）或 --advertise ws://192.168.1.10:8722（局域网直连）\n\n" +
+        "Missing --advertise.\n" +
+        "It decides which address goes into the pairing string — without it your phone has nowhere to connect, even holding a valid code.\n" +
+        "e.g. --advertise wss://ps.example.com (behind a reverse proxy / tunnel) or --advertise ws://192.168.1.10:8722 (straight over the LAN)\n\n" +
         INSTALL_USAGE,
     };
   }
   if (!advertise.startsWith("ws://") && !advertise.startsWith("wss://")) {
     return {
       cmd: "error",
-      message: `--advertise 必须以 ws:// 或 wss:// 开头（收到：${advertise}）。\nHTTPS 站点填 wss://，明文 HTTP 填 ws://。`,
+      message: `--advertise must start with ws:// or wss:// (got: ${advertise}).\nUse wss:// for an HTTPS site, ws:// for plain HTTP.`,
     };
   }
 
@@ -86,7 +86,7 @@ export function parseInstallArgv(argv: string[]): InstallAction {
   if (raw["--port"] !== undefined) {
     const n = Number(raw["--port"]);
     if (!Number.isInteger(n) || n < 1 || n > 65535) {
-      return { cmd: "error", message: `--port 端口必须是 1..65535 的整数（收到：${raw["--port"]}）` };
+      return { cmd: "error", message: `--port must be an integer in 1..65535 (got: ${raw["--port"]})` };
     }
     port = n;
   }
@@ -170,12 +170,12 @@ export const LINUX_SYMLINK = "/usr/local/bin/pocketshell-agent";
 export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | { ok: false; message: string } {
   if (i.platform === "linux") {
     if (i.euid !== 0) {
-      return { ok: false, message: `install 需要 root 权限（要写 ${LINUX_BIN_DIR}、/etc/systemd/system 与 ${LINUX_SYMLINK}）。\n请改用：sudo pocketshell-agent install …` };
+      return { ok: false, message: `install needs root (it writes ${LINUX_BIN_DIR}, /etc/systemd/system and ${LINUX_SYMLINK}).\nRun it as: sudo pocketshell-agent install …` };
     }
     const user = i.opts.user ?? i.env.SUDO_USER ?? "root";
     const home = i.homeOf(user);
     if (!home) {
-      return { ok: false, message: `系统里没有用户「${user}」。请用 --user 指定一个已存在的用户。` };
+      return { ok: false, message: `No such user on this system: "${user}". Pass --user with an existing account.` };
     }
     const keyDir = `${home}/.pocketshell`;
     return {
@@ -198,16 +198,16 @@ export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | 
   if (i.platform === "darwin") {
     if (i.env.SUDO_USER || i.euid === 0) {
       // `launchctl bootstrap gui/$(id -u)` under sudo targets uid 0's GUI domain.
-      return { ok: false, message: "macOS 上请不要用 sudo —— LaunchAgent 属于用户域，加 sudo 会装到 root 的会话里（你看不见也用不上）。\n请去掉 sudo 重新运行：pocketshell-agent install …" };
+      return { ok: false, message: "Do not use sudo on macOS — a LaunchAgent lives in your user domain, and under sudo it would be installed into root's session (invisible and useless to you).\nRe-run without sudo: pocketshell-agent install …" };
     }
     const user = i.opts.user ?? i.env.USER ?? "";
     const home = i.opts.user ? i.homeOf(i.opts.user) : (i.env.HOME ?? null);
     if (!user || !home) {
-      return { ok: false, message: `无法确定 home 目录${i.opts.user ? `（--user ${i.opts.user}）` : ""}。` };
+      return { ok: false, message: `Could not determine the home directory${i.opts.user ? ` (--user ${i.opts.user})` : ""}.` };
     }
     const dir = i.tmuxDir();
     if (!dir) {
-      return { ok: false, message: "找不到 tmux。launchd 的 PATH 极简，必须把 tmux 所在目录写进服务配置，所以安装前 tmux 必须已就位。\n请先安装：brew install tmux" };
+      return { ok: false, message: "tmux not found. launchd's PATH is minimal, so tmux's directory has to be baked into the service config — which means tmux must already be in place before installing.\nInstall it first: brew install tmux" };
     }
     const keyDir = `${home}/.pocketshell`;
     return {
@@ -227,7 +227,7 @@ export function resolvePlan(i: ResolveInput): { ok: true; plan: InstallPlan } | 
     };
   }
 
-  return { ok: false, message: `不支持的平台：${i.platform}。install 目前只支持 Linux（systemd）与 macOS（launchd）。` };
+  return { ok: false, message: `Unsupported platform: ${i.platform}. install currently supports Linux (systemd) and macOS (launchd) only.` };
 }
 
 // Renders the system-level unit. System level (not user level) is deliberate:

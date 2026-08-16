@@ -4,7 +4,7 @@
 
 ---
 
-This guide covers four ways to expose the PocketShell Agent to your phone, from simplest to most involved:
+This guide covers five ways to expose the PocketShell Agent to your phone, from simplest to most involved:
 
 | Option | When to use | Requires |
 |---|---|---|
@@ -12,6 +12,7 @@ This guide covers four ways to expose the PocketShell Agent to your phone, from 
 | [B. Direct server + domain](#option-b--direct-server-deployment-with-a-domain-caddy--nginx) | Agent runs on a server with a public IP and a domain | Caddy or Nginx |
 | [C. Cloudflare Tunnel](#option-c--cloudflare-tunnel-no-public-ip) | Home/office machine without a public IP | Cloudflare account + domain |
 | [D. frp relay server](#option-d--frp-relay-server-no-public-ip-self-controlled) | No public IP, but you own a VPS and want full control | VPS + domain |
+| [E. Tailscale Funnel](#option-e--tailscale-funnel-no-domain-needed) | You want real HTTPS but own no domain | Tailscale account |
 
 ### Before you start: three key concepts
 
@@ -202,6 +203,46 @@ POCKETSHELL_ADVERTISE=wss://ps.example.com \
 ```
 
 With `proxyBindAddr = "127.0.0.1"` set, the frps landing port `18092` binds to the VPS's localhost and is reachable only through Caddy; only 443 faces the internet (also firewall port `7000` so only your frpc can reach it). Optionally put Cloudflare's proxy (orange cloud) in front for CDN + origin-IP hiding — WebSocket passes through automatically.
+
+---
+
+### Option E — Tailscale Funnel (no domain needed)
+
+If you do not own a domain, this is the shortest path to a real HTTPS address:
+
+```bash
+sudo pocketshell-agent install --advertise ws://127.0.0.1:8722
+sudo pocketshell-agent tunnel setup
+```
+
+You approve two things in a browser (signing this machine in, and enabling
+Funnel for your tailnet); everything else is automatic. You end up on
+`https://<host>.<tailnet>.ts.net`, which is a real certificate — so the app
+installs to your home screen and Web Push works.
+
+Things worth knowing before you pick this:
+
+- **Bandwidth is capped.** Measured on 2026-08-16: about 2.5 MB/s through
+  Funnel versus ~4.7 MB/s direct on the same machine and client — roughly
+  half. Terminal use does not notice; a 10 MB attachment takes about 4
+  seconds, 100 MB about 40. Tailscale calls this "non-configurable bandwidth
+  limits" and publishes no number.
+- **Funnel is still beta**, and the public port is always 443 (Funnel allows
+  only 443, 8443 and 10000).
+- **Your traffic passes through Tailscale's relays**, but it stays Noise
+  ciphertext end to end — the relay cannot read it.
+- **The first certificate takes a minute or more.** Repeated failures are
+  rate-limited by Let's Encrypt and can force a long wait.
+- `POCKETSHELL_TLS=1` is not supported with Funnel; Funnel terminates TLS
+  itself and the agent should speak plain HTTP on loopback.
+
+If you are testing the public address with curl, pass `--http1.1`. Over HTTP/2
+`Connection: Upgrade` is a forbidden hop-by-hop header and gets dropped, so a
+WebSocket check appears to fail when it is actually fine.
+
+On macOS, `tunnel setup` does not install Tailscale for you — install it first
+(`brew install tailscale`, or the App Store app) and run `tunnel setup` without
+`sudo`.
 
 ---
 

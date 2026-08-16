@@ -39,7 +39,7 @@ test("uninstall takes no flags", () => {
 test("--advertise is required and the error says why", () => {
   const m = err(["install"]);
   expect(m).toContain("--advertise");
-  expect(m).toContain("配对串");   // explains WHY it is required
+  expect(m).toContain("pairing string");   // explains WHY it is required
 });
 
 test("--advertise must be ws:// or wss://, not https://", () => {
@@ -51,17 +51,17 @@ test("--advertise must be ws:// or wss://, not https://", () => {
 });
 
 test("port must be an integer in 1..65535", () => {
-  expect(err(["install", "--advertise", "wss://x.com", "--port", "0"])).toContain("端口");
-  expect(err(["install", "--advertise", "wss://x.com", "--port", "70000"])).toContain("端口");
-  expect(err(["install", "--advertise", "wss://x.com", "--port", "abc"])).toContain("端口");
-  expect(err(["install", "--advertise", "wss://x.com", "--port", "80.5"])).toContain("端口");
+  expect(err(["install", "--advertise", "wss://x.com", "--port", "0"])).toContain("--port");
+  expect(err(["install", "--advertise", "wss://x.com", "--port", "70000"])).toContain("--port");
+  expect(err(["install", "--advertise", "wss://x.com", "--port", "abc"])).toContain("--port");
+  expect(err(["install", "--advertise", "wss://x.com", "--port", "80.5"])).toContain("--port");
 });
 
 test("values containing control characters are rejected", () => {
   // systemd's Environment= is line-based: a newline in any value could inject
   // arbitrary directives into the unit file.
-  expect(err(["install", "--advertise", "wss://x.com\nExecStart=/bin/sh"])).toContain("控制字符");
-  expect(err(["install", "--advertise", "wss://x.com", "--name", "a\rb"])).toContain("控制字符");
+  expect(err(["install", "--advertise", "wss://x.com\nExecStart=/bin/sh"])).toContain("control characters");
+  expect(err(["install", "--advertise", "wss://x.com", "--name", "a\rb"])).toContain("control characters");
 });
 
 test("flags needing a value reject a missing or flag-shaped value", () => {

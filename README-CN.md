@@ -128,6 +128,8 @@ PocketShell 是一个**面向移动端的自托管远程终端**。它把开发�
 
 **环境要求**：开发机（跑 Agent 的一端）需要 `tmux` 和 `git`。
 
+> 命令行安装过程的提示与报错是**英文**的（App 界面本身完整支持中文）。下面每一步都写清了会发生什么，照做即可。
+
 **第一步：一行安装**
 
 ```bash
@@ -138,6 +140,8 @@ curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.s
 
 **第二步：做成开机自启的服务**
 
+*有域名*（已经用 Caddy/Nginx 或隧道指到这台机器）：
+
 ```bash
 # Linux
 sudo pocketshell-agent install --advertise wss://your.domain --name 我的服务器
@@ -145,6 +149,18 @@ sudo pocketshell-agent install --advertise wss://your.domain --name 我的服务
 # macOS —— 不要加 sudo，LaunchAgent 属于用户域
 pocketshell-agent install --advertise wss://your.domain --name 我的Mac
 ```
+
+*没有域名*：先用占位地址装上，再让 PocketShell 通过 Tailscale Funnel 给你一个真 HTTPS 地址：
+
+```bash
+sudo pocketshell-agent install --advertise ws://127.0.0.1:8722 --name 我的服务器
+sudo pocketshell-agent tunnel setup
+```
+
+`tunnel setup` 会让你在浏览器上点两次授权，然后把这台机器挂到
+`https://<host>.<tailnet>.ts.net`，把该地址回填进服务配置，并打印一个新的配对串。
+是真证书，所以 App 能装到桌面、Web Push 也能用——代价是带宽大约是直连的一半。
+数字与注意事项见[方式 E](./DEPLOYMENT-CN.md#方式-etailscale-funnel无需域名)。
 
 这条命令会写好 systemd/launchd 服务配置 → 开机自启 + 立刻启动 → **首次安装时把配对串直接打印出来**。
 
@@ -263,7 +279,7 @@ Agent（Claude Code / Codex / opencode / Kimi CLI）完成一轮任务或等待�
 
 ## 🌐 部署
 
-需要从公网访问（不在同一局域网）？见 **[部署指南 DEPLOYMENT-CN.md](./DEPLOYMENT-CN.md)**，涵盖四种方式：
+需要从公网访问（不在同一局域网）？见 **[部署指南 DEPLOYMENT-CN.md](./DEPLOYMENT-CN.md)**，涵盖五种方式：
 
 | 方式 | 适用场景 |
 |---|---|
@@ -271,6 +287,7 @@ Agent（Claude Code / Codex / opencode / Kimi CLI）完成一轮任务或等待�
 | Caddy / Nginx 反代 | 有公网 IP 的服务器 + 域名 |
 | Cloudflare Tunnel | 家宽无公网 IP，不想开端口 |
 | frp 中转 | 无公网 IP，但想自控整条链路 |
+| [Tailscale Funnel](./DEPLOYMENT-CN.md#方式-etailscale-funnel无需域名) | 自己没有域名也要真 HTTPS，一条命令搞定 |
 
 文档同时给出 systemd / launchd 常驻运行示例与排查表。
 
