@@ -255,19 +255,25 @@
   <div class="wrap">
     <div class="quick">
       <h2>Three minutes to running</h2>
-      <p class="q-sub">The host needs tmux and git. Linux or macOS. No reverse proxy required to try it — start on your LAN.</p>
+      <p class="q-sub">The host needs tmux and git. Linux or macOS. <b>No domain and no reverse proxy required</b> — one command gets you a real HTTPS address.</p>
       <div class="quick-grid">
         <div>
-          <div class="q-step"><div class="q-n">1</div><div><h4>One-line install</h4><p>Detects your platform, verifies the SHA256, lands in your PATH.</p></div></div>
+          <div class="q-step"><div class="q-n">1</div><div><h4>One-line install</h4><p>Detects your platform, verifies the SHA256, then prints the exact next command to run.</p></div></div>
           <div class="q-step"><div class="q-n">2</div><div><h4>Register it as a service</h4><p>Starts at boot; a first install prints the pairing string right there.</p></div></div>
-          <div class="q-step"><div class="q-n">3</div><div><h4>Pair your phone</h4><p>Open the URL, paste, add to home screen. Done.</p></div></div>
+          <div class="q-step"><div class="q-n">3</div><div><h4>Get a public address</h4><p>No domain? <code>tunnel setup</code> gets you one over Tailscale Funnel — two browser approvals, nothing else. Already have a domain? Skip it.</p></div></div>
+          <div class="q-step"><div class="q-n">4</div><div><h4>Pair your phone</h4><p>Open the URL, paste, add to home screen. Done.</p></div></div>
         </div>
         <div class="term-light">
           <div class="t-bar">terminal<button class="copy-btn" data-copied="copied ✓" data-copy="curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh">copy</button></div>
-          <pre><span class="c"># install</span>
+          <pre><span class="c"># install — it prints the next command with the right path</span>
 <span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
 
-<span class="c"># run it as a service (no sudo on macOS)</span>
+<span class="c"># no domain: a placeholder now, replaced in the next step</span>
+<span class="p">$</span> sudo pocketshell-agent install \
+    --advertise ws://127.0.0.1:8722 --name my-server
+<span class="p">$</span> sudo pocketshell-agent tunnel setup
+
+<span class="c"># already have a domain? just this (no sudo on macOS)</span>
 <span class="p">$</span> pocketshell-agent install \
     --advertise wss://your.domain --name my-mac</pre>
         </div>

@@ -255,19 +255,25 @@
   <div class="wrap">
     <div class="quick">
       <h2>三分钟，跑起来</h2>
-      <p class="q-sub">宿主机只要有 tmux 和 git。Linux / macOS 都行。装完不用配反代，也能先在局域网里试。</p>
+      <p class="q-sub">宿主机只要有 tmux 和 git。Linux / macOS 都行。<b>不用域名、不用配反代</b> —— 一条命令就能拿到真 HTTPS 地址。</p>
       <div class="quick-grid">
         <div>
-          <div class="q-step"><div class="q-n">1</div><div><h4>一行安装</h4><p>自动认平台、校验 SHA256，装完就在 PATH 里。</p></div></div>
+          <div class="q-step"><div class="q-n">1</div><div><h4>一行安装</h4><p>自动认平台、校验 SHA256，装完直接把下一条命令连路径一起打出来。</p></div></div>
           <div class="q-step"><div class="q-n">2</div><div><h4>注册成服务</h4><p>开机自启，第一次安装会直接把配对串打出来。</p></div></div>
-          <div class="q-step"><div class="q-n">3</div><div><h4>手机配对</h4><p>浏览器打开、粘贴、加到主屏幕，完事。</p></div></div>
+          <div class="q-step"><div class="q-n">3</div><div><h4>拿一个公网地址</h4><p>没有域名？<code>tunnel setup</code> 走 Tailscale Funnel 给你一个 —— 除两次浏览器授权外全自动。已有域名就跳过这步。</p></div></div>
+          <div class="q-step"><div class="q-n">4</div><div><h4>手机配对</h4><p>浏览器打开、粘贴、加到主屏幕，完事。</p></div></div>
         </div>
         <div class="term-light">
           <div class="t-bar">terminal<button class="copy-btn" data-copied="已复制 ✓" data-copy="curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh">copy</button></div>
-          <pre><span class="c"># 安装</span>
+          <pre><span class="c"># 安装 —— 它会把下一条命令连正确路径一起打出来</span>
 <span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/Big-Pony/pocketshell/main/install.sh | sh
 
-<span class="c"># 服务化（macOS 无需 sudo）</span>
+<span class="c"># 没有域名：先填占位地址，下一步会自动替换</span>
+<span class="p">$</span> sudo pocketshell-agent install \
+    --advertise ws://127.0.0.1:8722 --name my-server
+<span class="p">$</span> sudo pocketshell-agent tunnel setup
+
+<span class="c"># 已有域名？只要这一条（macOS 无需 sudo）</span>
 <span class="p">$</span> pocketshell-agent install \
     --advertise wss://your.domain --name my-mac</pre>
         </div>

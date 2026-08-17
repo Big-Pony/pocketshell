@@ -27,7 +27,7 @@ PocketShell is not a cloud service and not an IDE. It assumes you already have t
 - [README](https://github.com/Big-Pony/pocketshell/blob/main/README.md): full feature list, quick start, install options, good-fit / not-a-fit guidance
 - [README (中文)](https://github.com/Big-Pony/pocketshell/blob/main/README-CN.md): Chinese README
 - [Interaction cheat sheet](https://github.com/Big-Pony/pocketshell/blob/main/USAGE.md): mobile gestures, key combos, the three key layouts (Classic / Layered / Flick) and the Fn app-command layer
-- [Deployment guide](https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT.md): reverse proxy, TLS, running as a systemd or launchd service
+- [Deployment guide](https://github.com/Big-Pony/pocketshell/blob/main/DEPLOYMENT.md): reverse proxy, TLS, Tailscale Funnel for hosts without a domain, running as a systemd or launchd service
 
 ## Source and releases
 
