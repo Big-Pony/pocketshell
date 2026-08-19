@@ -203,7 +203,7 @@ test("groupByKind 不修改入参", () => {
 // 用户后台过的会话越多，幽灵流量越大。
 //
 // 两条路径共用同一个纯函数，对称性因此是结构性的而不是靠人记住。
-import { backgroundTab, reattachOnRestore } from "./top-tabs";
+import { backgroundTab } from "./top-tabs";
 
 describe("backgroundTab", () => {
   test("把 id 移出 tabOrder —— 与 closeTopTab 同语义", () => {
@@ -226,20 +226,3 @@ describe("backgroundTab", () => {
   });
 });
 
-describe("reattachOnRestore（重进时该给谁补 attach）", () => {
-  test("排除 file: 前缀与已死会话 —— 保持原有行为", () => {
-    const ids = reattachOnRestore(["file:/x", "live", "dead"], new Set(["live"]), new Set());
-    expect(ids).toEqual(["live"]);
-  });
-
-  test("★ 排除后台化会话 —— 它们不挂 TerminalView，attach 来的字节无人消费", () => {
-    const ids = reattachOnRestore(["fg", "bg"], new Set(["fg", "bg"]), new Set(["bg"]));
-    expect(ids).toEqual(["fg"]);
-  });
-
-  test("存量用户的 localStorage 里已经有泄漏的 tabOrder，这条过滤同时治存量", () => {
-    // 修 toBackground 只防新增；已经写进 localStorage 的那些要靠这里挡住。
-    const ids = reattachOnRestore(["a", "b", "c"], new Set(["a", "b", "c"]), new Set(["b", "c"]));
-    expect(ids).toEqual(["a"]);
-  });
-});

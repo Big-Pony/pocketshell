@@ -1604,3 +1604,31 @@ describe("rpc expectBytes 记账（14 期需求 3）", () => {
     expect((h.conn as any).inflightBytes).toBe(0);
   });
 });
+
+// ── 2026-08-19 真机取证：首屏 seed 的 attach 被「预先 attach」吞掉 ───────────
+//
+// App.svelte 恢复时曾对每个存活标签页先发一次 attach(id)（不带 seq → lastSeq=0），
+// 随后 TerminalView 的 seedFromHistory 再发 attach(seq, {seed:true})。真机日志显示
+// 服务端只收到前者：整环回放 2384 帧 / 221406B，而后者根本没上线。
+// 根因就在下面这条断言里——attach() 的 `subscribed` 提前返回在 seen 覆盖**之后**，
+// 于是第二次调用只改记账、不发帧。8 个 tab 各来一份 221KB 就是 1.7MB，直接顶穿
+// 服务端 1MB 高水位触发背压丢帧，表现为「同时开 8 个 tmux 重进全空白」。
+test("预先 attach 之后，seed attach 只改记账不发帧（故障机理）", () => {
+  const h = harness();
+  h.conn.attach("work");                       // App 恢复时的预先 attach
+  const first = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(first.type).toBe("attach");
+  expect(first.lastSeq).toBe(0);               // 整环回放的源头
+  const nAfterFirst = h.sent.length;
+
+  h.conn.attach("work", 4321, { seed: true }); // 快照回来后的 seed attach
+  expect(h.sent.length).toBe(nAfterFirst);     // 一个字节都没发出去
+});
+
+test("不预先 attach 时，seed attach 带着快照 seq 真的上线", () => {
+  const h = harness();
+  h.conn.attach("work", 4321, { seed: true }); // TerminalView 挂载后唯一的一次
+  const att = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(att.type).toBe("attach");
+  expect(att.lastSeq).toBe(4321);              // 服务端只补快照之后的增量
+});

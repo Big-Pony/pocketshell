@@ -158,28 +158,20 @@ export function groupByKind(order: string[], fileIds: Set<string>): string[] {
 
 // ── 后台化与重进重连（2026-08-18，docs/需求/2026-08-18-多会话空白与输出丢失）──
 //
-// 这两个函数存在的唯一理由是**对称性要结构化**。原来 closeTopTab 记得
+// 这个函数存在的唯一理由是**对称性要结构化**。原来 closeTopTab 记得
 // `tabOrder = removeOrder(...)` 而 toBackground 忘了，两条同语义的路径靠人去记，
-// 结果就是漏了一处、且漏得很安静：后台化会话永久留在 tabOrder → 落进 localStorage
-// → 重进时被无条件 attach，而 topSessions 排除 backgrounded、这些会话根本不挂
-// TerminalView → **给没有渲染宿主的会话订阅了实时流**，字节 100% 无人消费，纯粹
-// 与真实 tab 抢同一条 WS。用户后台过的会话越多，幽灵流量越大。
+// 结果就是漏了一处、且漏得很安静：后台化会话永久留在 tabOrder，落进 localStorage
+// 后再也出不来，tab 条的持久化顺序里永远躺着一批看不见的 id。
+//
+// 【2026-08-19】此处原先还有第二重危害：App 重进时会遍历 tabOrder 无条件
+// attach，于是这些泄漏 id 会被订阅实时流，而它们不挂 TerminalView（topSessions
+// 排除 backgrounded），字节 100% 无人消费。那个预先 attach 循环已整体删除
+// （见 App.svelte 的 onSessions 注释），所以这一重危害不复存在 —— 与之配套的
+// reattachOnRestore 过滤函数也一并删了，别再去找它。
 
 /** 把一个会话后台化：移出 tab 条，记进 backgrounded。返回新值（Svelte 靠新引用触发）。 */
 export function backgroundTab(
   order: string[], backgrounded: Set<string>, id: string,
 ): { tabOrder: string[]; backgrounded: Set<string> } {
   return { tabOrder: removeOrder(order, id), backgrounded: new Set([...backgrounded, id]) };
-}
-
-/**
- * 重进应用时该给哪些会话补 attach。
- *
- * backgrounded 的过滤是第二道：修 toBackground 只防新增，存量用户的 localStorage
- * 里已经躺着泄漏的 tabOrder，得靠这里挡住。
- */
-export function reattachOnRestore(
-  order: string[], alive: Set<string>, backgrounded: Set<string>,
-): string[] {
-  return order.filter((id) => !id.startsWith("file:") && alive.has(id) && !backgrounded.has(id));
 }
