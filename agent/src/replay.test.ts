@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { ReplayService } from "./replay";
+import { ReplayService, tailWithinBudget, GAP_BACKFILL_BUDGET_BYTES } from "./replay";
 
 const b = (s: string) => new TextEncoder().encode(s);
 
@@ -99,4 +99,43 @@ test("since reports oldestSeq of the retained buffer on gap", () => {
   const res = r.since("s", 1);
   expect(res.gap).toBe(true);
   expect(res.oldestSeq).toBe(3);
+});
+
+// —— gap 补发限量（2026-08-19）：gap 时只发覆盖一屏的最新 N 字节 ——
+// 见 docs/域/终端与会话.md 的「断线重放」。这里钉的是纯函数的边界语义，
+// server.ts 只负责「gap 时才调它」。
+
+test("tailWithinBudget keeps the newest frames within the byte budget", () => {
+  const frames = [1, 2, 3, 4, 5].map((seq) => ({ sessionId: "s", seq, data: new Uint8Array(10) }));
+  // 预算 25B：从最新往回收，5(10) + 4(10) = 20 <= 25，再加 3 就 30 > 25。
+  expect(tailWithinBudget(frames, 25).map((f) => f.seq)).toEqual([4, 5]);
+});
+
+test("tailWithinBudget keeps chronological order (replay must not arrive reversed)", () => {
+  const frames = [1, 2, 3].map((seq) => ({ sessionId: "s", seq, data: new Uint8Array(4) }));
+  expect(tailWithinBudget(frames, 8).map((f) => f.seq)).toEqual([2, 3]);
+});
+
+test("tailWithinBudget always keeps at least the newest frame, however big", () => {
+  // 题眼：客户端的 `seen` 只由 output 帧推进（connection.ts:564）。一帧都不发
+  // 会让 seen 永久钉死 → 每次重连必再判 gap → 粘性 resync 循环。所以哪怕单帧
+  // 超预算也必须发出去。
+  const frames = [{ sessionId: "s", seq: 7, data: new Uint8Array(99_999) }];
+  expect(tailWithinBudget(frames, 1024).map((f) => f.seq)).toEqual([7]);
+});
+
+test("tailWithinBudget returns everything when the backlog fits", () => {
+  const frames = [1, 2].map((seq) => ({ sessionId: "s", seq, data: new Uint8Array(4) }));
+  expect(tailWithinBudget(frames, 1024).map((f) => f.seq)).toEqual([1, 2]);
+});
+
+test("tailWithinBudget on an empty backlog stays empty (no synthetic frame)", () => {
+  expect(tailWithinBudget([], 1024)).toEqual([]);
+});
+
+test("the default gap budget covers a worst-case phone screen but is a fraction of the ring", () => {
+  // 27 行 × 61 列（真机竖屏实测尺寸）满屏重绘，逐格带 SGR 的最坏情况远小于它；
+  // 同时必须显著小于 256KB 的环容量，否则限量等于没限。
+  expect(GAP_BACKFILL_BUDGET_BYTES).toBeGreaterThanOrEqual(27 * 61 * 10);
+  expect(GAP_BACKFILL_BUDGET_BYTES).toBeLessThanOrEqual(256 * 1024 / 4);
 });

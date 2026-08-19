@@ -192,3 +192,54 @@ test("groupByKind 不修改入参", () => {
   groupByKind(order, new Set());
   expect(order).toEqual(["t1", "t2"]);
 });
+
+// ── 2026-08-18 幽灵 attach（docs/需求/2026-08-18-多会话空白与输出丢失，优先级 3）──
+//
+// toBackground() 此前**没有** removeOrder，而同语义的 closeTopTab() 有。后果链：
+// 后台化会话永久留在 tabOrder → 落进 localStorage → 重进时 App 的一次性重连循环
+// 只过滤 file: 前缀与 alive、**不过滤 backgrounded** → 无条件 conn.attach(id)。
+// 而 topSessions **排除** backgrounded，这些会话根本不挂 TerminalView ——
+// 给一个没有任何渲染宿主的会话订阅了实时流，字节 100% 无人消费，纯粹抢带宽。
+// 用户后台过的会话越多，幽灵流量越大。
+//
+// 两条路径共用同一个纯函数，对称性因此是结构性的而不是靠人记住。
+import { backgroundTab, reattachOnRestore } from "./top-tabs";
+
+describe("backgroundTab", () => {
+  test("把 id 移出 tabOrder —— 与 closeTopTab 同语义", () => {
+    const r = backgroundTab(["a", "b", "c"], new Set(["z"]), "b");
+    expect(r.tabOrder).toEqual(["a", "c"]);
+  });
+
+  test("把 id 放进 backgrounded，且返回新的 Set（Svelte 的 $state 靠新引用触发）", () => {
+    const before = new Set(["z"]);
+    const r = backgroundTab(["a"], before, "a");
+    expect([...r.backgrounded].sort()).toEqual(["a", "z"]);
+    expect(r.backgrounded).not.toBe(before);
+  });
+
+  test("重复后台化幂等", () => {
+    const once = backgroundTab(["a", "b"], new Set(), "a");
+    const twice = backgroundTab(once.tabOrder, once.backgrounded, "a");
+    expect(twice.tabOrder).toEqual(["b"]);
+    expect([...twice.backgrounded]).toEqual(["a"]);
+  });
+});
+
+describe("reattachOnRestore（重进时该给谁补 attach）", () => {
+  test("排除 file: 前缀与已死会话 —— 保持原有行为", () => {
+    const ids = reattachOnRestore(["file:/x", "live", "dead"], new Set(["live"]), new Set());
+    expect(ids).toEqual(["live"]);
+  });
+
+  test("★ 排除后台化会话 —— 它们不挂 TerminalView，attach 来的字节无人消费", () => {
+    const ids = reattachOnRestore(["fg", "bg"], new Set(["fg", "bg"]), new Set(["bg"]));
+    expect(ids).toEqual(["fg"]);
+  });
+
+  test("存量用户的 localStorage 里已经有泄漏的 tabOrder，这条过滤同时治存量", () => {
+    // 修 toBackground 只防新增；已经写进 localStorage 的那些要靠这里挡住。
+    const ids = reattachOnRestore(["a", "b", "c"], new Set(["a", "b", "c"]), new Set(["b", "c"]));
+    expect(ids).toEqual(["a"]);
+  });
+});

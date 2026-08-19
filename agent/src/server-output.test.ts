@@ -5,7 +5,7 @@ import { test, expect } from "bun:test";
 import { startServer } from "./server";
 import type { SecureChannel } from "./secure-channel";
 import { encode, decodeServer } from "./protocol";
-import { ReplayService } from "./replay";
+import { ReplayService, GAP_BACKFILL_BUDGET_BYTES } from "./replay";
 import { TerminalService } from "./terminal";
 import { fromB64 } from "./bytes";
 
@@ -349,5 +349,79 @@ test("guard: backpressure works against a socket that refuses non-existent membe
   srv.__test.drain(strictWs as any);
   expect(frames(strictWs).filter((m) => m.type === "resync"))
     .toEqual([{ type: "resync", sessionId: "s", from: 1 }]);
+  srv.stop();
+});
+
+// --- gap 补发限量 + attach 埋点（2026-08-19，见 docs/域/终端与会话.md「断线重放」）
+
+test("attach with a gap backfills only the newest frames within the budget, not the whole ring", () => {
+  // 环容量远大于预算：制造一个「有 gap 且积压远超一屏」的局面。
+  const replay = new ReplayService(1024 * 1024);
+  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  openReady(srv, ws);
+  // 200 帧 × 4KB = 800KB 积压，全部在环里（没被驱逐）。
+  for (let i = 0; i < 200; i++) replay.ingest("s", new Uint8Array(4096));
+  // lastSeq=0 但 oldestSeq=1 → 无 gap，这一支必须完整补齐（回归护栏在下一条）。
+  // 这里手工驱逐出 gap：再灌到超过 cap。
+  const replay2 = new ReplayService(64 * 1024);
+  const srv2 = startServer({ port: 0, replay: replay2, channelFactory: passthroughResponder });
+  const ws2 = fakeWs();
+  openReady(srv2, ws2);
+  for (let i = 0; i < 200; i++) replay2.ingest("t", new Uint8Array(4096));
+  srv2.__test.message(ws2 as any, utf8(encode({ type: "attach", sessionId: "t", lastSeq: 1 })));
+  const got = frames(ws2);
+  expect(got.some((m) => m.type === "resync")).toBe(true);
+  const outs = got.filter((m) => m.type === "output");
+  // 环里有 16 帧（64KB / 4KB），预算只放得下 3 帧（12KB <= 16KB）。
+  expect(outs.length).toBeGreaterThan(0);      // 必须仍发帧：seen 要能推进
+  expect(outs.length).toBeLessThan(16);        // 但绝不是整环
+  const bytes = outs.reduce((n, m) => n + (m.type === "output" ? fromB64(m.data).byteLength : 0), 0);
+  expect(bytes).toBeLessThanOrEqual(GAP_BACKFILL_BUDGET_BYTES);
+  // 发的必须是**最新**的那几帧（含 latestSeq），否则 seen 推不到当前进度。
+  const seqs = outs.map((m) => (m.type === "output" ? m.seq : 0));
+  expect(seqs.at(-1)).toBe(replay2.latestSeq("t"));
+  srv.stop(); srv2.stop();
+});
+
+test("attach WITHOUT a gap still backfills the complete backlog (budget must not touch this path)", () => {
+  const replay = new ReplayService(1024 * 1024);
+  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  openReady(srv, ws);
+  // 100 帧 × 4KB = 400KB，远超 gap 预算，但没有驱逐 → 无 gap → 必须一帧不少。
+  for (let i = 0; i < 100; i++) replay.ingest("u", new Uint8Array(4096));
+  srv.__test.message(ws as any, utf8(encode({ type: "attach", sessionId: "u", lastSeq: 0 })));
+  const got = frames(ws);
+  expect(got.some((m) => m.type === "resync")).toBe(false);
+  expect(got.filter((m) => m.type === "output").length).toBe(100);
+  srv.stop();
+});
+
+test("attach logs one diag line with {sessionId,lastSeq,gap,frames,bytes}", () => {
+  const replay = new ReplayService(64 * 1024);
+  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  openReady(srv, ws);
+  for (let i = 0; i < 200; i++) replay.ingest("v", new Uint8Array(4096));
+  const lines: string[] = [];
+  const orig = console.log;
+  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+  try {
+    srv.__test.message(ws as any, utf8(encode({ type: "attach", sessionId: "v", lastSeq: 1 })));
+  } finally { console.log = orig; }
+  const diag = lines.filter((l) => l.startsWith("[pocketshell:diag]"));
+  expect(diag.length).toBe(1);
+  const body = JSON.parse(diag[0].slice("[pocketshell:diag]".length).trim());
+  expect(body.kind).toBe("attach");
+  expect(body.tag).toBe("v");
+  expect(body.lastSeq).toBe(1);
+  expect(body.gap).toBe(true);
+  expect(typeof body.frames).toBe("number");
+  expect(typeof body.bytes).toBe("number");
+  // 埋点记的必须是**实际发出去**的量，否则修复效果无从验证。
+  const outs = frames(ws).filter((m) => m.type === "output");
+  expect(body.frames).toBe(outs.length);
+  expect(body.bytes).toBe(outs.reduce((n, m) => n + (m.type === "output" ? fromB64(m.data).byteLength : 0), 0));
   srv.stop();
 });

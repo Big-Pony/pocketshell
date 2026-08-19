@@ -333,6 +333,12 @@ curl -fsSL https://pocketshell.net/install.sh | sh
     // 开 App 后的第一个等待：term.history（tmux capture + gzip + 可能分片）。
     // 此前是纯黑空终端、零反馈（14 期需求 5）。
     seeding: "正在读取会话历史…",
+    // 2026-08-18：首屏失败此前是永久吸收态（空 catch，提示直接消失）。多 tab
+    // 重进时 8 个 tab 全部空白且一直空白，只能关掉重开。现在退避重试，用尽后
+    // 把失败摆出来并留一个能点的入口。
+    seedRetrying: "读取超时，正在重试…",
+    seedFailed: "读取会话历史失败",
+    seedRetry: "重试",
   },
   keyboard: {
     tab: {

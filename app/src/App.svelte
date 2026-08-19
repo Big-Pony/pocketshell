@@ -15,7 +15,7 @@
   import BottomBar from "./components/BottomBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import type { LinkMetrics } from "./lib/net/connection";
-  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, groupByKind, type TopTab } from "./lib/ui/top-tabs";
+  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, groupByKind, backgroundTab, reattachOnRestore, type TopTab } from "./lib/ui/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -309,9 +309,10 @@
     const alive = new Set(sessions.map((s) => s.name));
     if (!restoredReattachDone) {
       restoredReattachDone = true;
-      for (const id of tabOrder) {
-        if (!id.startsWith("file:") && alive.has(id)) conn.attach(id);
-      }
+      // backgrounded 必须排除：那些会话不挂 TerminalView，attach 来的字节
+      // 无人消费。存量用户的 localStorage 里已经躺着泄漏的 tabOrder（见
+      // toBackground 的注释），所以这道过滤同时治存量。
+      for (const id of reattachOnRestore(tabOrder, alive, backgrounded)) conn.attach(id);
     }
     // R5: only assign when the order actually shrank — filter() always returns
     // a fresh array, which would retrigger the persist $effect + tab strip on
@@ -659,9 +660,7 @@
       return;
     }
     conn.detach(id); // backgrounded term tabs stop their output stream, same as toBackground
-    backgrounded.add(id);
-    backgrounded = new Set(backgrounded);
-    tabOrder = removeOrder(tabOrder, id);
+    ({ tabOrder, backgrounded } = backgroundTab(tabOrder, backgrounded, id));
     if (activeId === id) activeId = topSessions.filter((s) => s.name !== id)[0]?.name ?? "";
     if (activeTop === id) activeTop = "";
   }
@@ -719,8 +718,11 @@
     cancelSelection();
     copyMode = false;
     conn.detach(activeId); // R2: unsubscribe; reopening re-attaches via Terminal mount
-    backgrounded.add(activeId);
-    backgrounded = new Set(backgrounded);
+    // 2026-08-18：此前这里**漏了** tabOrder 的移除（closeTopTab 有、这里没有），
+    // 于是后台化会话永久留在 tabOrder → localStorage → 重进时被无条件 attach，
+    // 而它根本不挂 TerminalView，字节无人消费纯粹抢带宽。两条路径现在共用
+    // backgroundTab()，对称性是结构性的而不是靠人记住。
+    ({ tabOrder, backgrounded } = backgroundTab(tabOrder, backgrounded, activeId));
     activeId = topSessions[0]?.name ?? "";
   }
 

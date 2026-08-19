@@ -83,7 +83,10 @@
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
-  import { buildReseedPayload, buildReseedReport, ReseedGate, type ReseedTrigger } from "../lib/term/reseed";
+  import {
+    buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite,
+    historyExpectBytes, seedRetryDelayMs, SEED_MAX_ATTEMPTS, type ReseedTrigger,
+  } from "../lib/term/reseed";
   import { Connection } from "../lib/net/connection";
   import { decodeHistoryData } from "../lib/term/history-decode";
   import { DEFAULT_SETTINGS } from "../lib/settings";
@@ -119,6 +122,13 @@
   // 首屏 seed（term.history）。历史行数越多越慢——设置项说明原文就是
   // "越少越快"，说明这条早被识别为慢路径。此前纯黑等待、零反馈（14 期需求 5）。
   let seeding = $state(true);
+  // 首屏 seed 的失败态（2026-08-18）。此前失败只是把 seeding 关掉、什么都不说，
+  // 用户面对一个永远空白的终端且没有任何线索。seedRetrying = 正在退避重试中；
+  // seedFailed = 重试用尽，屏幕上留一个能点的重试入口。
+  let seedRetrying = $state(false);
+  let seedFailed = $state(false);
+  // onMount 内赋值（同 refit 的生命周期）：模板里的重试按钮要能调到它。
+  let retrySeed: () => void = () => {};
   let term: Terminal;
   let fit: FitAddon;
   // Plain `let term/fit` are NOT reactive — a visibility $effect keyed on them
@@ -399,11 +409,27 @@
     let probeFrames = 0;
     let probeBytes = 0;
     const pendingOut = new PendingBuffer();
+    // 优先级 4（2026-08-18）：reloadHistory 的 t0..t1 窗口旁录。
+    //
+    // 重灌期间到达的实时字节会被 t1 快照的 RIS 抹掉：快照里没有（拍摄时还没产生），
+    // RIS 又清屏 → **永久消失**。丢的是时间中段，所以症状是「Claude Code 大量输出时
+    // 中间几行不见了」而不是「最新几行不见了」。真机 rtt 中位 1931ms、最高 9283ms，
+    // 那是很宽的一个洞。
+    //
+    // 丢失的字节从来没离开过客户端，所以不必向服务端再要一次（补发 attach(h.seq)
+    // 那条路已被证伪：connection.ts 的 `if (subscribed || …) return` 在 seen 覆盖
+    // 之后 → 帧发不出去但 seen 已回退，且会形成 resync→重灌→attach→gap→resync
+    // 自激环）。窗口开着时旁录一份，快照到达时拼在后面重写即可。
+    //
+    // 复用 PendingBuffer 是为了白拿它的 2MB 上限与 dirty 语义：窗口内涌进超过上限
+    // 的字节时它自己丢弃并置 dirty，我们据此放弃回灌（宁可丢，也不能让一个卡住的
+    // 重灌把内存吃穿）。
+    let windowBuf: PendingBuffer | null = null;
     const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId !== sessionId) return;
       probeFrames++;
       probeBytes += f.data.byteLength;
-      if (active) { term.write(f.data); return; }
+      if (active) { term.write(f.data); windowBuf?.push(f.data); return; }
       if (closed) return;
       pendingOut.push(f.data);
     });
@@ -424,6 +450,51 @@
     // 故障后来又回来了。真正的解法是 xterm 上游注释里写的那条：用流内 RIS。
     // 载荷拼装与代际闸门在 lib/term/reseed.ts，那里有完整的实测记录。
     const reseedGate = new ReseedGate();
+
+    /**
+     * 上报一次重灌的诊断。
+     *
+     * 【2026-08-18 两处修正】
+     * 1) `bufferLenAfter` 由调用方在 `term.write(payload, cb)` 的**回调里**取。
+     *    xterm 的 write 是异步入队的（WriteBuffer 按 12ms 时间片解析），在 write
+     *    的同步下一行读 buffer.active.length 量到的是写入**之前**的状态。真机日志
+     *    「45% 的 reseed bufferLenBefore == bufferLenAfter」因此是测量假象而非
+     *    「快照白拉」：那 37 个样本 37/37 的 before 都等于 24（=rows），而
+     *    snapshotBytes 中位 20939 —— 数据明明拿到了。
+     * 2) 失败分支也要上报。此前 diag.report 在 `await conn.rpc()` 之后、同一个 try
+     *    内，外层是空 catch，于是 history 一超时就零日志 —— 82 条样本全是幸存者，
+     *    越糟的链路越不出现在统计里。
+     */
+    const reportReseed = (
+      trigger: ReseedTrigger,
+      startedAt: number, framesAtStart: number, bytesAtStart: number,
+      lenBefore: number, lenAfter: number,
+      snapshotBytes: number, discarded: boolean, error?: string,
+    ) => {
+      try {
+        void conn.rpc("diag.report", {
+          tag: sessionId,
+          ...buildReseedReport({
+            trigger,
+            rttMs: Date.now() - startedAt,
+            discarded,
+            snapshotBytes,
+            framesDuringAwait: probeFrames - framesAtStart,
+            bytesDuringAwait: probeBytes - bytesAtStart,
+            bufferLenBefore: lenBefore,
+            bufferLenAfter: lenAfter,
+            error,
+          }),
+        }).catch(() => {});
+      } catch { /* 探针永不影响终端本身 */ }
+    };
+
+    /** rpc 失败原因的短标签。只取 code/message，绝不带响应体（日志会被贴进公开 issue）。 */
+    const errLabel = (e: unknown): string => {
+      const x = e as { code?: string; message?: string } | null;
+      return String(x?.code ?? x?.message ?? "error").slice(0, 120);
+    };
+
     const reloadHistory = async (trigger: ReseedTrigger = "alt-normal") => {
       if (currentBuffer !== "normal") return;
       const gen = reseedGate.begin();
@@ -433,35 +504,46 @@
       const framesAtStart = probeFrames;
       const bytesAtStart = probeBytes;
       const lenBefore = term.buffer.active.length;
+      // t0：开窗旁录。上一代若还开着窗（乱序返回），它的字节归新一代 —— 代际闸门
+      // 会把旧快照整份丢弃，旧窗口跟着旧快照走就等于白丢，跟着新快照走才不丢。
+      const win = new PendingBuffer();
+      windowBuf = win;
       try {
-        const h = (await conn.rpc("term.history", { session: sessionId, lines: historyLines })) as TermHistoryResult;
+        const h = (await conn.rpc(
+          "term.history", { session: sessionId, lines: historyLines },
+          // 让死线把响应体算进去。不传的话 N 个并发重灌与 1 个拿到完全相同的
+          // 10s 死线，8 tab 同时重进时后面的 lane 必然假超时（见 reseed.ts）。
+          { expectBytes: historyExpectBytes(historyLines) },
+        )) as TermHistoryResult;
         // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
         const stale = reseedGate.isStale(gen);
         const data = stale ? "" : await decodeHistoryData(h?.data ?? "", h?.enc);
+        // 过期的一代不许动窗口：它的旁录已经归给新一代了（windowBuf 早被覆盖）。
+        // dirty 表示窗口内涌进的字节超过 2MB 上限、已被 PendingBuffer 丢弃，
+        // 此时拿到的是**残缺**的字节流，回灌反而会写出错乱的屏幕 —— 宁可只写快照。
+        const windowBytes = stale || win.dirty ? null : win.take();
+        if (!stale) { windowBuf = null; }
         // await 期间组件可能已卸载，或 pane 已切进 alt buffer（那里 capture-pane
         // 拿到的东西没有意义）。两者都不该再写。
         //
-        // RIS 与内容必须拼进**同一次** write：拆成两次虽然队列里也有序，但中间
-        // 会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
+        // RIS、快照、窗口旁录必须拼进**同一次** write：拆成两次虽然队列里也有序，
+        // 但中间会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
         if (!stale && !destroyed && currentBuffer === "normal") {
-          term.write(buildReseedPayload(data));
+          term.write(concatReseedWrite(buildReseedPayload(data), windowBytes), () => {
+            // 回调触发 = 这批字节已解析完，此刻的行数才是真的（见 reportReseed）。
+            reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
+              term.buffer.active.length, data.length, stale);
+          });
+        } else {
+          reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
+            term.buffer.active.length, data.length, stale);
         }
-        try {
-          void conn.rpc("diag.report", {
-            tag: sessionId,
-            ...buildReseedReport({
-              trigger,
-              rttMs: Date.now() - startedAt,
-              discarded: stale,
-              snapshotBytes: data.length,
-              framesDuringAwait: probeFrames - framesAtStart,
-              bytesDuringAwait: probeBytes - bytesAtStart,
-              bufferLenBefore: lenBefore,
-              bufferLenAfter: term.buffer.active.length,
-            }),
-          }).catch(() => {});
-        } catch { /* 探针永不影响终端本身 */ }
-      } catch { /* best-effort */ }
+      } catch (e) {
+        // 失败也要留下窗口的字节：它们已经写进 xterm 了，没有 RIS 来抹，不必回灌。
+        if (windowBuf === win) windowBuf = null;
+        reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
+          term.buffer.active.length, 0, false, errLabel(e));
+      }
     };
 
     // 首屏 seed：拉一份快照写进空白终端，然后用快照的 seq 订阅之后的增量。
@@ -473,22 +555,73 @@
     //
     // 失败也必须 attach —— 否则首屏空白之外连实时输出都收不到。此时退回
     // attach(0)（不带 seed），走原来的 replay 重放路径兜底。
-    const seedFromHistory = async () => {
+    //
+    // 【2026-08-18 优先级 1b】此前的 catch 只做一次 attach(0)、finally 里把
+    // seeding 关掉，于是失败=**永久吸收态**：无重试、无提示、无埋点。而此后三条
+    // 重灌路径在该场景下全部不触发（alt-normal 因 appliedMode 初值就是 "normal"
+    // 而永不发生；stash-dirty 在 87 条生产日志里 0 次；resync 要服务端主动发），
+    // 结果就是用户报告的「8 个 tab 重进全部空白，关掉重开才好」——「重开才好」
+    // 恰恰因为只有重新挂载才能再走一次本函数。
+    //
+    // 现在：退避重试 SEED_MAX_ATTEMPTS 次，全用尽后**保留可见且可点的重试入口**，
+    // 而不是让提示静默消失。
+    let seedTimer: ReturnType<typeof setTimeout> | undefined;
+    const seedFromHistory = async (attempt = 0) => {
+      // 重试成功后这三个必须一起归位：只清 seeding 的话，内容出来了却一直盖着
+      // 一层「正在重试」的半透明提示。
+      seedFailed = false;
+      seedRetrying = false;
+      seeding = true;
+      const startedAt = Date.now();
+      const framesAtStart = probeFrames;
+      const bytesAtStart = probeBytes;
+      const lenBefore = term.buffer.active.length;
       try {
-        const h = (await conn.rpc("term.history", { session: sessionId, lines: historyLines })) as TermHistoryResult;
+        const h = (await conn.rpc(
+          "term.history", { session: sessionId, lines: historyLines },
+          { expectBytes: historyExpectBytes(historyLines) },
+        )) as TermHistoryResult;
+        if (destroyed) return;
+        let text = "";
         if (h?.data) {
           // 保持首屏语义不变：**不带 RIS**（终端此刻本就是空的，见上方注释），
           // 只做换行规范化。这里刻意不走 buildReseedPayload —— 那是重灌路径的
           // 载荷，会多一个 RIS 前缀。变的只有解码这一段。
-          term.write((await decodeHistoryData(h.data, h.enc)).replace(/\n/g, "\r\n"));
+          text = (await decodeHistoryData(h.data, h.enc)).replace(/\n/g, "\r\n");
+          term.write(text, () => {
+            reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
+              term.buffer.active.length, text.length, false);
+          });
+        } else {
+          reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
+            term.buffer.active.length, 0, false);
         }
         conn.attach(sessionId, h?.seq ?? 0, { seed: true });
-      } catch {
-        conn.attach(sessionId);
-      } finally {
         seeding = false;
+      } catch (e) {
+        if (destroyed) return;
+        // 首屏路径此前**零埋点**，而它才是「重进应用」的主路径 —— 首屏空白在日志里
+        // 一个直接证据都没有。这条补上后才谈得上验证修复。
+        reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
+          term.buffer.active.length, 0, false, errLabel(e));
+        // 实时流先接上（不带 seed，走 replay 兜底），这样即使快照始终拉不到，
+        // 新产生的输出仍然看得见 —— 与旧行为一致，只是不再到此为止。
+        conn.attach(sessionId);
+        if (attempt + 1 < SEED_MAX_ATTEMPTS) {
+          seeding = false;
+          seedRetrying = true;
+          seedTimer = setTimeout(() => { seedTimer = undefined; void seedFromHistory(attempt + 1); }, seedRetryDelayMs(attempt));
+          return;
+        }
+        // 重试用尽：把失败摆在屏幕上，并留一个能点的入口。静默消失才是最坏的
+        // 结果 —— 用户面对的是一个永远空白且没有任何线索的终端。
+        seeding = false;
+        seedRetrying = false;
+        seedFailed = true;
       }
     };
+    /** 手动重试（模板里的按钮）。从第 0 次重新计数，用户愿意再等就再给三次。 */
+    retrySeed = () => { if (!destroyed) void seedFromHistory(0); };
 
     // Activation path (R1). A dirty stash means the byte stream is incomplete,
     // so replaying it would corrupt the screen: reseed from tmux instead — or,
@@ -502,7 +635,13 @@
         return;
       }
       const data = pendingOut.take();
-      if (data) term.write(data);
+      if (data) {
+        term.write(data);
+        // 与 onOutput 的 active 分支对称：重灌在路上时切走又切回，这批字节同样是
+        // 「写进了 xterm 却不在快照里」的内容，t1 的 RIS 照样抹。旁录路径只有
+        // 这两个入口，两个都要挂上。
+        windowBuf?.push(data);
+      }
     };
 
     activateRefit = () => {
@@ -700,6 +839,8 @@
       unsubscribeOutput?.();
       unsubscribeInput?.();
       if (resizeDebounce) clearTimeout(resizeDebounce);
+      // 卸载时挂起的首屏重试必须撤掉：它会向一个已 dispose 的终端写字节。
+      if (seedTimer) { clearTimeout(seedTimer); seedTimer = undefined; }
       stopPoll(); // also drops a pending input-debounced classify
       // Release the WebGL addon BEFORE the terminal: it also stops any pending
       // context-loss handler from rebuilding a renderer onto a dead terminal.
@@ -775,12 +916,20 @@
 
 <div class="term-wrap" class:hidden={!active}>
   <div class="term" class:closed bind:this={host}></div>
-  {#if seeding}
+  {#if seeding || seedRetrying}
     <div class="term-seed">
-      <span>{$t('terminal.seeding')}</span>
+      <span>{seedRetrying ? $t('terminal.seedRetrying') : $t('terminal.seeding')}</span>
       <!-- delayMs={0}：这条路径**已知必然慢**（tmux capture + gzip + 可能分片），
            不需要延迟判断。 -->
       <ProgressLine delayMs={0} />
+    </div>
+  {:else if seedFailed}
+    <!-- 首屏重试用尽（2026-08-18）。此前这里什么都不显示，用户看到的是一个
+         永远空白、毫无线索的终端，只能靠关掉重开撞运气。pointer-events 要放开，
+         否则按钮点不动（.term-seed 上是 none）。 -->
+    <div class="term-seed term-seed-failed">
+      <span>{$t('terminal.seedFailed')}</span>
+      <button class="term-seed-retry" type="button" onclick={() => retrySeed()}>{$t('terminal.seedRetry')}</button>
     </div>
   {/if}
 </div>
@@ -796,6 +945,17 @@
     pointer-events: none;
   }
   .term-seed :global(.pl) { max-width: 180px; }
+  /* 失败态要能点，所以单独放开 pointer-events（.term-seed 整体是 none）。 */
+  .term-seed-failed { pointer-events: auto; }
+  .term-seed-retry {
+    padding: 6px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.78rem;
+  }
   .term {
     width: 100%;
     height: 100%;
