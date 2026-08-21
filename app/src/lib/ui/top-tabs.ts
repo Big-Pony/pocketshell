@@ -155,3 +155,23 @@ export function groupByKind(order: string[], fileIds: Set<string>): string[] {
   for (const id of order) (fileIds.has(id) ? files : terms).push(id);
   return [...terms.reverse(), ...files.reverse()];
 }
+
+// ── 后台化与重进重连（2026-08-18，docs/需求/2026-08-18-多会话空白与输出丢失）──
+//
+// 这个函数存在的唯一理由是**对称性要结构化**。原来 closeTopTab 记得
+// `tabOrder = removeOrder(...)` 而 toBackground 忘了，两条同语义的路径靠人去记，
+// 结果就是漏了一处、且漏得很安静：后台化会话永久留在 tabOrder，落进 localStorage
+// 后再也出不来，tab 条的持久化顺序里永远躺着一批看不见的 id。
+//
+// 【2026-08-19】此处原先还有第二重危害：App 重进时会遍历 tabOrder 无条件
+// attach，于是这些泄漏 id 会被订阅实时流，而它们不挂 TerminalView（topSessions
+// 排除 backgrounded），字节 100% 无人消费。那个预先 attach 循环已整体删除
+// （见 App.svelte 的 onSessions 注释），所以这一重危害不复存在 —— 与之配套的
+// reattachOnRestore 过滤函数也一并删了，别再去找它。
+
+/** 把一个会话后台化：移出 tab 条，记进 backgrounded。返回新值（Svelte 靠新引用触发）。 */
+export function backgroundTab(
+  order: string[], backgrounded: Set<string>, id: string,
+): { tabOrder: string[]; backgrounded: Set<string> } {
+  return { tabOrder: removeOrder(order, id), backgrounded: new Set([...backgrounded, id]) };
+}

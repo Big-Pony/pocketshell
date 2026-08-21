@@ -15,7 +15,7 @@
   import BottomBar from "./components/BottomBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import type { LinkMetrics } from "./lib/net/connection";
-  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, groupByKind, type TopTab } from "./lib/ui/top-tabs";
+  import { openOrReuseFileTab, closeFileTab, filePathFromTabId, replaceTabPath, cycle, stepClamp, appendOrder, removeOrder, visibleOrder, groupByKind, backgroundTab, type TopTab } from "./lib/ui/top-tabs";
   import DeviceManager from "./components/DeviceManager.svelte";
   import Keyboard from "./components/Keyboard.svelte";
   import SnippetPanel from "./components/SnippetPanel.svelte";
@@ -297,22 +297,26 @@
     updPct = u.pct ?? null;
     updMsg = u.message ?? null;
   });
-  // Guard so restored session tabs are re-attached exactly once (on the first
-  // sessions snapshot after a reload). `sessions` is re-broadcast every ~3s, and
-  // TerminalView attaches on its own mount + Connection re-attaches on reconnect,
-  // so repeating the loop each broadcast would only send redundant attach frames.
-  let restoredReattachDone = false;
+  // 【2026-08-19 删除「重进时预先 attach」】这里曾对每个存活标签页发一次
+  // conn.attach(id)（不带 seq ⇒ lastSeq=0），本意是「恢复被还原的标签页」。
+  // 它在真机上是首屏卡顿与多 tab 空白的主要燃料，原因有两层：
+  //   1) lastSeq=0 让服务端整环回放 —— 单个会话实测 2384 帧 / 221406B，而这些
+  //      字节紧接着就会被 seedFromHistory 的 tmux 快照覆盖，纯属白传；
+  //   2) 更要命的是它**吞掉**真正该发的那次 attach：connection.ts 的
+  //      `if (subscribed || ...) return` 位于 seen 覆盖之后，于是随后
+  //      attach(h.seq, {seed:true}) 只改记账、不发帧（connection.test.ts 有
+  //      配对断言锁住这两条）。结果是唯一上线的 attach 永远是 lastSeq=0。
+  // 8 个 tab 各来一份 221KB ≈ 1.7MB，直接顶穿服务端 1MB 高水位触发背压丢帧。
+  //
+  // 不需要任何替代品：topSessions 里的每个会话都挂 TerminalView，其 onMount
+  // 调 seedFromHistory，内部负责 attach（失败时退回 attach(0) 兜底）。差集
+  // 只有「alive 但 attached=false」的外部空闲会话，它们只出现在任务面板、
+  // 不挂 TerminalView，attach 来的字节本就无人消费。
   conn.onSessions((list) => {
     sessions = mergeSessions(sessions, list);
     // Drop dead sessions from the order + focus so the strip only shows sessions
-    // the server still has; re-attach any restored-but-alive session tabs once.
+    // the server still has.
     const alive = new Set(sessions.map((s) => s.name));
-    if (!restoredReattachDone) {
-      restoredReattachDone = true;
-      for (const id of tabOrder) {
-        if (!id.startsWith("file:") && alive.has(id)) conn.attach(id);
-      }
-    }
     // R5: only assign when the order actually shrank — filter() always returns
     // a fresh array, which would retrigger the persist $effect + tab strip on
     // every ~3s broadcast even when nothing changed. Same length ⇒ identical.
@@ -659,9 +663,7 @@
       return;
     }
     conn.detach(id); // backgrounded term tabs stop their output stream, same as toBackground
-    backgrounded.add(id);
-    backgrounded = new Set(backgrounded);
-    tabOrder = removeOrder(tabOrder, id);
+    ({ tabOrder, backgrounded } = backgroundTab(tabOrder, backgrounded, id));
     if (activeId === id) activeId = topSessions.filter((s) => s.name !== id)[0]?.name ?? "";
     if (activeTop === id) activeTop = "";
   }
@@ -719,8 +721,11 @@
     cancelSelection();
     copyMode = false;
     conn.detach(activeId); // R2: unsubscribe; reopening re-attaches via Terminal mount
-    backgrounded.add(activeId);
-    backgrounded = new Set(backgrounded);
+    // 2026-08-18：此前这里**漏了** tabOrder 的移除（closeTopTab 有、这里没有），
+    // 于是后台化会话永久留在 tabOrder → localStorage → 重进时被无条件 attach，
+    // 而它根本不挂 TerminalView，字节无人消费纯粹抢带宽。两条路径现在共用
+    // backgroundTab()，对称性是结构性的而不是靠人记住。
+    ({ tabOrder, backgrounded } = backgroundTab(tabOrder, backgrounded, activeId));
     activeId = topSessions[0]?.name ?? "";
   }
 

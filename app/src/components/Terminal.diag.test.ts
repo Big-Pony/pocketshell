@@ -79,14 +79,17 @@ test("a failing report never propagates — diagnostics must not break the sessi
   await new Promise((r) => setTimeout(r, 10));
   window.removeEventListener("unhandledrejection", onRejection);
 
-  // 三条上报都失败也不能互相牵连、更不能抛出未捕获拒绝：
+  // 四条上报都失败也不能互相牵连、更不能抛出未捕获拒绝：
   //   - 激活时的 scroll 快照（tag 带 /activate，2026-08-09 加的切 tab 取证）
   //   - visibilitychange 的 atlas 与 scroll 两条
+  //   - 首屏 seed 那条 reseed（2026-08-18 补的，此前首屏路径**零埋点**，
+  //     于是「重进应用全部空白」在日志里一个直接证据都没有）
   const calls = diagCalls(rpc);
-  expect(calls.length).toBe(3);
+  expect(calls.length).toBe(4);
   const tags = calls.map((c) => (c[1] as { tag?: string })?.tag);
   expect(tags.filter((t) => t === "s-diag2/activate").length).toBe(1);
-  expect(tags.filter((t) => t === "s-diag2").length).toBe(2);
+  expect(tags.filter((t) => t === "s-diag2").length).toBe(3);
+  expect(calls.filter((c) => (c[1] as { kind?: string })?.kind === "reseed").length).toBe(1);
   expect(onRejection).not.toHaveBeenCalled();
 });
 

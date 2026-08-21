@@ -1,6 +1,6 @@
 // app/src/demo/agent.test.ts
 import { test, expect } from "vitest";
-import { DemoAgent, DEMO_SESSIONS, REPLAY_CAP } from "./agent";
+import { DemoAgent, DEMO_SESSIONS, REPLAY_CAP, GAP_BACKFILL_FRAMES } from "./agent";
 import type { ServerMsg } from "../lib/net/protocol";
 
 /** 收集 agent 推出的所有帧，便于断言。 */
@@ -318,4 +318,40 @@ test("空回车只给提示符，不报错", () => {
   const text = h.only("output").map((o) => decode(o.data)).join("");
   expect(text).not.toContain("No such file");
   expect(text.trimEnd().endsWith("$")).toBe(true);
+});
+
+test("gap 时只补发最新的一小段，不倒整个缓冲（对齐真 agent 的 GAP_BACKFILL_BUDGET）", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.detachTransport();
+  for (let i = 0; i < REPLAY_CAP + 5; i++) h.agent.emitOutput("claude-refactor", `x${i}`);
+
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 0 });
+
+  expect(after.some((m) => m.type === "resync")).toBe(true);
+  const outs = after.filter((m) => m.type === "output");
+  // 仍然发帧：前端的 seen 只由 output 帧推进，一帧不发 = 粘性 resync 循环。
+  expect(outs.length).toBeGreaterThan(0);
+  expect(outs.length).toBeLessThan(REPLAY_CAP);
+  expect(outs.length).toBe(GAP_BACKFILL_FRAMES);
+  // 发的是**最新**的那一段（末帧就是缓冲里最新的一帧）。
+  const last = outs.at(-1) as Extract<ServerMsg, { type: "output" }>;
+  expect(decode(last.data)).toBe(`x${REPLAY_CAP + 4}`);
+});
+
+test("无 gap 时补齐仍然完整（限量只作用于 gap 分支）", () => {
+  const h = harness();
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor" });
+  h.agent.detachTransport();
+  // 不溢出缓冲 → 无 gap。哪怕帧数超过 gap 预算的条数，也必须一帧不少。
+  for (let i = 0; i < 60; i++) h.agent.emitOutput("claude-refactor", `y${i}`);
+
+  const after: ServerMsg[] = [];
+  h.agent.setPush((m) => after.push(m));
+  h.agent.handle({ type: "attach", sessionId: "claude-refactor", lastSeq: 0 });
+
+  expect(after.filter((m) => m.type === "resync")).toEqual([]);
+  expect(after.filter((m) => m.type === "output").length).toBe(60);
 });

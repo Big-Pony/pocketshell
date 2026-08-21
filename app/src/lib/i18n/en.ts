@@ -332,6 +332,9 @@ curl -fsSL https://pocketshell.net/install.sh | sh
   },
   terminal: {
     seeding: "Loading session history…",
+    seedRetrying: "Timed out — retrying…",
+    seedFailed: "Could not load session history",
+    seedRetry: "Retry",
   },
   keyboard: {
     tab: {

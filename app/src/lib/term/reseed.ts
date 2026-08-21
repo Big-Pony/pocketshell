@@ -49,8 +49,17 @@ export class ReseedGate {
   }
 }
 
-/** 重灌的触发来源。埋点按它区分路径，故障复现后可直接定位。 */
-export type ReseedTrigger = "alt-normal" | "stash-dirty" | "resync";
+/**
+ * 重灌的触发来源。埋点按它区分路径，故障复现后可直接定位。
+ *
+ * "seed" 是首屏那次（seedFromHistory），2026-08-18 补上。此前它**完全没有埋点**，
+ * 而它才是「重进应用」的主路径 —— 日志里 82 条 reseed 全来自 resync/alt-normal，
+ * 首屏空白这个用户实际报告的故障在日志里一个直接证据都没有。
+ *
+ * agent 侧 diag-report.ts 对 trigger 是「任意字符串过 oneLine」，不是枚举白名单，
+ * 所以加值不需要动 agent。
+ */
+export type ReseedTrigger = "alt-normal" | "stash-dirty" | "resync" | "seed";
 
 export interface ReseedReportInput {
   trigger: ReseedTrigger;
@@ -64,6 +73,17 @@ export interface ReseedReportInput {
   bytesDuringAwait: number;
   bufferLenBefore: number;
   bufferLenAfter: number;
+  /**
+   * 失败原因（只放 Error.message / code，绝不放响应体）。成功时不传。
+   *
+   * 2026-08-18：此前 diag.report 位于 `await conn.rpc()` **之后**、且在同一个
+   * try 内，外层是空 catch —— term.history 一旦超时，这次 reseed 不产生任何
+   * 日志。于是所有量化都建立在幸存者样本上，越是故障严重的链路越不出现在日志里。
+   *
+   * `error` 已在 agent 白名单里（diag-report.ts 的 `if (typeof p.error === "string")`），
+   * 所以补这条不需要动 agent 侧。
+   */
+  error?: string;
 }
 
 /**
@@ -84,6 +104,8 @@ export function buildReseedReport(input: ReseedReportInput): Record<string, unkn
     bytesDuringAwait: input.bytesDuringAwait,
     bufferLenBefore: input.bufferLenBefore,
     bufferLenAfter: input.bufferLenAfter,
+    // 成功样本的形状保持不变：不传就不出现这个键，日志里一眼能分成败两类。
+    ...(input.error ? { error: input.error } : {}),
   };
 }
 
@@ -113,4 +135,70 @@ export function buildRpcReport(input: RpcReportInput): Record<string, unknown> {
     rawBytes: input.rawBytes,
     chunks: input.chunks,
   };
+}
+
+// ── term.history 的死线记账（2026-08-18，优先级 1a）──
+//
+// connection.ts 的 rpc 死线按「排在前面 + 自己」的字节数放大，但那只算**出站**
+// 字节，除非调用方用 opts.expectBytes 显式告知响应体多大。全项目此前只有下载
+// 路径（transfer.ts:281/332）在传，term.history 不传 —— 于是 8 个 tab 同时重进
+// 时，8 个并发 history 与 1 个拿到**完全相同**的 10 秒死线：每个 lane 都以为自己
+// 只排了两百来字节，而实际要等前面 7 份快照先排空。
+//
+// 这不是「保守裕度」，是与下载路径同一个 bug 的第二个实例（connection.ts:305-308
+// 的注释自述过一次）。真机日志里 9283ms 那条 rtt 大概率就是被 10 秒死线截断的右端。
+//
+// 每行多少字节：真机 8 会话实测，压缩后 8~22KB / 原始 40~83KB（1000 行），
+// base64 再膨胀 4/3 → 上线约 11~30KB，即 11~30 B/行。取 30 是这个区间的上沿，
+// 因为**高估的代价远小于低估**：高估只是在健康链路上多给几秒宽限（死线本来就
+// 只是「慢到这个程度也不该判死」的下界），低估则等于没修。
+export const HISTORY_WIRE_BYTES_PER_LINE = 30;
+
+/** term.history 响应体的字节估算。精度不重要，量级正确即可（见上方注释）。 */
+export function historyExpectBytes(lines: number): number {
+  if (!Number.isFinite(lines) || lines <= 0) return 0;
+  return Math.floor(lines) * HISTORY_WIRE_BYTES_PER_LINE;
+}
+
+// ── 首屏 seed 的退避重试（2026-08-18，优先级 1b）──
+//
+// 旧实现的 catch 里只做 `conn.attach(sessionId)`（lastSeq=0，反而触发整环重放），
+// finally 里 `seeding = false` 把进度提示关掉 —— 无重试、无提示、无埋点。
+// 而此后三条重灌路径在该场景下**全部不触发**：alt-normal 因 appliedMode 初值就是
+// "normal" 而永不发生；stash-dirty 在 87 条生产日志里出现 0 次；resync 要服务端主动
+// 发。结果是**永久空白**，用户报告的正是「8 个 tab 重进全部空白，关掉重开才好」。
+//
+// 「关掉重开就好」这个现象本身就是证据：只有重新挂载能再走一次 seedFromHistory。
+// 那就让它自己再走一次。
+export const SEED_MAX_ATTEMPTS = 3;
+
+/** 第 n 次失败后等多久再试（指数退避 + 上限）。attempt 从 0 开始。 */
+export function seedRetryDelayMs(attempt: number): number {
+  return Math.min(30_000, 800 * Math.pow(3, Math.max(0, attempt)));
+}
+
+// ── 重灌载荷 + 窗口旁录的合并（2026-08-18，优先级 4）──
+//
+// reloadHistory 的 t0..t1 窗口（真机 rtt 中位 1931ms、最高 9283ms）里，PTY 输出
+// 照常写进 xterm，然后 t1 到达的快照用 RIS 把它们清掉：这些字节**快照里没有**
+// （拍摄时还没产生）、RIS 又抹掉 → 永久消失。丢的是时间中段，所以症状是
+// 「中间几行消失」而不是「最新几行消失」。
+//
+// 核心洞察：**丢失的字节从来没离开过客户端**，只是被 RIS 抹了。所以不需要向
+// 服务端再要一次（补发 attach(h.seq) 那条路已被证伪：connection.ts:840 的
+// `if (subscribed || …) return` 在 seen 覆盖之后，重灌路径下帧发不出去但 seen
+// 已被回退，且会形成 resync→重灌→attach→gap→resync 自激环）。窗口内的字节旁录
+// 在本地，快照到达时接在后面重写一遍即可。
+//
+// 必须走**字节**而不是字符串：实时帧可能在一个多字节字符中间被切开，两帧各自
+// decode 会各产生一个 U+FFFD，拼起来就是两个乱码方块（终端里中文很常见）。
+// 而且 RIS + 快照 + 窗口三段**必须拼进同一次 write** —— 拆成两次虽然队列里也
+// 有序，但中间会插进新的实时帧（见本文件顶部的实测记录）。
+export function concatReseedWrite(payload: string, window: Uint8Array | null): string | Uint8Array {
+  if (!window || window.byteLength === 0) return payload;
+  const head = new TextEncoder().encode(payload);
+  const out = new Uint8Array(head.byteLength + window.byteLength);
+  out.set(head, 0);
+  out.set(window, head.byteLength);
+  return out;
 }

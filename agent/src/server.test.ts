@@ -987,8 +987,14 @@ test("attach with an evicted lastSeq sends a resync before backfill frames", asy
   await Bun.sleep(150);
   const resync = got.find((m) => m.type === "resync");
   expect(resync).toEqual({ type: "resync", sessionId: "x", from: 3 });
+  // gap 分支现在按字节预算限量（replay.ts 的 GAP_BACKFILL_BUDGET_BYTES）。
+  // 这里整个积压才 2 字节，远在预算内 → 仍是完整的 [3, 4]。**限量本身**的
+  // 覆盖在 server-output.test.ts（积压 >> 预算的用例），这条守的是另一件事：
+  // gap 时**仍然有帧发出**（客户端的 seen 只由 output 帧推进，一帧不发就是
+  // 粘性 resync 循环）、且 resync 排在它们前面。
   const outSeqs = got.filter((m) => m.type === "output").map((m) => m.seq);
   expect(outSeqs).toEqual([3, 4]);
+  expect(outSeqs.length).toBeGreaterThan(0);
   const resyncIdx = got.findIndex((m) => m.type === "resync");
   const firstOutputIdx = got.findIndex((m) => m.type === "output");
   expect(resyncIdx).toBeLessThan(firstOutputIdx);

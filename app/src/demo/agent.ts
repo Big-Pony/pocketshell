@@ -37,6 +37,21 @@ const enc = new TextEncoder();
 // 环形缓冲上限。演示不需要真 agent 那样按字节算，条数足够——一幕戏几十帧。
 export const REPLAY_CAP = 500;
 
+// gap 补发上限（2026-08-19，对齐真 agent 的 GAP_BACKFILL_BUDGET_BYTES）。
+//
+// gap 已经宣告「你落后太多、请重灌」，再把整个缓冲倒下去纯属白费带宽——真机
+// 上 8 tab 场景约 2MB 白传，把 term.history 顶到超时、屏幕全空白。
+//
+// **单位是帧数而不是字节**，与真 agent 不同：真 agent 的环按字节封顶（256KB），
+// 故预算也按字节；演示的环按条数封顶（REPLAY_CAP），一个按真机屏幕算出来的
+// 32KB 预算在这里永远触不到底（一幕戏总共才几 KB），限量就等于没写、演示与
+// 线上行为分叉。取「一屏的行数」量级，语义一致。
+//
+// **仍然要发帧、不能干脆跳过重放**：前端的 `seen` 只由 output 帧推进
+// （connection.ts），一帧不发会让 seen 永久钉死 → 每次重连必再判 gap →
+// 粘性 resync 循环。详见 agent/src/replay.ts 的长注释。
+export const GAP_BACKFILL_FRAMES = 40;
+
 // 演示的预览 token 是个常量：配合演示包里真实存在的 public-demo/preview/demo/**
 // 静态文件（由 vite.config 的 demoAssets() 插件只在演示构建里拷进 dist），
 // FilePreview 拼出的 /preview/demo/<relpath> 就是一个普通静态请求。
@@ -223,7 +238,8 @@ export class DemoAgent {
    * 断线补齐：吐出该会话所有 seq > lastSeq 的缓冲帧。
    *
    * 若 lastSeq 早于缓冲里最老的一帧，说明中间有内容已被挤掉——按真 agent 的
-   * 语义下发 resync，让前端知道「这段补不全」而不是假装完整。
+   * 语义下发 resync，让前端知道「这段补不全」而不是假装完整，并且只补发最新
+   * 的一小段（GAP_BACKFILL_FRAMES）而不是整个缓冲。
    */
   private replayFrom(sessionId: string, lastSeq: number): void {
     // `this.replay` 是跨会话共享的单一环形缓冲，replay[0] 可能属于别的会话——
@@ -231,11 +247,13 @@ export class DemoAgent {
     // 会误伤这个会话（明明没漏任何帧也被判定为有缺口而下发 resync）。
     const mine = this.replay.filter((f) => f.sessionId === sessionId);
     const oldest = mine.length ? mine[0].seq : lastSeq + 1; // 该会话缓冲里没有帧：没有缺口可报
-    if (lastSeq + 1 < oldest) this.send({ type: "resync", sessionId, from: oldest });
-    for (const f of mine) {
-      if (f.seq <= lastSeq) continue;
-      this.send({ type: "output", ...f });
-    }
+    const gap = lastSeq + 1 < oldest;
+    if (gap) this.send({ type: "resync", sessionId, from: oldest });
+    const pending = mine.filter((f) => f.seq > lastSeq);
+    // gap 时只补发最新的一段（为什么不能一帧都不发，见 GAP_BACKFILL_FRAMES）。
+    // **非 gap 路径一帧都不能少**——那是正常的断线补齐，前端不会重灌。
+    const send = gap ? pending.slice(-GAP_BACKFILL_FRAMES) : pending;
+    for (const f of send) this.send({ type: "output", ...f });
   }
 
   /**

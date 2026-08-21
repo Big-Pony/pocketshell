@@ -24,7 +24,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -99,6 +99,15 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
       if (v !== undefined) out[k] = v;
     }
     if (typeof p.error === "string") out.error = oneLine(p.error, MAX_ERROR);
+    // attach 埋点（2026-08-19）。**唯一由 agent 自己产出、不经客户端的 kind**
+    // —— 见 server.ts 的 attach 分支。走同一条格式化是为了让日志里只有一种
+    // 结构化行，用户 grep [pocketshell:diag] 就能一次拿全。`tag` 是 sessionId，
+    // 与其它 kind 的用法一致（会话名是用户自己起的，不含终端内容）。
+    if (typeof p.gap === "boolean") out.gap = p.gap;
+    for (const k of ["lastSeq", "frames", "bytes"] as const) {
+      const v = num(p[k]);
+      if (v !== undefined) out[k] = v;
+    }
     // 12 期 rpc 压缩埋点。只放计数与方法名，绝不放载荷内容——这条日志用户
     // 可能直接贴进公开 issue。method 与 tag 同样过 oneLine + 长度上限。
     // 字段名与 app/src/lib/term/reseed.ts 的 buildRpcReport 逐字对应，漂移是

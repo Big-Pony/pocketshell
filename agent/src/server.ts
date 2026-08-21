@@ -7,7 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { loadConfig, type AgentConfig, resolveTlsMaterial, buildPairingString, resolveAdvertise } from "./config";
 import { TerminalService } from "./terminal";
 import { ShellService } from "./shell-service";
-import { ReplayService } from "./replay";
+import { ReplayService, tailWithinBudget, GAP_BACKFILL_BUDGET_BYTES } from "./replay";
 import { OutputBatcher } from "./output-batcher";
 import { sweepTmp } from "./fs-service";
 import { RPC_FIT_SAFE_BYTES, RPC_CHUNK_PAYLOAD_BYTES, chunkRpcPayload } from "./rpc-fit";
@@ -38,6 +38,7 @@ import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireO
 import { ContextStore } from "./context-store";
 import { AI_TOOLS, type AiTool } from "./ai-context";
 import { dispatchRpc } from "./rpc-router";
+import { formatDiagReport } from "./diag-report";
 import { runCli } from "./cli-entry";
 
 // 入参可选：调用点的 `tool` 来自解析后的 JSON body（`tool?: string`）。收窄成
@@ -652,9 +653,23 @@ export function startServer(deps: Deps = {}) {
         // The replay backfill below is itself the resync for this conn, so any
         // pending backpressure-resync flag for the session is stale.
         conn.needsResyncSessions.delete(msg.sessionId);
-        const { frames, gap, oldestSeq } = replay.since(msg.sessionId, msg.lastSeq ?? 0);
+        const lastSeq = msg.lastSeq ?? 0;
+        const { frames, gap, oldestSeq } = replay.since(msg.sessionId, lastSeq);
         if (gap) sendSecure(conn, { type: "resync", sessionId: msg.sessionId, from: oldestSeq });
-        for (const f of frames) sendSecure(conn, { type: "output", sessionId: f.sessionId, seq: f.seq, data: toB64(f.data) });
+        // gap 时只补发最新的一段（预算与「为什么不能干脆不发」的四个反例见
+        // replay.ts 的 GAP_BACKFILL_BUDGET_BYTES 注释）。**非 gap 路径一个字节
+        // 都不能动**——那是正常的断线补齐，客户端不会重灌，少一帧就是真丢字节。
+        const send = gap ? tailWithinBudget(frames, GAP_BACKFILL_BUDGET_BYTES) : frames;
+        for (const f of send) sendSecure(conn, { type: "output", sessionId: f.sessionId, seq: f.seq, data: toB64(f.data) });
+        // attach 分支此前不打任何日志，整条「整环重放制造字节洪水」的根因链只能
+        // 靠客户端埋点 + 数值指纹推断。这一行给出服务端直接佐证，也是验证上面
+        // 限量是否生效的唯一依据。attach 只在重连/挂载时发生（重复 attach 被
+        // connection.ts 的 subscribed 判断挡在客户端），不会刷屏。
+        console.log(formatDiagReport({
+          tag: msg.sessionId, kind: "attach", lastSeq, gap,
+          frames: send.length,
+          bytes: send.reduce((n, f) => n + f.data.byteLength, 0),
+        }));
         break;
       }
       case "detach":

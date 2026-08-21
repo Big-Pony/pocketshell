@@ -7,6 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { gzipSync } from "node:zlib";
 import { toB64 } from "../lib/bytes";
 import { DEFAULT_SETTINGS } from "../lib/settings";
+import { historyExpectBytes } from "../lib/term/reseed";
 import type { Connection } from "../lib/net/connection";
 
 // The two merged suites need different xterm implementations: the buffering /
@@ -130,7 +131,12 @@ function propsFor(conn: ReturnType<typeof stubConn>, active: boolean, closed = f
 async function settleMount(conn: ReturnType<typeof stubConn>) {
   // lines 是 2026-08-09 加的：首屏只拉最近 N 行（默认取 DEFAULT_SETTINGS.historyLines
   // = 1000）。全量 scrollback 在真机上要七秒，见 lib/term/history-decode.ts 的注释。
-  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith("term.history", { session: "s1", lines: DEFAULT_SETTINGS.historyLines }));
+  // 第三个参数是 2026-08-18 加的 expectBytes：不传的话 N 个并发 term.history 与
+  // 1 个拿到完全相同的 10s 死线（见 lib/term/reseed.ts 的 historyExpectBytes）。
+  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith(
+    "term.history", { session: "s1", lines: DEFAULT_SETTINGS.historyLines },
+    { expectBytes: historyExpectBytes(DEFAULT_SETTINGS.historyLines) },
+  ));
   await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("s1", 0, { seed: true }));
 }
 
@@ -168,7 +174,9 @@ test("historyLines 设置值透传到 term.history 的 lines 参数", async () =
   // 设置面板改了行数却没生效，是这条链路最容易断的一环（prop 加了但没往下传）。
   const conn = stubConn();
   render(TerminalView, { props: { ...propsFor(conn, true), historyLines: 200 } });
-  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith("term.history", { session: "s1", lines: 200 }));
+  await waitFor(() => expect(conn.rpc).toHaveBeenCalledWith(
+    "term.history", { session: "s1", lines: 200 }, { expectBytes: historyExpectBytes(200) },
+  ));
 });
 
 test("首屏 seed 认得 enc=gzip 的压缩载荷", async () => {
