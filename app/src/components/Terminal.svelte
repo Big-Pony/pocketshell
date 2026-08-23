@@ -941,10 +941,6 @@
     const onResize = () => {
       if (!active) return;
       if (resizeDebounce) clearTimeout(resizeDebounce);
-      // 埋点的两个订阅（2026-08-22）。心跳往一个已 dispose 的终端读 buffer 会抛，
-      // onRender 订阅不撤则随每次开关会话累积。
-      clearInterval(heartbeat);
-      unsubscribeRender?.();
       resizeDebounce = setTimeout(() => {
         resizeDebounce = undefined;
         // 宽度变化后**不**重灌历史（2026-08-08）：capture-pane -J 灌进来的是
@@ -1006,6 +1002,17 @@
       unsubscribeOutput?.();
       unsubscribeInput?.();
       if (resizeDebounce) clearTimeout(resizeDebounce);
+      // 埋点的两个订阅（2026-08-22）。心跳往一个已 dispose 的终端读 buffer 会抛，
+      // onRender 订阅不撤则随每次开关会话累积。
+      //
+      // 【2026-08-23】这两行原先误写在 onResize 里 —— 那不是「终端没了」，那是
+      // 「终端变大了」。后果是窗口一改尺寸（或分栏拖动触发 ResizeObserver）就把
+      // 渲染订阅永久退掉、心跳永久清掉，此后 renderFrames 恒为 0、write 心跳彻底
+      // 停摆。线上 aippt 会话据此被判成「渲染器停摆 5 次」，实为埋点自己死了：
+      // 同一条记录里 pageVersions 3201→8368、bufDelta=387，屏幕明明在画。
+      // 两条数据互相矛盾时，错的是恒为 0 的那条。
+      clearInterval(heartbeat);
+      unsubscribeRender?.();
       // 卸载时挂起的首屏重试必须撤掉：它会向一个已 dispose 的终端写字节。
       if (seedTimer) { clearTimeout(seedTimer); seedTimer = undefined; }
       stopPoll(); // also drops a pending input-debounced classify

@@ -116,7 +116,25 @@ for (const [session, rs] of [...bySession].sort()) {
     const w = writes.find((x) => Math.abs(Date.parse(x.ts) - Date.parse(r.ts)) < 2000);
     return w && (n(w.wroteBytes) ?? 0) > 0;
   });
-  if (wroteWhileStalled.length) {
+  // 【2026-08-23】先排除「埋点自己死了」再谈渲染器停摆。同一条 render 记录里
+  // 带着图集的 pageVersions —— 那是 WebGL 侧独立累加的版本号，与 onRender 订阅
+  // 无关。renderFrames=0 而 pageVersions 在涨，说明屏幕明明在画、是订阅掉了，
+  // 不是渲染器停了。线上 aippt 就是这样被误判成「停摆 5 次」的：清理写在了
+  // onResize 里，窗口一改尺寸订阅就被永久退掉。
+  //
+  // 这是同一个教训的第二次：任何「计数恒为 0」都要先怀疑埋点，再怀疑被测对象。
+  const versionSum = (r: Rec): number => {
+    const v = r.pageVersions;
+    return Array.isArray(v) ? v.reduce((a: number, x: unknown) => a + (typeof x === "number" ? x : 0), 0) : -1;
+  };
+  const climbing = wroteWhileStalled.filter((r, i) => {
+    const prev = wroteWhileStalled[i - 1];
+    return prev && versionSum(r) > versionSum(prev) && versionSum(prev) >= 0;
+  });
+  if (climbing.length) {
+    console.log(`  ⚠ renderFrames=0 但图集版本号在涨 ${climbing.length} 次 —— 是 onRender 订阅掉了，不是渲染器停摆`);
+    console.log(`      ⇒ 先查 Terminal.svelte 里 unsubscribeRender 的清理时机（应在 teardown，不在 onResize）`);
+  } else if (wroteWhileStalled.length) {
     console.log(`  ✗ 渲染器停摆 ${wroteWhileStalled.length} 次：字节在涨但 renderFrames=0`);
     for (const r of wroteWhileStalled.slice(-5)) {
       const b = (k: string) => (typeof r[k] === "boolean" ? (r[k] ? "是" : "否") : "?");

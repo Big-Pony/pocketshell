@@ -151,3 +151,55 @@ test("连接对象没有 hasFeature 时按关闭处理，且不影响首屏 seed
   // 首屏 seed 照常发生 —— 诊断判断抛出的话这条会挂
   expect(callsOf(rpc, "term.history").length).toBeGreaterThanOrEqual(1);
 });
+
+// ---- 采样订阅的生命周期（2026-08-23）----
+// 心跳与 onRender 订阅的清理原先误写在 onResize 里 —— 那不是「终端没了」，
+// 那是「终端变大了」。窗口一改尺寸就把两者永久关掉，此后 renderFrames 恒为 0、
+// write 心跳彻底停摆。线上 aippt 会话据此被判成「渲染器停摆」，实为埋点自己
+// 死了：同一条 render 记录里 pageVersions 3201→8368、bufDelta=387，屏幕明明在画。
+//
+// 这条测试钉的是「resize 之后采样还活着」。把清理挪回 onResize，它必须挂。
+
+const outConn = (rpc: ReturnType<typeof vi.fn>) => {
+  const out: Array<(f: { sessionId: string; data: Uint8Array }) => void> = [];
+  const conn = {
+    onOutput: (cb: (f: { sessionId: string; data: Uint8Array }) => void) => { out.push(cb); return () => {}; },
+    onInput: () => () => {},
+    attach: () => {},
+    resize: () => {},
+    rpc,
+    hasFeature: (n: string) => n === "diag",
+  } as any;
+  return { conn, emit: (id: string, s: string) => { for (const cb of out) cb({ sessionId: id, data: new TextEncoder().encode(s) }); } };
+};
+
+test("窗口 resize 之后心跳仍在采样 —— 清理属于销毁，不属于改尺寸", async () => {
+  vi.useFakeTimers();
+  const rpc = okRpc();
+  const { conn, emit } = outConn(rpc);
+  render(Terminal, { props: { conn, sessionId: "s-smp9", active: true } });
+  await vi.advanceTimersByTimeAsync(1600);
+  const before = kindsOf(rpc).filter((k) => k === "write").length;
+
+  // 改一次窗口尺寸（真实路径：window resize → 150ms 防抖 refit）
+  window.dispatchEvent(new Event("resize"));
+  await vi.advanceTimersByTimeAsync(300);
+
+  // 有新字节 + 超过 SAMPLE_MS(15s)，心跳必须照常打点
+  emit("s-smp9", "hello from the pty\r\n");
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(kindsOf(rpc).filter((k) => k === "write").length).toBeGreaterThan(before);
+});
+
+test("终端销毁后心跳停止 —— 往已 dispose 的终端读 buffer 会抛", async () => {
+  vi.useFakeTimers();
+  const rpc = okRpc();
+  const { conn, emit } = outConn(rpc);
+  const { unmount } = render(Terminal, { props: { conn, sessionId: "s-smp10", active: true } });
+  await vi.advanceTimersByTimeAsync(1600);
+  unmount();
+  const after = kindsOf(rpc).filter((k) => k === "write").length;
+  emit("s-smp10", "output after unmount\r\n");
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(kindsOf(rpc).filter((k) => k === "write").length).toBe(after);
+});
