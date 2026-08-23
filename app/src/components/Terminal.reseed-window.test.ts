@@ -337,3 +337,65 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     expect(rows.filter((r) => r === "OLD-WINDOW").length).toBeLessThanOrEqual(1);
   });
 });
+
+// ── 5 ────────────────────────────────────────────────────────────────
+// 重灌拉的行数不能少于 buffer 里已有的。RIS 清的是**整个** buffer（含
+// scrollback），只回写 historyLines 行的话，差额就是被抹掉的历史。
+//
+// 真机 aippt（agent.out.log 2026-08-22/23）三次 resync：
+//   bufferLenBefore=1219 → After=634、882 → 506、859 → 507
+// 即单次净损失 585/376/352 行 —— 用户报告的「文本内容不连贯」。
+//
+// 纯逻辑在 reseed.ts 的 reseedLines 单测里；这里钉的是**接线**：调用点
+// 真的把 buffer 长度喂进去了，而不是继续传 historyLines。少了这条，把
+// `reseedLines(historyLines, lenBefore)` 改回 `historyLines` 依然全绿。
+describe("5 · 重灌行数不得少于 buffer 现有行数", () => {
+  test("buffer 比 historyLines 长时，term.history 要按 buffer 行数拉", async () => {
+    // 先用一份长历史把 buffer 撑到 1000 行以上
+    const long = Array.from({ length: 1200 }, (_, i) => `L${i}`).join("\n") + "\n";
+    const rpc = baseRpc(() => Promise.resolve(hist(long)));
+    const { conn } = stubConn(rpc);
+    let reseed: ((t: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn, sessionId: "s-lines", active: true, historyLines: 1000,
+        onReseedReady: (_i: string, f: any) => { reseed = f; },
+      },
+    });
+    await tick(50);
+
+    rpc.mockClear();
+    reseed?.("resync");
+    await tick(50);
+
+    const call = rpc.mock.calls.find((c) => c[0] === "term.history");
+    expect(call).toBeTruthy();
+    const asked = (call![1] as { lines?: number }).lines ?? 0;
+    // buffer 此刻远超 1000 行，要的行数必须跟着涨（上限 2000）
+    expect(asked).toBeGreaterThan(1000);
+    expect(asked).toBeLessThanOrEqual(2000);
+    // expectBytes 要跟着同一个数走，否则死线按 1000 行算，拉 1200 行必假超时
+    const eb = (call![2] as { expectBytes?: number })?.expectBytes ?? 0;
+    expect(eb).toBe(asked * 30);
+  });
+
+  test("buffer 短时仍按 historyLines 拉 —— 不因为一次重灌就多要几百行", async () => {
+    const rpc = baseRpc(() => Promise.resolve(hist("short\n")));
+    const { conn } = stubConn(rpc);
+    let reseed: ((t: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn, sessionId: "s-lines2", active: true, historyLines: 1000,
+        onReseedReady: (_i: string, f: any) => { reseed = f; },
+      },
+    });
+    await tick(50);
+
+    rpc.mockClear();
+    reseed?.("resync");
+    await tick(50);
+
+    const call = rpc.mock.calls.find((c) => c[0] === "term.history");
+    expect((call![1] as { lines?: number }).lines).toBe(1000);
+  });
+});

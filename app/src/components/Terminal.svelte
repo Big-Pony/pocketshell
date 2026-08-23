@@ -87,7 +87,7 @@
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
   import {
     buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite,
-    historyExpectBytes, seedRetryDelayMs, SEED_MAX_ATTEMPTS, type ReseedTrigger,
+    historyExpectBytes, reseedLines, seedRetryDelayMs, SEED_MAX_ATTEMPTS, type ReseedTrigger,
   } from "../lib/term/reseed";
   import { Connection } from "../lib/net/connection";
   import { decodeHistoryData } from "../lib/term/history-decode";
@@ -667,11 +667,15 @@
       const win = new PendingBuffer();
       windowBuf = win;
       try {
+        // 【2026-08-23】拉的行数不能少于 buffer 里已有的：RIS 清的是**整个**
+        // buffer（含 scrollback），只回写 historyLines 行的话，差额就是被抹掉的
+        // 历史。真机实测单次净损失 585 行。见 reseed.ts 的 reseedLines。
+        const wantLines = reseedLines(historyLines, lenBefore);
         const h = (await conn.rpc(
-          "term.history", { session: sessionId, lines: historyLines },
+          "term.history", { session: sessionId, lines: wantLines },
           // 让死线把响应体算进去。不传的话 N 个并发重灌与 1 个拿到完全相同的
           // 10s 死线，8 tab 同时重进时后面的 lane 必然假超时（见 reseed.ts）。
-          { expectBytes: historyExpectBytes(historyLines) },
+          { expectBytes: historyExpectBytes(wantLines) },
         )) as TermHistoryResult;
         // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
         const stale = reseedGate.isStale(gen);

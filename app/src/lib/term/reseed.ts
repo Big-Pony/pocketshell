@@ -160,6 +160,40 @@ export function historyExpectBytes(lines: number): number {
   return Math.floor(lines) * HISTORY_WIRE_BYTES_PER_LINE;
 }
 
+// ── 重灌行数：不能少于 buffer 里已有的（2026-08-23）──
+//
+// 重灌走**流内 RIS**（`\x1bc`），它清掉的是 xterm 的**整个** buffer，包括
+// scrollback。此前无论 buffer 里有多少行，回写的都只是 `historyLines`（默认
+// 1000）行快照 —— buffer 比这更长时，差额就是**被抹掉的历史**。
+//
+// 真机 aippt 会话的三次 resync（agent.out.log，2026-08-22/23）：
+//
+//     bufferLenBefore=1219 → After=634   净损失 585 行
+//     bufferLenBefore= 882 → After=506   净损失 376 行
+//     bufferLenBefore= 859 → After=507   净损失 352 行
+//
+// 用户报告的「文本内容不连贯」就是它。**这条路径的丢失屏幕对拍看不见**：
+// screen-probe 只哈希 `viewportY` 起的可视区 27 行，agent 侧 `capture-pane -p`
+// 同样只取当前屏，而丢失发生在 scrollback 里 —— 两边看的都不是出事的地方，
+// 所以对拍一直报 missingLines=0。埋点覆盖不到的地方，"没有证据"不等于"没有问题"。
+//
+// 上限取 tmux 的 history-limit（2000）：再多要也拿不到，白白拖慢那次重灌。
+// 服务端 capture 的是 `-S cursor_y - lines`，超出部分 tmux 自己会截。
+export const TMUX_HISTORY_LIMIT = 2000;
+
+/**
+ * 这次重灌该拉多少行：至少 `configured`，但不少于 buffer 里已有的行数，
+ * 上限 tmux 的 history-limit。
+ *
+ * `bufferLen` 读不到（<=0 / 非有限值）时退化为 `configured` —— 宁可维持旧行为，
+ * 也不要因为一个读不到的数去拉 2000 行拖慢每一次重灌。
+ */
+export function reseedLines(configured: number, bufferLen: number): number {
+  const base = Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 0;
+  const have = Number.isFinite(bufferLen) && bufferLen > 0 ? Math.floor(bufferLen) : 0;
+  return Math.min(Math.max(base, have), TMUX_HISTORY_LIMIT);
+}
+
 // ── 首屏 seed 的退避重试（2026-08-18，优先级 1b）──
 //
 // 旧实现的 catch 里只做 `conn.attach(sessionId)`（lastSeq=0，反而触发整环重放），

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildReseedPayload, ReseedGate } from "./reseed";
+import { describe, it, expect, test } from "vitest";
+import { buildReseedPayload, ReseedGate, reseedLines, TMUX_HISTORY_LIMIT } from "./reseed";
 
 describe("buildReseedPayload", () => {
   it("总是以 RIS 开头 —— 清空必须和内容在同一个字符串里", () => {
@@ -179,5 +179,40 @@ describe("buildReseedReport 的失败分支（优先级 1c：埋点不能只有�
       framesDuringAwait: 0, bytesDuringAwait: 0, bufferLenBefore: 1, bufferLenAfter: 1,
     });
     expect("error" in r).toBe(false);
+  });
+});
+
+// ---- reseedLines：RIS 清全屏，回写就不能比原来少（2026-08-23）----
+// 真机 aippt 的三次 resync 净损失 585/376/352 行，就是「buffer 有 1219 行、
+// 只回写 1000 行」。这组用例钉住「至少不缩水」。
+describe("reseedLines", () => {
+  test("buffer 比配置短时按配置拉 —— 不因为一次重灌就多要几百行", () => {
+    expect(reseedLines(1000, 507)).toBe(1000);
+    expect(reseedLines(1000, 24)).toBe(1000);
+  });
+
+  test("buffer 比配置长时按 buffer 拉 —— 差额正是会被 RIS 抹掉的历史", () => {
+    // 真机三条现场
+    expect(reseedLines(1000, 1219)).toBe(1219);
+    expect(reseedLines(1000, 1451)).toBe(1451);
+    expect(reseedLines(1000, 1002)).toBe(1002);
+  });
+
+  test("上限是 tmux 的 history-limit —— 再多要也拿不到，只会拖慢这次重灌", () => {
+    expect(reseedLines(1000, 5000)).toBe(TMUX_HISTORY_LIMIT);
+    expect(reseedLines(3000, 500)).toBe(TMUX_HISTORY_LIMIT);
+  });
+
+  test("bufferLen 读不到时退化为配置值，而不是拉满 2000", () => {
+    // 宁可维持旧行为，也不要因为一个读不到的数把每次重灌都拖慢
+    expect(reseedLines(1000, 0)).toBe(1000);
+    expect(reseedLines(1000, -1)).toBe(1000);
+    expect(reseedLines(1000, NaN)).toBe(1000);
+  });
+
+  test("配置值本身非法时不抛、不返回负数", () => {
+    expect(reseedLines(0, 800)).toBe(800);
+    expect(reseedLines(NaN, 800)).toBe(800);
+    expect(reseedLines(0, 0)).toBe(0);
   });
 });

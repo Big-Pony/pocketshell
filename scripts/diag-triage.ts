@@ -161,8 +161,30 @@ for (const [session, rs] of [...bySession].sort()) {
     console.log(`  ⚠ ${odd.length} 次采样：写入 >4KB 但 buffer 行数零增长（可能是原地重绘，也可能是没落进 buffer）`);
   }
 
+  // 重灌净损失（2026-08-23）。**这是屏幕对拍看不见的那条丢失路径**：
+  // 对拍只哈希可视区 27 行，而 RIS 清的是整个 buffer（含 scrollback），
+  // 损失全发生在屏幕之外，所以 missingLines 会一直是 0。
+  //
+  // bufferLenAfter < bufferLenBefore 就是净损失行数，直接读得出来 —— 这些数字
+  // 在日志里躺了一整天没人看，因为脚本压根没解析 reseed 记录。埋点采到了不等于
+  // 有人在读；判定脚本没覆盖的字段等于没埋。
+  const reseeds = rs.filter((r) => r.kind === "reseed");
+  const shrank = reseeds
+    .map((r) => ({ r, before: n(r.bufferLenBefore) ?? 0, after: n(r.bufferLenAfter) ?? 0 }))
+    .filter((x) => x.before > 0 && x.after > 0 && x.after < x.before);
+  if (shrank.length) {
+    const worst = shrank.reduce((a, b) => (b.before - b.after > a.before - a.after ? b : a));
+    console.log(`  ✗ 重灌净损失 ${shrank.length} 次：buffer 行数不增反减 —— scrollback 被 RIS 抹掉且没回写`);
+    for (const x of shrank.slice(-5)) {
+      console.log(`      ${hhmmss(x.r.ts)} trigger=${String(x.r.trigger)} ${x.before} → ${x.after} 行（净损失 ${x.before - x.after}）`);
+    }
+    console.log(`      ⇒ 最严重一次损失 ${worst.before - worst.after} 行。查 reseedLines：拉的行数必须 >= 重灌前的 buffer 长度`);
+  }
+
   // 一句话结论
-  const verdict = bad.length > 0
+  const verdict = shrank.length > 0
+    ? "重灌把 scrollback 抹短了 ⇒ 历史丢失（对拍看不见）"
+    : bad.length > 0
     ? "buffer 缺内容 ⇒ 数据/写入路径"
     : wroteWhileStalled.length > 0
       ? "buffer 完好但没画 ⇒ 渲染器"
