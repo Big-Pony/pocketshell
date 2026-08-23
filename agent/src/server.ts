@@ -86,6 +86,12 @@ interface Deps {
   channelFactory?: () => SecureChannel;
   pairTimeoutMs?: number;
   assets?: Record<string, string>;
+  /**
+   * 覆盖诊断埋点开关，仅供测试。生产走 config（env `POCKETSHELL_DIAG` 或
+   * agent.json 的 `diag`，默认关闭）。测试若要断言埋点内容就必须显式打开，
+   * 这本身也是一道保险：**默认关闭若被改坏，这些测试会立刻红**。
+   */
+  diag?: boolean;
 }
 
 // agent 在每个 sessions 帧里声明的可选能力位。见 protocol.ts 的 ServerMsg.sessions
@@ -97,6 +103,15 @@ const AGENT_FEATURES: string[] = ["bin"];
 
 export function startServer(deps: Deps = {}) {
   const config = deps.config ?? loadConfig();
+  // 诊断埋点默认关闭时，客户端**根本不该开始采样**——否则每个活跃会话每 15s
+  // 仍要跑三条 rpc，只是服务端把结果丢掉，白烧手机电量和一条 WS。所以把它做成
+  // 能力位：客户端见到 "diag" 才采样（见 app 的 Terminal.svelte）。
+  // 老客户端不认这个位、照常采样，服务端静默丢弃，行为退化但不出错。
+  const diagOn = deps.diag ?? config.diag;
+  const features = diagOn ? [...AGENT_FEATURES, "diag"] : AGENT_FEATURES;
+  // rpc handler 通过 ctx.config.diag 判断，所以覆盖必须落到传下去的那份 config
+  // 上，否则 deps.diag 只影响 server.ts 自己的三处埋点，rpc 侧的两处仍走原值。
+  const rpcConfig: AgentConfig = deps.diag === undefined ? config : { ...config, diag: diagOn };
   const terminal = deps.terminal ?? new TerminalService();
   const replay = deps.replay ?? new ReplayService(config.replayBufferBytes);
   const contextStore = new ContextStore();
@@ -184,6 +199,14 @@ export function startServer(deps: Deps = {}) {
   // reclaimed when that device has no live connections left.
   const previewTokens = new PreviewTokens();
 
+  // 诊断埋点的唯一出口。总开关默认关闭（见 diag-report.ts 的 diagEnabled）——
+  // 走一个函数而不是在每个 console.log 前加 if，是为了让「加了新埋点却忘了挂
+  // 开关」在代码里没有可乘之机：所有 kind 都必须经过这里。
+  const diagLog = (payload: unknown) => {
+    if (!diagOn) return;
+    console.log(formatDiagReport(payload));
+  };
+
   const sendSecure = (conn: Conn, msg: ServerMsg) => {
     if (!conn.ready) return;
     conn.ws.send(conn.channel.send(new Uint8Array(Buffer.from(encode(msg), "utf8"))));
@@ -244,15 +267,49 @@ export function startServer(deps: Deps = {}) {
       if (conn.subscriptions.has(id)) {
         sendSecure(conn, { type: "resync", sessionId: id, from: replay.oldestSeq(id) });
       }
+      // 结算沿：这一轮到底丢了多少。durMs 是丢弃持续时长 —— 它直接回答
+      // 「屏幕上那个洞对应多长的时间窗」。
+      const k = dropKey(conn, id);
+      const st = dropStats.get(k);
+      if (st) {
+        dropStats.delete(k);
+        diagLog({
+          tag: id, kind: "drop", phase: "end",
+          frames: st.frames, bytes: st.bytes, durMs: Date.now() - st.since,
+          buffered: bufferedAmount(conn),
+        });
+      }
     }
     conn.needsResyncSessions.clear();
   };
+  // 【2026-08-22】A6 丢帧此前**完全静默**：既不打日志，也不产生任何客户端可见
+  // 的痕迹（客户端 seq 记账刻意不断言连续性）。排查「中间少几行」时，「agent
+  // 日志里没有丢帧记录」曾被当成「没丢过」的证据 —— 那是错的，它只是没记。
+  //
+  // 逐帧打日志会在背压期间刷屏（那正是每秒几十帧的时刻），所以按会话聚合：
+  // 进入丢弃状态时记一次，恢复（resync 发出）时把这一轮的帧数/字节数一起结算。
+  const dropStats = new Map<string, { frames: number; bytes: number; since: number }>();
+  const dropKey = (conn: Conn, id: string) => `${conn.remoteStatic ?? "?"}|${id}`;
   const deliverOutput = (conn: Conn, msg: ServerMsg & { type: "output" }) => {
     maybeResync(conn); // no-op unless the buffer has drained below low water
     if (conn.needsResyncSessions.size > 0 || bufferedAmount(conn) > HIGH_WATER_BYTES) {
       // Drop this frame for this conn only; replay still holds it, so a later
       // resync/reattach can backfill the hole.
       conn.needsResyncSessions.add(msg.sessionId);
+      const k = dropKey(conn, msg.sessionId);
+      let st = dropStats.get(k);
+      if (!st) {
+        st = { frames: 0, bytes: 0, since: Date.now() };
+        dropStats.set(k, st);
+        // 起始沿：立刻记一行，这样即使连接再没恢复过（结算行永远不来），日志里
+        // 也留下了「这个会话在这个时刻开始丢帧」。
+        diagLog({
+          tag: msg.sessionId, kind: "drop", phase: "start",
+          buffered: bufferedAmount(conn),
+        });
+      }
+      st.frames++;
+      st.bytes += msg.data.length;
       return;
     }
     sendSecure(conn, msg);
@@ -301,7 +358,7 @@ export function startServer(deps: Deps = {}) {
           const sessions = contextStore.decorate([...(await terminal.list()), ...shell.list()]);
           if (lastPushed && sessionListsEqual(lastPushed, sessions)) continue;
           lastPushed = sessions;
-          for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions, features: AGENT_FEATURES });
+          for (const conn of conns.values()) sendSecure(conn, { type: "sessions", sessions, features });
         } while (pushAgain);
       } catch {
         // A failed probe round must not reject callers or kill the interval;
@@ -631,7 +688,7 @@ export function startServer(deps: Deps = {}) {
         // gated by the push diff cache.
         void terminal
           .list()
-          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: contextStore.decorate([...sessions, ...shell.list()]), features: AGENT_FEATURES }))
+          .then((sessions) => sendSecure(conn, { type: "sessions", sessions: contextStore.decorate([...sessions, ...shell.list()]), features }))
           .catch(() => { /* runners are fail-safe; never crash the handler */ });
         break;
       case "renameSession":
@@ -665,11 +722,11 @@ export function startServer(deps: Deps = {}) {
         // 靠客户端埋点 + 数值指纹推断。这一行给出服务端直接佐证，也是验证上面
         // 限量是否生效的唯一依据。attach 只在重连/挂载时发生（重复 attach 被
         // connection.ts 的 subscribed 判断挡在客户端），不会刷屏。
-        console.log(formatDiagReport({
+        diagLog({
           tag: msg.sessionId, kind: "attach", lastSeq, gap,
           frames: send.length,
           bytes: send.reduce((n, f) => n + f.data.byteLength, 0),
-        }));
+        });
         break;
       }
       case "detach":
@@ -794,7 +851,7 @@ export function startServer(deps: Deps = {}) {
         // update.apply, all async) and the unknown-method fallback.
         return dispatchRpc(
           {
-            config, terminal, shell, replay, notify, previewTokens,
+            config: rpcConfig, terminal, shell, replay, notify, previewTokens,
             claudeSettingsPath: toolPaths.claude, agentBin, doWire, runApply,
             id,
             devicePub: conn.remoteStatic,

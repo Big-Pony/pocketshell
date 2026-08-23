@@ -341,6 +341,25 @@
   //
   // 必须是重灌快照而不是 term.redraw：refresh-client 只推可见屏那 rows 行，
   // scrollback 一个字节都不推（实测），补不了洞。
+  // seq 缺口 = 服务端发了、客户端没收到的帧。上报到 agent 日志，让「中间少
+  // 几行」这类故障从靠现场围观变成复现即定位（缺号区间直接指向丢失位置）。
+  // 不给用户任何提示：缺口后面通常紧跟 resync 自愈，弹提示只会制造噪音。
+  // seq 跳号 ⇒ 服务端发了、客户端没收到，且能定位到具体区间。这是「内容中间
+  // 少几行」故障的第一个分岔口：有缺口 ⇒ 数据链路；无缺口而屏幕仍缺内容 ⇒
+  // 往 screen 对拍与 render 心跳看（见 Terminal.svelte 的 sampleChain）。
+  //
+  // 字段用 expected/got/missing 三个专名，不复用 lastSeq/frames/bytes ——
+  // 那三个是 attach 埋点的语义（字节数/帧数），混用会让日志里同名字段含义
+  // 随 kind 漂移，翻日志的人必须记住哪个 kind 配哪套解释。
+  conn.onSeqGap((f) => {
+    // 诊断默认关闭（2026-08-23）。typeof 判断是防御更早版本的连接对象没有这个
+    // 方法——一个诊断判断不该把 onSeqGap 回调打断。
+    if (typeof conn.hasFeature !== "function" || !conn.hasFeature("diag")) return;
+    void conn.rpc("diag.report", {
+      tag: f.sessionId, kind: "seqgap",
+      expected: f.expected, got: f.got, missing: f.missing,
+    }).catch(() => {});
+  });
   conn.onResync((f) => {
     flash = tr("app.notice.historyLost");
     setTimeout(() => (flash = ""), 4000);

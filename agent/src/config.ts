@@ -13,6 +13,7 @@ import { openSnippetStore, type SnippetStore } from "./snippet-store";
 import { openHintStore, type HintStore } from "./hint-store";
 import { openThemeStore, type ThemeStore } from "./theme-store";
 import { normalizeInstanceName } from "./instance-brand";
+import { diagEnabled } from "./diag-report";
 
 /** The repo OTA is allowed to auto-apply from. See the `update` block below. */
 export const OFFICIAL_UPDATE_REPO = "Big-Pony/pocketshell";
@@ -46,6 +47,11 @@ export interface AgentConfig {
   /** 部署时传入的实例名（已归一化）。未设即不做 PWA 品牌化。 */
   instanceName?: string;
   update: { enabled: boolean; repo: string | null; official: boolean };
+  /**
+   * 诊断埋点是否开启（`POCKETSHELL_DIAG=1` 或 agent.json 的 `diag: true`）。
+   * **默认关闭**——它是排查工具，不该让正常使用的人承担采样与日志开销。
+   */
+  diag: boolean;
   notifyToken: string;
 }
 
@@ -101,6 +107,8 @@ interface AgentFileConfig {
   tlsCert?: string;
   tlsKey?: string;
   instanceName?: string;
+  /** 诊断埋点开关。默认关闭，见 diag-report.ts 的 diagEnabled。 */
+  diag?: boolean;
 }
 
 function loadAgentJson(keyDir: string): AgentFileConfig {
@@ -205,6 +213,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   // elsewhere repo keeps working — forks are legitimate — but OTA drops to
   // check-only and refuses to apply, so a repo swap can no longer silently
   // become a binary swap. Applying from a fork stays possible by hand.
+  // 诊断埋点开关。env 优先于 agent.json，两者都没有就是关。开启后 agent 会把
+  // 客户端上报的采样写进 stdout（launchd 已把它落到日志文件），并向客户端广播
+  // `diag` 能力位让它开始采样。见 diag-report.ts 的 diagEnabled。
+  const diag = diagEnabled(env, file.diag);
+
   const updateRepoRaw = env.POCKETSHELL_UPDATE_REPO ?? OFFICIAL_UPDATE_REPO;
   const updateEnabled = env.POCKETSHELL_UPDATE !== "0" && updateRepoRaw !== "off";
   const update = {
@@ -235,6 +248,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     tmpDir,
     instanceName,
     update,
+    diag,
     notifyToken,
   };
 }

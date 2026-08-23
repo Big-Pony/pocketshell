@@ -811,7 +811,9 @@ test("agent.info returns null when no instance name is set", () => {
 // 的净化归 diag-report.test.ts 逐条覆盖，这条测的是它确实被接上了。
 test("diag.report logs one whitelisted line and acks", () => {
   const keyDir = mkdtempSync(join(tmpdir(), "ps-diag-key-"));
-  const srv = startServer({ port: 0, config: loadConfig({ POCKETSHELL_KEY_DIR: keyDir }), channelFactory: passthroughResponder });
+  // POCKETSHELL_DIAG=1 走的是真实的开关路径（env → loadConfig → ctx.config.diag），
+  // 所以这条同时验证了「环境变量能开」端到端有效。默认关闭见下一条。
+  const srv = startServer({ port: 0, config: loadConfig({ POCKETSHELL_KEY_DIR: keyDir, POCKETSHELL_DIAG: "1" }), channelFactory: passthroughResponder });
   const ws = fakeWs();
   srv.__test.open(ws as any); srv.__test.message(ws as any, M1); ws.sent.length = 0;
 
@@ -839,6 +841,35 @@ test("diag.report logs one whitelisted line and acks", () => {
   expect(diag[0]).toContain('"pagesBlank":[true]');
   // 终端内容绝不能落进日志（本仓库公开，日志可能被贴进 issue）。
   expect(diag[0]).not.toContain("SECRET");
+});
+
+// 诊断默认关闭（2026-08-23）：不设 POCKETSHELL_DIAG 时，diag.report 仍然**应答
+// ok**（老客户端不该拿到 rpc 错误），但一行日志都不写。
+test("diag.report 默认静默：仍答 ok，但不写日志", () => {
+  const keyDir = mkdtempSync(join(tmpdir(), "ps-diag-off-"));
+  const srv = startServer({ port: 0, config: loadConfig({ POCKETSHELL_KEY_DIR: keyDir }), channelFactory: passthroughResponder });
+  const ws = fakeWs();
+  srv.__test.open(ws as any); srv.__test.message(ws as any, M1); ws.sent.length = 0;
+
+  const lines: string[] = [];
+  const origLog = console.log;
+  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+  try {
+    srv.__test.message(ws as any, utf8(encode({
+      type: "rpc", id: "d2", method: "diag.report",
+      params: { tag: "s1", kind: "atlas", pages: 1 },
+    })));
+  } finally { console.log = origLog; }
+
+  const reply = decodeServer(Buffer.from(ws.sent[0]).toString("utf8"));
+  srv.stop();
+  rmSync(keyDir, { recursive: true, force: true });
+
+  expect(reply.type).toBe("response");
+  if (reply.type === "response" && reply.ok) {
+    expect(reply.result).toEqual({ ok: true });
+  } else { throw new Error("expected an ok response"); }
+  expect(lines.filter((l) => l.startsWith("[pocketshell:diag]")).length).toBe(0);
 });
 
 // ---- merged from the former agent/test/server.test.ts ----

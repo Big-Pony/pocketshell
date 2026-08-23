@@ -82,6 +82,8 @@
   import { installWebgl, type WebglHandle } from "../lib/term/webgl-renderer";
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
+  import { hashLine, hashViewport } from "../lib/term/screen-probe";
+  import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
   import {
     buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite,
@@ -157,6 +159,9 @@
   // 切 tab 时拍一份滚动/尺寸快照（2026-08-09 取证）。onMount 里赋值，由下面
   // 跟随 active 的 $effect 调用，所以要活过 onMount 的闭包。
   let reportScroll: (why: string) => void = () => {};
+  // 全链路采样（2026-08-22）。同样在 onMount 里赋值、由外部触发，见下方
+  // sampleChain 处的长注释。默认空实现，未挂载时调用是安全的 no-op。
+  let sampleNow: (why: string) => void = () => {};
 
   // Which tmux buffer the pane is in, driven by tmux's real alternate_on state.
   // Shells AND classic-renderer Claude Code live in the normal buffer (native
@@ -284,8 +289,22 @@
     // 就是「手边没有电脑」，指望用户在现场连 devtools 抄日志不现实，而 agent 跑
     // 在用户自己机器上，回到电脑前翻日志就行。上报是尽力而为，链路断了只是少一
     // 条诊断，绝不能影响任何别的东西。
+    /**
+     * agent 是否开着诊断埋点。**默认（拿不到答案时）视为关闭**。
+     *
+     * 用函数包一层而不是直接 `conn.hasFeature("diag")`：Connection 是通过 prop
+     * 传进来的，测试替身与更早版本的连接对象上没有这个方法，直接调用会抛，而
+     * 一个**诊断**判断把组件挂载搞挂，比没有诊断糟得多（本文件每个探针都包 try
+     * 就是这个原则）。缺方法时返回 false，正好也是我们要的默认。
+     */
+    const diagOn = (): boolean => {
+      try {
+        return typeof conn.hasFeature === "function" && conn.hasFeature("diag");
+      } catch { return false; }
+    };
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
+      if (!diagOn()) return;   // 诊断默认关闭（2026-08-23）
       try {
         const snap = snapshotAtlas(webglAddon, true);
         console.warn(formatSnapshot(sessionId, snap));
@@ -312,12 +331,150 @@
     // 挂到激活路径上，快照字段一个不改（cols 看塌陷、cellHeight/scrollHeight 看
     // 滚动塌陷），agent 侧白名单也无需改动。
     reportScroll = (why: string) => {
+      if (!diagOn()) return;   // 同上
       try {
         const s = snapshotScroll(term);
         console.warn(formatScrollSnapshot(`${sessionId}/${why}`, s));
         void conn.rpc("diag.report", { tag: `${sessionId}/${why}`, kind: "scroll", ...s }).catch(() => {});
       } catch { /* 诊断绝不能影响任何东西 */ }
     };
+
+    // ================= 全链路埋点（2026-08-22）=================
+    //
+    // 为什么加：「终端中间少几行、上下都在、重开就好」这个故障排查了两轮，
+    // 连着七个假设被推翻（背压 / reseed 窗口 / scrollback 裁剪 / 图集失效 /
+    // resize 抖动 / tmux 尺寸错位 / webgl 插件版本错位），每一轮都卡在同一处：
+    // **日志答不上「故障那一刻数据在哪一层」**。上面那两个探针只在回前台/切
+    // tab 时采样，而真机现场是「一直看着、什么都没操作」，那两条路径根本不触发。
+    //
+    // 这里补的三条心跳只在**该会话正在流式输出**时才发，静止时一条都不产生：
+    //
+    //   screen  tmux 真值 vs xterm 视口逐行对拍 → 判定数据丢了还是没画出来
+    //   write   写入帧数/字节 vs buffer 行数增量 → 写进去了但没进 buffer
+    //   render  渲染器是否还在动 + 图集状态       → 渲染器停摆
+    //
+    // 采样节流到 SAMPLE_MS：故障是「持续频繁发生」，不需要逐帧，日志也不能刷屏。
+    const SAMPLE_MS = 15000;
+    // 首次采样的基线必须是「挂载时刻」而不是 0：否则第一条日志的 sinceMs 会是
+    // `Date.now() - 0` ——一个 Unix 时间戳（实测 1787410257448），而不是时间差。
+    // 同理 renderFrames/wroteBytes 的首条差值也就成了「从纪元至今」的累计，读
+    // 日志的人拿它除以时间会得出完全错的速率。上线第一批数据就是这么露馅的。
+    const mountedAt = Date.now();
+    // 每帧渲染计数。对照 write 心跳的 wroteBytes，两者背离即锁定渲染层。
+    //
+    // 【2026-08-23】这里**必须**走 render-probe 的 subscribeRender，不能用公开的
+    // `term.onRender` —— 后者转发的是被 `_isNextRenderRedrawOnly` 门控的
+    // onRenderedViewportChange，而普通流式输出正是 redraw-only，一次都不 fire。
+    // 第一版埋点踩了这个坑，线上连着几十条 renderFrames=0，屏幕却明明在滚动。
+    // 详见 render-probe.ts 里 subscribeRender 的注释。
+    let renderCount = 0;
+    let renderRows = 0;
+    const unsubscribeRender = subscribeRender(term, (rows) => {
+      renderCount++;
+      renderRows += rows;
+    });
+    let lastSampleAt = mountedAt;
+    let lastSampleFrames = 0;
+    let lastSampleBytes = 0;
+    // -1 = 还没有基线。首条 write 心跳不该报 bufDelta —— 用 0 当基线的话，第一条
+    // 恒等于整个 buffer 长度（实测 506），看起来像「这 15 秒里长了 506 行」。
+    // 所有 delta 类字段都有这个坑，其余几个的基线 0 恰好是对的（帧数/字节数从
+    // 0 开始累计），只有 bufLen 不是从 0 开始的。
+    let lastSampleBufLen = -1;
+    let lastSampleRenderFrames = 0;
+
+    /**
+     * 一轮全链路采样。**永远不抛**：任何一条探针因上游结构变动而失败，都不能
+     * 影响另外两条，更不能影响终端本身（诊断把会话搞挂比没有诊断更糟）。
+     *
+     * `why` 进 phase 字段，用来区分是心跳打的还是别的路径触发的。
+     */
+    const sampleChain = (why: string) => {
+      const now = Date.now();
+      const dt = now - lastSampleAt;
+      lastSampleAt = now;
+
+      // 1) 写入量 vs buffer 增量。两者长期背离 = 字节写进 xterm 却没落进 buffer。
+      try {
+        const bufLen = term.buffer.active.length;
+        void conn.rpc("diag.report", {
+          tag: sessionId, kind: "write", phase: why,
+          wroteFrames: probeFrames - lastSampleFrames,
+          wroteBytes: probeBytes - lastSampleBytes,
+          // 无基线时报 -1（"读不到"），与 0（"真的没长"）区分开——这个区别在
+          // diag-report.ts 里是刻意保住的，别在这里归一。
+          bufDelta: lastSampleBufLen < 0 ? -1 : bufLen - lastSampleBufLen,
+          sinceMs: dt,
+        }).catch(() => {});
+        lastSampleFrames = probeFrames;
+        lastSampleBytes = probeBytes;
+        lastSampleBufLen = bufLen;
+      } catch { /* 诊断绝不能影响任何东西 */ }
+
+      // 2) 渲染器心跳 + 图集。renderFrames=0 而 wroteBytes>0 ⇒ 字节到了、渲染器
+      // 没动，buffer 再对也画不出来。dirtyRows 是这段时间里被重画的行数累计
+      // （xterm 的 onRender 给出每次重画的行区间），它直接回答「那几行到底
+      // 有没有被画过」——这是七轮排查里始终缺的那个数。
+      try {
+        const snap = snapshotAtlas(webglAddon, true);
+        // 渲染服务状态（2026-08-22 第二批）：renderFrames=0 之后必须能分清
+        // 「被暂停了」还是「渲染器指针空了」——两者修法完全不同，而 atlas 探针的
+        // hasRenderer 查的是 WebGL addon 对象，答不了这个问题。见 render-probe.ts。
+        const rsnap = snapshotRender(term);
+        void conn.rpc("diag.report", {
+          tag: sessionId, kind: "render", phase: why,
+          renderFrames: renderCount - lastSampleRenderFrames,
+          dirtyRows: renderRows,
+          sinceMs: dt,
+          ...snap,
+          ...rsnap,
+        }).catch(() => {});
+        lastSampleRenderFrames = renderCount;
+        renderRows = 0;
+      } catch { /* 同上 */ }
+
+      // 3) 屏幕对拍。放最后：它要发一轮 rpc 且 agent 侧要 spawn 一次 tmux，
+      // 前两条更便宜、更不该被它拖累。alt buffer 里 capture-pane 拿到的是
+      // 另一块屏，比对没有意义，直接跳过。
+      try {
+        if (currentBuffer === "normal") {
+          const hashes = hashViewport(term);
+          // 空视口不比：首屏 seed 还在路上时（激活的那一刻 bufferLength 恰好等于
+          // rows、全是空行），对拍会把 tmux 的每一非空行都报成缺失。上线实测就
+          // 拍到过这样一条「27 行缺 19 行」——19 正是 tmux 侧的非空行数，而 xterm
+          // 侧非空行为 0。那不是故障，是拍早了。
+          //
+          // 判据放在客户端而不是 agent：只有这里知道「我这一屏还没内容」，agent
+          // 拿到的是一串哈希，分不出「空屏」与「内容恰好全变了」。
+          const EMPTY = hashLine("");
+          if (hashes.some((h) => h !== EMPTY)) {
+            void conn.rpc("diag.screen", { session: sessionId, why, hashes }).catch(() => {});
+          }
+        }
+      } catch { /* 同上 */ }
+    };
+
+    /** 供外部（心跳/手动触发）调用；节流由调用方或这里的时间闸控制。 */
+    sampleNow = (why: string) => {
+      if (!active) return;            // 隐藏的终端不参与：它本来就不渲染
+      // agent 没开诊断就一次都不采：这套埋点是排查工具，默认关闭（见 agent 的
+      // diag-report.ts）。少了这道判断，关掉诊断也只是「服务端把结果丢掉」，
+      // 手机这边照样每 15s 三条 rpc + 一次全视口哈希。
+      if (!diagOn()) return;
+      sampleChain(why);
+    };
+
+    // 心跳：只在「距上次采样超过 SAMPLE_MS **且这期间真的有新字节**」时采样。
+    // 后一个条件是关键——会话静止时一条日志都不该产生，否则十几个会话挂一夜
+    // 就把日志刷成噪音，真出故障时反而翻不到。
+    const heartbeat = setInterval(() => {
+      if (!active || destroyed) return;
+      if (!diagOn()) return;   // 同 sampleNow：默认关闭
+      if (probeBytes === lastSampleBytes) return;   // 这一轮没有新输出
+      if (Date.now() - lastSampleAt < SAMPLE_MS) return;
+      sampleChain("stream");
+    }, 5000);
+    (heartbeat as unknown as { unref?: () => void })?.unref?.();
     // Mobile IME fix: xterm focuses a hidden helper textarea on tap; if it stays
     // editable the phone keyboard pops up (and, because our on-screen keys
     // preventDefault focus-steal, never leaves). xterm is display-only here
@@ -429,7 +586,7 @@
       if (f.sessionId !== sessionId) return;
       probeFrames++;
       probeBytes += f.data.byteLength;
-      if (active) { term.write(f.data); windowBuf?.push(f.data); return; }
+      if (active) { term.write(f.data); windowBuf?.push(f.data, f.seq); return; }
       if (closed) return;
       pendingOut.push(f.data);
     });
@@ -471,6 +628,7 @@
       lenBefore: number, lenAfter: number,
       snapshotBytes: number, discarded: boolean, error?: string,
     ) => {
+      if (!diagOn()) return;   // 诊断默认关闭（2026-08-23）
       try {
         void conn.rpc("diag.report", {
           tag: sessionId,
@@ -521,7 +679,12 @@
         // 过期的一代不许动窗口：它的旁录已经归给新一代了（windowBuf 早被覆盖）。
         // dirty 表示窗口内涌进的字节超过 2MB 上限、已被 PendingBuffer 丢弃，
         // 此时拿到的是**残缺**的字节流，回灌反而会写出错乱的屏幕 —— 宁可只写快照。
-        const windowBytes = stale || win.dirty ? null : win.take();
+        // 【2026-08-23】按快照 seq 过滤旁录，否则重连出现 gap 时会写出长串重复：
+        // 服务端先发 resync 再补发最新 32KB，而 onResync 是同步发起重灌 ⇒ 那 32KB
+        // 落进了旁录；但它们的 seq ≤ 快照 seq，**已经在快照里**。详见
+        // PendingBuffer.takeAfter 的注释。h.seq 缺席时退化为不过滤（老 agent）。
+        const snapshotSeq = typeof h?.seq === "number" ? h.seq : 0;
+        const windowBytes = stale || win.dirty ? null : win.takeAfter(snapshotSeq);
         if (!stale) { windowBuf = null; }
         // await 期间组件可能已卸载，或 pane 已切进 alt buffer（那里 capture-pane
         // 拿到的东西没有意义）。两者都不该再写。
@@ -778,6 +941,10 @@
     const onResize = () => {
       if (!active) return;
       if (resizeDebounce) clearTimeout(resizeDebounce);
+      // 埋点的两个订阅（2026-08-22）。心跳往一个已 dispose 的终端读 buffer 会抛，
+      // onRender 订阅不撤则随每次开关会话累积。
+      clearInterval(heartbeat);
+      unsubscribeRender?.();
       resizeDebounce = setTimeout(() => {
         resizeDebounce = undefined;
         // 宽度变化后**不**重灌历史（2026-08-08）：capture-pane -J 灌进来的是
@@ -864,6 +1031,16 @@
         // 取证（2026-08-09）：在 refit **之后**拍，量到的才是这个 tab 稳定下来的
         // 真实尺寸。列数塌陷与滑不动都只在切 tab 时复现，而这里是唯一必经之路。
         reportScroll("activate");
+        // 全链路采样（2026-08-22）：切回一个 tab 是「用户正盯着这一屏」的时刻，
+        // 也是故障最常被看见的时刻。此处对拍一次，日志里就有了「用户看到它的
+        // 那一刻，buffer 与 tmux 到底一不一致」。
+        //
+        // 延后 1.5s 而不是立刻拍：激活的这一刻首屏 seed 往往还在路上（真机
+        // rtt 中位 ~1.9s），此时视口是空的，拍下来只是一条「什么都没有」。
+        // sampleChain 里另有空视口保护兜底，这里的延时是让它**拍到内容**而不
+        // 只是不拍错。用 setTimeout 而非挂进 seed 流程：诊断不该侵入功能路径。
+        const t = setTimeout(() => sampleNow("activate"), 1500);
+        (t as unknown as { unref?: () => void })?.unref?.();
       });
     } else if (term) {
       stopPoll();

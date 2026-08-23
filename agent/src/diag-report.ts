@@ -19,12 +19,43 @@
 //     break the session is worse than no diagnostic.
 export const DIAG_PREFIX = "[pocketshell:diag]";
 
+/**
+ * 诊断埋点总开关（2026-08-23）。**默认关闭。**
+ *
+ * 为什么要有它：这套埋点是为排查「终端内容中间丢失」配的取证工具，对已经在正常
+ * 使用的人没有价值，却要付出真实代价——每个活跃会话在流式输出时每 15s 一轮采样
+ * （三条 rpc + agent 侧两次 `tmux capture-pane` 的 spawn），并往 agent 日志持续写行。
+ * 让所有人默认承担这个开销去帮一个未复现的 bug 采数据，不是一个合理的默认。
+ *
+ * 判定顺序（第一个命中的生效）：
+ *   1. 环境变量 `POCKETSHELL_DIAG` —— "1"/"true"/"on" 开，其余值（含空字符串）关；
+ *   2. `agent.json` 的 `diag` 字段（布尔）；
+ *   3. 默认 false。
+ *
+ * 环境变量优先于配置文件，是为了「临时开一次看看」不必改文件、也不会忘记改回去。
+ *
+ * 注意开关**只挡日志输出，不挡 rpc 白名单**：`diag.report` / `diag.screen` 仍然
+ * 正常应答（返回 ok），否则老客户端会拿到 rpc 错误。真正省掉客户端那侧开销的是
+ * `sessions.features` 里的 `diag` 位——见 server.ts。
+ */
+export function diagEnabled(env: Record<string, string | undefined>, configured?: boolean): boolean {
+  const raw = env.POCKETSHELL_DIAG;
+  if (typeof raw === "string" && raw !== "") {
+    const v = raw.trim().toLowerCase();
+    // 显式的假值也要认：`POCKETSHELL_DIAG=0` 必须能压过 agent.json 里的 true，
+    // 否则「临时关一下」就没有办法。
+    if (v === "0" || v === "false" || v === "off" || v === "no") return false;
+    return v === "1" || v === "true" || v === "on" || v === "yes";
+  }
+  return configured === true;
+}
+
 const MAX_TAG = 64;
 const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -105,6 +136,31 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     // 与其它 kind 的用法一致（会话名是用户自己起的，不含终端内容）。
     if (typeof p.gap === "boolean") out.gap = p.gap;
     for (const k of ["lastSeq", "frames", "bytes"] as const) {
+      const v = num(p[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    // 【2026-08-22 全链路埋点】下面四个 kind 是为「内容中间少几行、上下都在」
+    // 这类故障配的。设计原则不变：**只放计数，绝不放终端内容** —— screen 对拍
+    // 只上报「差异行数」与「首个差异行号」，不含任何字符。
+    //
+    //   drop   agent 侧 A6 背压丢帧（此前完全静默，见 server.ts deliverOutput）
+    //   seqgap 客户端 seq 跳号 ⇒ 帧真的丢了，且能定位区间
+    //   screen tmux 真值 vs xterm buffer 同刻对拍 ⇒ 判定「数据丢了」还是「没画出来」
+    //   write  写入量 vs buffer 增量 ⇒ 写进去了但没进 buffer
+    //   render 渲染器心跳 ⇒ 渲染器是否停摆
+    if (typeof p.phase === "string") out.phase = oneLine(p.phase, MAX_TAG);
+    // 渲染服务状态（app/src/lib/term/render-probe.ts）。**布尔要保住「读不到」**：
+    // 字段缺席 = 上游结构变了，与 false（确实没暂停）是两回事，别在这里补默认值。
+    for (const k of ["paused", "rendererSet", "needsFullRefresh", "domVisible"] as const) {
+      if (typeof p[k] === "boolean") out[k] = p[k];
+    }
+    for (const k of [
+      "durMs", "buffered",
+      "expected", "got", "missing",
+      "tmuxLines", "xtermLines", "missingLines", "extraLines", "firstDiff",
+      "wroteFrames", "wroteBytes", "bufDelta",
+      "renderFrames", "dirtyRows", "sinceMs",
+    ] as const) {
       const v = num(p[k]);
       if (v !== undefined) out[k] = v;
     }

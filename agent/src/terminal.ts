@@ -342,6 +342,30 @@ export class TerminalService {
     return { data: toB64(res.stdout), atTop };
   }
 
+  /**
+   * 当前**可视区**的纯文本行（不含 scrollback、不含 SGR）——屏幕对拍的 tmux 真值侧。
+   *
+   * 与 history()/capture() 的区别是刻意的：
+   *   - 不给 `-S`：只要当前这一屏。对拍要比的是「此刻屏幕上应该是什么」；
+   *   - 不给 `-e`：颜色不参与比对。渲染漏画丢的是字符，SGR 只会制造假差异；
+   *   - 不给 `-J`：保持屏幕格原样。**注意这条的理由在 2026-08-22 变过**：最初
+   *     写的是「反折会让行号错位」，那是按位置比对时代的顾虑；判据改成集合比对
+   *     （见 screen-diff.ts）后行号已不参与，留着不反折只是因为它更接近「屏幕上
+   *     此刻是什么」，且实测 `-J` 与否对内容集合无实质差别。
+   *
+   * 只在诊断路径（diag.screen）上被调用，不进任何热路径。
+   */
+  async visibleLines(name: string): Promise<string[]> {
+    const res = await this.tmuxAsync(["-u", "capture-pane", "-p", "-t", name]);
+    if (res.exitCode !== 0) return [];
+    const text = new TextDecoder().decode(res.stdout);
+    // capture-pane 的输出以 \n 结尾，split 后末尾会多一个空串；去掉它，
+    // 否则 tmuxLines 恒比真实行数多 1，底部对齐会整体错开一行。
+    const lines = text.split("\n");
+    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    return lines;
+  }
+
   // Snapshot of the tmux pane's current state. Used by the frontend to decide
   // whether an alternate-screen buffer is a shell (stay in normal scrollback,
   // seed history) or a full-screen app (3x virtual rows + outer scrolling).

@@ -35,6 +35,7 @@ function stubConn(rpc: ReturnType<typeof vi.fn>) {
       attach: vi.fn(),
       resize: () => {},
       rpc,
+      hasFeature: (n: string) => n === "diag",
     } as any,
     emit: (sessionId: string, s: string) => {
       for (const cb of out) cb({ sessionId, data: new TextEncoder().encode(s) });

@@ -19,6 +19,7 @@ function stubConn(rpc: ReturnType<typeof vi.fn>) {
     attach: () => {},
     resize: () => {},
     rpc,
+    hasFeature: (n: string) => n === "diag",
   } as any;
 }
 
@@ -79,17 +80,25 @@ test("a failing report never propagates — diagnostics must not break the sessi
   await new Promise((r) => setTimeout(r, 10));
   window.removeEventListener("unhandledrejection", onRejection);
 
-  // 四条上报都失败也不能互相牵连、更不能抛出未捕获拒绝：
+  // 每一条上报都失败也不能互相牵连、更不能抛出未捕获拒绝：
   //   - 激活时的 scroll 快照（tag 带 /activate，2026-08-09 加的切 tab 取证）
   //   - visibilitychange 的 atlas 与 scroll 两条
   //   - 首屏 seed 那条 reseed（2026-08-18 补的，此前首屏路径**零埋点**，
   //     于是「重进应用全部空白」在日志里一个直接证据都没有）
+  //
+  // 按 kind 断言而不是数总数：硬编码总数会让**每新增一条探针**都在这里红一次，
+  // 而那与本测试要守的性质无关。这里只列**同步发出**的那几条 —— 全链路采样
+  // （write/render/screen）走 1.5s 延时，等真实时钟不属于这个测试的职责，
+  // 它由 Terminal.sample.test.ts 用假时钟单独覆盖。
   const calls = diagCalls(rpc);
-  expect(calls.length).toBe(4);
+  const kinds = calls.map((c) => (c[1] as { kind?: string })?.kind);
+  for (const k of ["atlas", "scroll", "reseed"]) {
+    expect(kinds.filter((x) => x === k).length).toBeGreaterThanOrEqual(1);
+  }
   const tags = calls.map((c) => (c[1] as { tag?: string })?.tag);
   expect(tags.filter((t) => t === "s-diag2/activate").length).toBe(1);
-  expect(tags.filter((t) => t === "s-diag2").length).toBe(3);
   expect(calls.filter((c) => (c[1] as { kind?: string })?.kind === "reseed").length).toBe(1);
+  // 全部失败也不能有未捕获拒绝——这才是本测试真正要守的东西。
   expect(onRejection).not.toHaveBeenCalled();
 });
 

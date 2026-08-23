@@ -25,6 +25,7 @@ import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChu
 import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { gitReview, type ReviewScope } from "./git-review";
 import { formatDiagReport } from "./diag-report";
+import { diffScreens, hashLines } from "./screen-diff";
 import { chainPathOf, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { checkLatest } from "./update-check";
 import { importTheme } from "./server-theme";
@@ -191,6 +192,18 @@ export const parse = {
     return { cwd: str(p, "cwd"), scope };
   },
   termHistory: (p: RpcParams) => ({ session: str(p, "session"), lines: optNum(p, "lines") }),
+  /**
+   * 屏幕对拍（见 screen-diff.ts）。hashes 是客户端 xterm 可视区的**逐行哈希**，
+   * 不含任何字符。非数字项归 0 而不是抛——诊断路径永远不该因为脏输入而报错，
+   * 顶多这一行比不出来。上限 512 行：真机 rows 最大值远小于它，超出必是异常。
+   */
+  diagScreen: (p: RpcParams) => ({
+    session: str(p, "session"),
+    why: optStr(p, "why") ?? "",
+    hashes: Array.isArray(p.hashes)
+      ? (p.hashes as unknown[]).slice(0, 512).map((n) => (typeof n === "number" && Number.isFinite(n) ? n >>> 0 : 0))
+      : [],
+  }),
   termCapture: (p: RpcParams) => ({
     session: str(p, "session"),
     opts: { colors: flag(p, "colors"), back: optNum(p, "back"), endBack: optNum(p, "endBack") },
@@ -263,6 +276,56 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
     const a = parse.termCapture(p);
     return ok(ctx.shell.has(a.session) ? { data: "", atTop: true } : await ctx.terminal.capture(a.session, a.opts));
   },
+  /**
+   * 屏幕对拍：把客户端 xterm 可视区的行哈希与 tmux 真值比一次，只把统计写进
+   * agent 日志。**不返回内容、也不把内容写进日志**，见 screen-diff.ts 的隐私说明。
+   *
+   * 这是「内容中间少几行」故障的判定点：diffLines=0 ⇒ 数据在 buffer 里、是没画
+   * 出来（查渲染器）；diffLines>0 ⇒ buffer 真的少了（查数据链路）。
+   * shell 会话没有 tmux pane，退化为不比对。
+   */
+  "diag.screen": async (ctx, p) => {
+    const a = parse.diagScreen(p);
+    // 开关关闭时**整个跳过**，而不是只跳过日志：对拍要 spawn 两次 tmux
+    // capture-pane，那才是这条埋点的主要成本。仍然返回 ok —— 客户端不该因为
+    // 服务端关了诊断而收到 rpc 错误。
+    if (!ctx.config.diag) return ok({ ok: true, skipped: "disabled" });
+    if (ctx.shell.has(a.session)) return ok({ ok: true, skipped: "shell" });
+    // 取两次 tmux，中间隔一小段：**只有在两次快照里都缺的行才算真缺**。
+    //
+    // 为什么必须这样（实测，不是设计洁癖）：客户端取哈希 → rpc 上行 → 这里
+    // spawn tmux，中间隔一个 RTT（真机 1~3s）。Claude Code 界面里有 spinner
+    // 动画、计时、token 计数**每帧都在变**，所以单次比对必然带一批假缺失
+    // ——上线第一条真实数据就是 27 行里差 20 行，全是这种噪音。
+    //
+    // 两次都缺 ⇒ 这行在这段时间里持续不在客户端屏幕上 ⇒ 才是「内容丢了」。
+    // 动画行在两次 tmux 快照之间自己就变了，第二次比对时对不上同一个哈希，
+    // 自然被筛掉。
+    const first = diffScreens(hashLines(await ctx.terminal.visibleLines(a.session)), a.hashes);
+    await new Promise((r) => setTimeout(r, 250));
+    const second = diffScreens(hashLines(await ctx.terminal.visibleLines(a.session)), a.hashes);
+    // 取两次的**较小值**：任何一次不缺，就不算缺。
+    const missingLines = Math.min(first.missingLines, second.missingLines);
+    const extraLines = Math.min(first.extraLines, second.extraLines);
+    // 动画行的指纹是 **missing 与 extra 成对**：同一行的两个版本（spinner 转了
+    // 一帧、计时跳了一秒），tmux 侧算它缺、xterm 侧算它陈旧，两边各记一条。
+    // 真丢内容不会在 xterm 侧凭空多出等量的行，所以成对的那部分要扣掉。
+    // 实测线上样本：`缺=1 陈旧=1`、`缺=2 陈旧=2`、`缺=14 陈旧=15` 全是这一类。
+    //
+    // 扣的是**较小值**（配对数），剩下的才是净缺失。宁可少报也不多报：多报一次
+    // 就要多查一轮，而这个 bug 已经在假信号上耗掉七轮了。
+    const paired = Math.min(missingLines, extraLines);
+    const d = {
+      tmuxLines: second.tmuxLines,
+      xtermLines: second.xtermLines,
+      missingLines: missingLines - paired,
+      extraLines: extraLines - paired,
+      firstDiff: missingLines - paired > 0 ? second.firstDiff : -1,
+    };
+    console.log(formatDiagReport({ tag: a.session, kind: "screen", phase: a.why, ...d }));
+    return ok({ ok: true, ...d });
+  },
+
   "term.paneInfo": (ctx, p) => {
     const sid = parse.session(p).session;
     return ok(ctx.shell.has(sid) ? { currentCommand: "", alternateOn: false, isShell: true } : ctx.terminal.paneInfo(sid));
@@ -306,7 +369,9 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
   // 已把 stdout 落到 ~/Library/Logs/pocketshell/agent.out.log，用户零操作。
   // 内容经 formatDiagReport 白名单化：只留几个计数器，终端内容一律丢弃
   // （本仓库公开，日志有可能被贴进 issue）。
-  "diag.report": (_ctx, p) => { console.log(formatDiagReport(p)); return ok({ ok: true }); },
+  // 开关关闭时静默丢弃：仍答 ok，老客户端（或本次会话开始前就在采样的客户端）
+  // 不该因此拿到 rpc 错误。
+  "diag.report": (ctx, p) => { if (ctx.config.diag) console.log(formatDiagReport(p)); return ok({ ok: true }); },
 
   "notify.getConfig": (ctx) => ok(ctx.notify.config()),
   "notify.setConfig": (ctx, p) => { ctx.notify.setConfig(parse.notifySetConfig(p).config); return ok({ ok: true }); },

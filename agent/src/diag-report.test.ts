@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { formatDiagReport, DIAG_PREFIX } from "./diag-report";
+import { formatDiagReport, DIAG_PREFIX, diagEnabled } from "./diag-report";
 
 const at = () => Date.parse("2026-08-01T10:00:00.000Z");
 
@@ -196,4 +196,99 @@ test("kind rpc method is sanitised to one line and bounded", () => {
   const obj = JSON.parse(line.slice(DIAG_PREFIX.length).trim());
   expect(obj.method).not.toContain("\n");
   expect(obj.method.length).toBeLessThanOrEqual(64);
+});
+
+// 【2026-08-22 全链路埋点】新增 kind 与字段的白名单复核。这些日志用户可能直接
+// 贴进公开 issue，所以「不含终端内容」是硬约束，不是风格问题。
+const p2 = (o: unknown) => parse(formatDiagReport(o, at));
+
+test("四个新 kind 都被接受，不再落成 unknown", () => {
+  for (const k of ["drop", "screen", "write", "render"]) {
+    expect(p2({ tag: "s", kind: k }).kind).toBe(k);
+  }
+});
+
+test("screen: 只留统计，终端内容与行文本一律丢弃", () => {
+  const out = p2({
+    tag: "s", kind: "screen", phase: "stream",
+    tmuxLines: 26, xtermLines: 27, missingLines: 2, extraLines: 1, firstDiff: 5,
+    lines: ["机密内容", "另一行"], text: "不该出现", hashes: [1, 2, 3],
+  });
+  expect(out).toMatchObject({ tmuxLines: 26, xtermLines: 27, missingLines: 2, extraLines: 1, firstDiff: 5, phase: "stream" });
+  expect(out.lines).toBeUndefined();
+  expect(out.text).toBeUndefined();
+  expect(out.hashes).toBeUndefined();
+});
+
+test("drop: 起始/结算两种形态都留得下", () => {
+  expect(p2({ tag: "s", kind: "drop", phase: "start", buffered: 1048577 }))
+    .toMatchObject({ phase: "start", buffered: 1048577 });
+  expect(p2({ tag: "s", kind: "drop", phase: "end", frames: 12, bytes: 3400, durMs: 900 }))
+    .toMatchObject({ phase: "end", frames: 12, bytes: 3400, durMs: 900 });
+});
+
+test("seqgap: expected/got/missing 三个专名", () => {
+  expect(p2({ tag: "s", kind: "seqgap", expected: 100, got: 105, missing: 4 }))
+    .toMatchObject({ expected: 100, got: 105, missing: 4 });
+});
+
+test("write / render: 计数字段留得下", () => {
+  expect(p2({ tag: "s", kind: "write", wroteFrames: 30, wroteBytes: 9000, bufDelta: 12, sinceMs: 15000 }))
+    .toMatchObject({ wroteFrames: 30, wroteBytes: 9000, bufDelta: 12, sinceMs: 15000 });
+  expect(p2({ tag: "s", kind: "render", renderFrames: 0, dirtyRows: 0, sinceMs: 15000 }))
+    .toMatchObject({ renderFrames: 0, dirtyRows: 0, sinceMs: 15000 });
+});
+
+test("0 与 -1 必须原样保留: 0=真的没画, -1=读不到", () => {
+  const out = p2({ tag: "s", kind: "render", renderFrames: 0, dirtyRows: 0 });
+  expect(out.renderFrames).toBe(0);
+  expect(out.dirtyRows).toBe(0);
+  expect(p2({ tag: "s", kind: "screen", firstDiff: -1 }).firstDiff).toBe(-1);
+});
+
+test("phase 同样过 oneLine, 换行不能伪造新日志行", () => {
+  expect(p2({ tag: "s", kind: "drop", phase: "a\nb" }).phase).toBe("a b");
+});
+
+test("render: 渲染服务状态四个布尔留得下", () => {
+  expect(p2({ tag: "s", kind: "render", paused: true, rendererSet: false, needsFullRefresh: true, domVisible: true }))
+    .toMatchObject({ paused: true, rendererSet: false, needsFullRefresh: true, domVisible: true });
+});
+
+test("render: 「读不到」不能被伪装成 false —— 缺席就该缺席", () => {
+  const out = p2({ tag: "s", kind: "render", paused: "yes", rendererSet: 1 });
+  expect(out.paused).toBeUndefined();
+  expect(out.rendererSet).toBeUndefined();
+});
+
+// 诊断总开关（2026-08-23）。默认关闭，环境变量优先于 agent.json。
+test("diagEnabled: 默认关闭", () => {
+  expect(diagEnabled({})).toBe(false);
+  expect(diagEnabled({}, undefined)).toBe(false);
+  expect(diagEnabled({}, false)).toBe(false);
+});
+
+test("diagEnabled: agent.json 的 diag=true 能开", () => {
+  expect(diagEnabled({}, true)).toBe(true);
+});
+
+test("diagEnabled: 环境变量各种真值", () => {
+  for (const v of ["1", "true", "on", "yes", "TRUE", " On "]) {
+    expect(diagEnabled({ POCKETSHELL_DIAG: v })).toBe(true);
+  }
+});
+
+test("diagEnabled: 环境变量的显式假值压过 agent.json 的 true —— 否则没法临时关", () => {
+  for (const v of ["0", "false", "off", "no"]) {
+    expect(diagEnabled({ POCKETSHELL_DIAG: v }, true)).toBe(false);
+  }
+});
+
+test("diagEnabled: 空字符串视为未设置，回落到 agent.json", () => {
+  expect(diagEnabled({ POCKETSHELL_DIAG: "" }, true)).toBe(true);
+  expect(diagEnabled({ POCKETSHELL_DIAG: "" }, false)).toBe(false);
+});
+
+test("diagEnabled: 认不出的值当作关（不能把 'maybe' 读成开）", () => {
+  expect(diagEnabled({ POCKETSHELL_DIAG: "maybe" }, false)).toBe(false);
 });

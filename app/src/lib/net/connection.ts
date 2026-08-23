@@ -59,6 +59,7 @@ type SessionsCb = (sessions: SessionMeta[]) => void;
 type ExitCb = (f: { sessionId: string; code: number }) => void;
 type ErrorCb = (f: { code: string; message: string }) => void;
 type ResyncCb = (f: { sessionId: string; from: number }) => void;
+type GapCb = (f: { sessionId: string; expected: number; got: number; missing: number }) => void;
 // The bytes are handed to listeners as well as the session id: "the user just
 // typed" is not enough for a listener that needs to know WHAT was typed (the
 // copy-output anchor only moves on a Return). Purely additive — existing
@@ -127,6 +128,7 @@ export class Connection {
   private exitCbs: ExitCb[] = [];
   private errorCbs: ErrorCb[] = [];
   private resyncCbs: ResyncCb[] = [];
+  private gapCbs: GapCb[] = [];
   private attached = new Set<string>();
   private seen = new Map<string, number>();
   private pairing = false;
@@ -380,6 +382,7 @@ export class Connection {
   // 的 wireBytes 恒等于 rawBytes，压缩率永远 1.0。所以额外要求"压缩真的
   // 生效过"——没压成功的样本本来就回答不了"这轮压缩省了多少"这个问题。
   private reportRpcIfBig(method: string, rttMs: number, wireBytes: number, rawBytes: number, chunks: number): void {
+    if (!this.features.has("diag")) return;   // 诊断默认关闭（2026-08-23）
     if (wireBytes <= RPC_DIAG_SAMPLE_MIN_BYTES) return;
     if (wireBytes >= rawBytes) return;
     void this.rpc("diag.report", buildRpcReport({ method, rttMs, wireBytes, rawBytes, chunks })).catch(() => {});
@@ -562,6 +565,17 @@ export class Connection {
     }
     if (msg.type === "output") {
       const prev = this.seen.get(msg.sessionId) ?? 0;
+      // 【2026-08-22】seq 缺口检测。「内容中间少几行、上下都在」这类故障靠
+      // 症状分不清是哪条路径丢的（背压主动丢帧 / 传输静默丢 / 渲染层），而
+      // seq 是服务端单调递增发的，缺号即丢帧且能定位到具体区间。
+      //
+      // 只在 prev>0（已建立记账）且真的跳号时上报，两个条件缺一不可：
+      //   - prev===0 是首帧或 seed 之后，此时跳号是正常的（服务端从快照 seq
+      //     之后开始发，客户端本来就没见过中间那些）；
+      //   - seq<=prev 是重发/乱序，不是缺口，且 attach 后必然出现一批。
+      if (prev > 0 && msg.seq > prev + 1) {
+        for (const cb of this.gapCbs) cb({ sessionId: msg.sessionId, expected: prev + 1, got: msg.seq, missing: msg.seq - prev - 1 });
+      }
       if (msg.seq > prev) this.seen.set(msg.sessionId, msg.seq);
       const f = { sessionId: msg.sessionId, seq: msg.seq, data: fromB64(msg.data) };
       for (const cb of this.outputCbs) cb(f);
@@ -942,6 +956,22 @@ export class Connection {
   onError(cb: ErrorCb): () => void {
     this.errorCbs.push(cb);
     return () => { this.errorCbs = this.errorCbs.filter((c) => c !== cb); };
+  }
+  /**
+   * agent 是否声明了某个能力位（sessions.features）。
+   *
+   * 诊断埋点用它（`hasFeature("diag")`）：agent 默认不开诊断，客户端就**不该
+   * 开始采样**——否则每个活跃会话每 15s 仍要跑三条 rpc，只是服务端把结果丢掉，
+   * 白烧手机电量。老 agent 不发这个位，采样自然也不开。
+   */
+  hasFeature(name: string): boolean {
+    return this.features.has(name);
+  }
+
+  /** seq 跳号时触发。缺口 = 服务端发了但客户端没收到的帧，见 onFrame 的注释。 */
+  onSeqGap(cb: GapCb): () => void {
+    this.gapCbs.push(cb);
+    return () => { this.gapCbs = this.gapCbs.filter((c) => c !== cb); };
   }
   onResync(cb: ResyncCb): () => void {
     this.resyncCbs.push(cb);

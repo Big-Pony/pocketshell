@@ -1313,6 +1313,9 @@ test("GUARD: a compressed rpcChunk decoded after a reconnect does not re-enter d
 
 test("C1: 大但未压缩的明帧响应不触发 diag 上报", async () => {
   const h = harness();
+  // 显式开诊断能力位：不开的话这条会被 2026-08-23 的「诊断默认关闭」短路，
+  // 测到的是开关而不是这里要钉的「未压缩就不报」门槛——假绿。
+  (h.conn as any).features = new Set(["diag"]);
   const rpcSpy = vi.spyOn(h.conn, "rpc");
   const p = h.conn.rpc("fs.downloadChunk", { path: "/big.bin", offset: 0 });
   const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
@@ -1329,6 +1332,7 @@ test("C1: 大但未压缩的明帧响应不触发 diag 上报", async () => {
 
 test("I2: 真正压缩过的大响应会触发 diag 上报，且字段值正确", async () => {
   const h = harness();
+  (h.conn as any).features = new Set(["diag"]);
   const rpcSpy = vi.spyOn(h.conn, "rpc");
   const p = h.conn.rpc("git.log", { cwd: "/repo" });
   const id = (decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any).id;
@@ -1631,4 +1635,53 @@ test("不预先 attach 时，seed attach 带着快照 seq 真的上线", () => {
   const att = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
   expect(att.type).toBe("attach");
   expect(att.lastSeq).toBe(4321);              // 服务端只补快照之后的增量
+});
+
+// ── seq 缺口检测（2026-08-22）─────────────────────────────────────────────
+// 「内容中间少几行、上下都在」靠症状分不清丢在哪一层。seq 是服务端单调递增
+// 发的，缺号即丢帧，且能定位到具体区间。
+test("seq 跳号时报告缺口，区间与数量都对", () => {
+  const h = harness();
+  const seen: any[] = [];
+  h.conn.onSeqGap((f) => seen.push(f));
+  const out = (seq: number) => h.deliver({ type: "output", sessionId: "w", seq, data: toB64(new Uint8Array([65])) } as any);
+  out(1); out(2); out(7);          // 3..6 丢了
+  expect(seen).toEqual([{ sessionId: "w", expected: 3, got: 7, missing: 4 }]);
+});
+
+test("首帧不算缺口 —— prev=0 时服务端从快照 seq 之后开始发，跳号是正常的", () => {
+  const h = harness();
+  const seen: any[] = [];
+  h.conn.onSeqGap((f) => seen.push(f));
+  h.deliver({ type: "output", sessionId: "w", seq: 5000, data: toB64(new Uint8Array([65])) } as any);
+  expect(seen).toEqual([]);
+});
+
+test("重发/乱序不算缺口 —— attach 后必然出现一批 seq<=prev", () => {
+  const h = harness();
+  const seen: any[] = [];
+  h.conn.onSeqGap((f) => seen.push(f));
+  const out = (seq: number) => h.deliver({ type: "output", sessionId: "w", seq, data: toB64(new Uint8Array([65])) } as any);
+  out(1); out(5); seen.length = 0;  // 清掉 2..4 那条真缺口
+  out(3); out(4); out(5);           // 重发，不该再报
+  expect(seen).toEqual([]);
+});
+
+test("连号不报 —— 正常流不该产生任何噪音", () => {
+  const h = harness();
+  const seen: any[] = [];
+  h.conn.onSeqGap((f) => seen.push(f));
+  for (let i = 1; i <= 50; i++) h.deliver({ type: "output", sessionId: "w", seq: i, data: toB64(new Uint8Array([65])) } as any);
+  expect(seen).toEqual([]);
+});
+
+test("多会话各自记账，互不串扰", () => {
+  const h = harness();
+  const seen: any[] = [];
+  h.conn.onSeqGap((f) => seen.push(f));
+  const out = (sid: string, seq: number) => h.deliver({ type: "output", sessionId: sid, seq, data: toB64(new Uint8Array([65])) } as any);
+  out("a", 1); out("b", 100); out("a", 2); out("b", 101);
+  expect(seen).toEqual([]);        // 两条流各自连续
+  out("a", 9);
+  expect(seen).toEqual([{ sessionId: "a", expected: 3, got: 9, missing: 6 }]);
 });

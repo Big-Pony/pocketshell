@@ -400,7 +400,10 @@ test("attach WITHOUT a gap still backfills the complete backlog (budget must not
 
 test("attach logs one diag line with {sessionId,lastSeq,gap,frames,bytes}", () => {
   const replay = new ReplayService(64 * 1024);
-  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder });
+  // diag:true 是必须的 —— 诊断埋点 2026-08-23 起默认关闭（见 diag-report.ts 的
+  // diagEnabled）。这条依赖也是一道保险：默认值若被改回 true，下面那个
+  // 「关闭时不输出」的用例会红。
+  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder, diag: true });
   const ws = fakeWs();
   openReady(srv, ws);
   for (let i = 0; i < 200; i++) replay.ingest("v", new Uint8Array(4096));
@@ -424,4 +427,38 @@ test("attach logs one diag line with {sessionId,lastSeq,gap,frames,bytes}", () =
   expect(body.frames).toBe(outs.length);
   expect(body.bytes).toBe(outs.reduce((n, m) => n + (m.type === "output" ? fromB64(m.data).byteLength : 0), 0));
   srv.stop();
+});
+
+test("诊断默认关闭：attach 不写任何 diag 行", () => {
+  const replay = new ReplayService(64 * 1024);
+  const srv = startServer({ port: 0, replay, channelFactory: passthroughResponder, diag: false });
+  const ws = fakeWs();
+  openReady(srv, ws);
+  for (let i = 0; i < 200; i++) replay.ingest("v", new Uint8Array(4096));
+  const lines: string[] = [];
+  const orig = console.log;
+  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+  try {
+    srv.__test.message(ws as any, utf8(encode({ type: "attach", sessionId: "v", lastSeq: 1 })));
+  } finally { console.log = orig; }
+  expect(lines.filter((l) => l.startsWith("[pocketshell:diag]")).length).toBe(0);
+  // 但 attach 本身照常工作：关掉的是日志，不是功能。
+  expect(frames(ws).filter((m) => m.type === "output").length).toBeGreaterThan(0);
+});
+
+test("诊断关闭时 sessions.features 不含 diag（客户端据此不采样）", async () => {
+  const mk = async (diag: boolean) => {
+    const srv = startServer({ port: 0, channelFactory: passthroughResponder, diag });
+    const ws = fakeWs();
+    openReady(srv, ws);
+    srv.__test.message(ws as any, utf8(encode({ type: "listSessions" })));
+    // listSessions 走 terminal.list() 的 promise，等一轮微任务再读帧。
+    await new Promise((r) => setTimeout(r, 20));
+    const m = frames(ws).filter((x) => x.type === "sessions").pop() as { features?: string[] } | undefined;
+    return m?.features ?? [];
+  };
+  expect(await mk(false)).not.toContain("diag");
+  expect(await mk(true)).toContain("diag");
+  // "bin" 两种情况下都必须在 —— 它不是诊断位，关掉诊断不能顺手把上传能力关了。
+  expect(await mk(false)).toContain("bin");
 });
