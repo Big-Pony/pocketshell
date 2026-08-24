@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashLine, hashViewport, normLine, viewportLines } from "./screen-probe";
+import { bufferTailLines, hashBufferTail, hashLine, hashViewport, normLine, viewportLines } from "./screen-probe";
 
 // agent/src/screen-diff.ts 的 hashLine 必须与这里逐字一致，否则对拍出来的差异
 // 全是假的。这组固定向量是两端的契约：**改动任一侧的哈希实现，两处测试同时红**。
@@ -17,11 +17,12 @@ describe("哈希与归一（与 agent 侧的跨仓契约）", () => {
   });
 });
 
-const mkTerm = (rows: number, lines: (string | null)[], viewportY = 0) => ({
+const mkTerm = (rows: number, lines: (string | null)[], viewportY = 0, baseY = viewportY) => ({
   rows,
   buffer: {
     active: {
       viewportY,
+      baseY,
       length: lines.length,
       getLine: (y: number) => {
         const v = lines[y];
@@ -67,5 +68,35 @@ describe("hashViewport", () => {
     const a = hashViewport(mkTerm(2, ["x", "y"], 0));
     const b = hashViewport(mkTerm(2, ["x", "z"], 0));
     expect(a[1]).not.toBe(b[1]);
+  });
+});
+
+// bufferTailLines：已沉降的 scrollback（不含当前屏）。这是「往上翻才发现少了
+// 一段」的唯一取证点 —— 视口对拍看不到那里，今天已因此两次误判为「没问题」。
+describe("bufferTailLines", () => {
+  it("只取 baseY 之上的行 —— 当前屏必须排除（那里有 spinner 在逐帧变）", () => {
+    // baseY=3：l0..l2 是沉降历史，l3..l4 是当前屏
+    const t = mkTerm(2, ["l0", "l1", "l2", "l3", "l4"], 3, 3);
+    expect(bufferTailLines(t, 10)).toEqual(["l0", "l1", "l2"]);
+  });
+
+  it("n 小于历史长度时取最后 n 行", () => {
+    const t = mkTerm(2, ["l0", "l1", "l2", "l3", "l4"], 4, 4);
+    expect(bufferTailLines(t, 2)).toEqual(["l2", "l3"]);
+  });
+
+  it("还没有沉降历史时返回空 —— 调用方据此跳过，不然会比出满屏假缺失", () => {
+    const t = mkTerm(2, ["l0", "l1"], 0, 0);
+    expect(bufferTailLines(t, 10)).toEqual([]);
+  });
+
+  it("读不到的行取空串，不跳过 —— 与 viewportLines 同一约定", () => {
+    const t = mkTerm(2, ["l0", null, "l2", "l3"], 3, 3);
+    expect(bufferTailLines(t, 10)).toEqual(["l0", "", "l2"]);
+  });
+
+  it("hashBufferTail 与 bufferTailLines 一一对应", () => {
+    const t = mkTerm(2, ["a", "b", "c"], 2, 2);
+    expect(hashBufferTail(t, 10)).toEqual([hashLine("a"), hashLine("b")]);
   });
 });

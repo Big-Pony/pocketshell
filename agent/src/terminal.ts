@@ -355,6 +355,28 @@ export class TerminalService {
    *
    * 只在诊断路径（diag.screen）上被调用，不进任何热路径。
    */
+  /**
+   * 已沉降的 scrollback 的最后 `n` 行（**不含当前屏**）。
+   *
+   * `-S -n -E -1`：tmux 的 -S/-E 以可视区顶部为 0、负数往历史里数，所以
+   * `-E -1` 正好停在当前屏上面一行 —— 拿到的全是不再变化的历史。刻意排除当前屏：
+   * 那里 CC 的 spinner/计时器逐帧在变，拿它对拍必然假阳。
+   *
+   * 不给 `-J`：要的是物理行，与客户端 buffer 的行一一对应；`-J` 会把折行合并成
+   * 逻辑行，两边行的划分就不同了（复制路径用 -J 是另一回事，那里要的是可读文本）。
+   */
+  async scrollbackLines(name: string, n: number): Promise<string[]> {
+    const lines = Math.max(1, Math.min(2000, Math.floor(n)));
+    const res = await this.tmuxAsync([
+      "-u", "capture-pane", "-p", "-S", `-${lines}`, "-E", "-1", "-t", name,
+    ]);
+    if (res.exitCode !== 0) return [];
+    const text = new TextDecoder().decode(res.stdout);
+    const out = text.split("\n");
+    if (out.length > 0 && out[out.length - 1] === "") out.pop();
+    return out;
+  }
+
   async visibleLines(name: string): Promise<string[]> {
     const res = await this.tmuxAsync(["-u", "capture-pane", "-p", "-t", name]);
     if (res.exitCode !== 0) return [];

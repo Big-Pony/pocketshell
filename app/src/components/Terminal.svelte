@@ -82,7 +82,7 @@
   import { installWebgl, type WebglHandle } from "../lib/term/webgl-renderer";
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
-  import { hashLine, hashViewport } from "../lib/term/screen-probe";
+  import { hashLine, hashViewport, hashBufferTail } from "../lib/term/screen-probe";
   import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
   import {
@@ -364,6 +364,11 @@
     //
     // 采样节流到 SAMPLE_MS：故障是「持续频繁发生」，不需要逐帧，日志也不能刷屏。
     const SAMPLE_MS = 15000;
+    // scrollback 对拍的节流与深度。300 行覆盖「往上翻几屏」的范围，又远小于
+    // tmux 的 history-limit(2000) 与 parse 的 2048 上限。
+    const SCROLLBACK_EVERY = 4;
+    const SCROLLBACK_LINES = 300;
+    let scrollbackTick = 0;
     // 首次采样的基线必须是「挂载时刻」而不是 0：否则第一条日志的 sinceMs 会是
     // `Date.now() - 0` ——一个 Unix 时间戳（实测 1787410257448），而不是时间差。
     // 同理 renderFrames/wroteBytes 的首条差值也就成了「从纪元至今」的累计，读
@@ -458,6 +463,25 @@
           const EMPTY = hashLine("");
           if (hashes.some((h) => h !== EMPTY)) {
             void conn.rpc("diag.screen", { session: sessionId, why, hashes }).catch(() => {});
+          }
+          // scrollback 对拍（2026-08-24）。视口对拍只看屏上 27 行，而「往上翻才
+          // 发现少了一段」的丢失全在 scrollback 里 —— 两边看的都不是出事的地方，
+          // 于是一路报 missingLines=0。今天已经因为这个盲区两次把「没有证据」
+          // 当成「没有问题」。
+          //
+          // 节流到 SCROLLBACK_EVERY 轮一次：它要传几百个哈希、agent 侧再 spawn
+          // 一次 capture-pane，比视口那次贵得多，不该每轮都做。
+          scrollbackTick++;
+          if (scrollbackTick % SCROLLBACK_EVERY === 0) {
+            const tail = hashBufferTail(term, SCROLLBACK_LINES);
+            // 历史还没攒够就不比：buffer 里只有一屏时 tail 是空的，比出来
+            // 「tmux 有 N 行、我一行都没有」——又是一条「拍早了」的假故障。
+            if (tail.length >= 20 && tail.some((h) => h !== EMPTY)) {
+              void conn.rpc("diag.screen", {
+                session: sessionId, why, scope: "scrollback",
+                lines: SCROLLBACK_LINES, hashes: tail,
+              }).catch(() => {});
+            }
           }
         }
       } catch { /* 同上 */ }

@@ -200,8 +200,13 @@ export const parse = {
   diagScreen: (p: RpcParams) => ({
     session: str(p, "session"),
     why: optStr(p, "why") ?? "",
+    // scope=scrollback 时比的是沉降历史，行数远多于一屏，512 的上限会把尾巴
+    // 截掉 —— 而被截掉的行在集合比对里全都算「缺」，直接造出一批假阳。
+    // 2048 与 scrollbackLines 的上限同阶。
+    scope: optStr(p, "scope") === "scrollback" ? "scrollback" as const : "viewport" as const,
+    lines: optNum(p, "lines"),
     hashes: Array.isArray(p.hashes)
-      ? (p.hashes as unknown[]).slice(0, 512).map((n) => (typeof n === "number" && Number.isFinite(n) ? n >>> 0 : 0))
+      ? (p.hashes as unknown[]).slice(0, 2048).map((n) => (typeof n === "number" && Number.isFinite(n) ? n >>> 0 : 0))
       : [],
   }),
   termCapture: (p: RpcParams) => ({
@@ -291,6 +296,27 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
     // 服务端关了诊断而收到 rpc 错误。
     if (!ctx.config.diag) return ok({ ok: true, skipped: "disabled" });
     if (ctx.shell.has(a.session)) return ok({ ok: true, skipped: "shell" });
+    // scrollback 对拍（2026-08-24）：比的是**已沉降的历史**，不是当前屏。
+    //
+    // 为什么单独一条路径：视口对拍只看屏上那 27 行，而「往上翻才发现少了一段」
+    // 的丢失全在 scrollback 里 —— 两边看的都不是出事的地方，于是一路报
+    // missingLines=0。今天已经因为这个盲区两次把「没有证据」当成「没有问题」。
+    //
+    // 这里**不需要**两次确认与配对抵扣：沉降的历史不再变化，没有 spinner 噪音。
+    // 集合比对天然不需要行号对齐（xterm 与 tmux 的 baseY 原点本来就不同）。
+    if (a.scope === "scrollback") {
+      const lines = a.lines ?? 300;
+      const tmux = hashLines(await ctx.terminal.scrollbackLines(a.session, lines));
+      const d = diffScreens(tmux, a.hashes);
+      if (ctx.config.diag) {
+        console.log(formatDiagReport({
+          tag: a.session, kind: "screen", phase: "scrollback",
+          tmuxLines: d.tmuxLines, xtermLines: d.xtermLines,
+          missingLines: d.missingLines, extraLines: d.extraLines, firstDiff: d.firstDiff,
+        }));
+      }
+      return ok({ ok: true });
+    }
     // 取两次 tmux，中间隔一小段：**只有在两次快照里都缺的行才算真缺**。
     //
     // 为什么必须这样（实测，不是设计洁癖）：客户端取哈希 → rpc 上行 → 这里

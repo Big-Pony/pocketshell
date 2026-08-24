@@ -22,6 +22,8 @@ export const normLine = (s: string): string => s.replace(/\s+$/, "");
 interface BufferLineLike { translateToString(trimRight?: boolean): string }
 interface BufferLike {
   readonly viewportY: number;
+  /** 滚到底时的首行。它之上是已沉降的 scrollback —— 见 bufferTailLines。 */
+  readonly baseY: number;
   readonly length: number;
   getLine(y: number): BufferLineLike | undefined;
 }
@@ -53,3 +55,30 @@ export function viewportLines(term: TermLike): string[] {
 
 export const hashViewport = (term: TermLike): number[] =>
   viewportLines(term).map((l) => hashLine(normLine(l)));
+
+/**
+ * 已沉降的 scrollback 的最后 `n` 行（**不含当前屏**）。
+ *
+ * 【2026-08-24 为什么需要它】视口对拍只哈希屏上那 27 行，而「往上翻才发现少了
+ * 一段」的丢失全都发生在 scrollback 里 —— 两边看的都不是出事的地方，所以视口
+ * 对拍一路报 missingLines=0。今天已经因为这个盲区两次把「没有证据」当成
+ * 「没有问题」：一次是重灌截断 scrollback（v1.19.5 才修掉），一次是本条。
+ *
+ * 取 `0..baseY-1` 而不是整个 buffer：baseY 是「滚到底时的首行」，它之上就是
+ * 已经沉降的历史。当前屏被排除是刻意的 —— 那里有 CC 的 spinner/计时器逐帧在变，
+ * 拿它对拍必然假阳（视口对拍为此专门做了两次确认与配对抵扣，这里直接绕开）。
+ */
+export function bufferTailLines(term: TermLike, n: number): string[] {
+  const buf = term.buffer.active;
+  const end = buf.baseY;            // 不含：baseY 起就是当前屏
+  const start = Math.max(0, end - n);
+  const out: string[] = [];
+  for (let i = start; i < end; i++) {
+    const line = buf.getLine(i);
+    out.push(line ? line.translateToString(true) : "");
+  }
+  return out;
+}
+
+export const hashBufferTail = (term: TermLike, n: number): number[] =>
+  bufferTailLines(term, n).map((l) => hashLine(normLine(l)));
