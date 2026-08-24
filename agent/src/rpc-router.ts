@@ -26,6 +26,7 @@ import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { gitReview, type ReviewScope } from "./git-review";
 import { formatDiagReport } from "./diag-report";
 import { diffScreens, hashLines, hashLinesBare } from "./screen-diff";
+import { appendMissingDump, dumpEnabled, missingDumpPath } from "./diag-dump";
 import { chainPathOf, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { checkLatest } from "./update-check";
 import { importTheme } from "./server-theme";
@@ -327,6 +328,14 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
           missingLines: d.missingLines, extraLines: d.extraLines, firstDiff: d.firstDiff,
           missingAt: d.missingAt, missingBare,
         }));
+        // 缺行原文转储：**只落本机文件**，需要 POCKETSHELL_DIAG_DUMP 额外授权。
+        // 行号告诉我们「丢了多少、丢在哪」，答不出「丢的是什么」，而机制通常
+        // 就写在内容里（折行续行？某类字符？整段只落一半？）。见 diag-dump.ts。
+        if (d.missingLines > 0 && dumpEnabled(process.env)) {
+          appendMissingDump(missingDumpPath(), {
+            tag: a.session, ts: new Date().toISOString(), raw, missingAt: d.missingAt,
+          });
+        }
       }
       return ok({ ok: true });
     }
