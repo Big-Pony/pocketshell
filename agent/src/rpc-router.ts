@@ -313,6 +313,7 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
           tag: a.session, kind: "screen", phase: "scrollback",
           tmuxLines: d.tmuxLines, xtermLines: d.xtermLines,
           missingLines: d.missingLines, extraLines: d.extraLines, firstDiff: d.firstDiff,
+          missingAt: d.missingAt,
         }));
       }
       return ok({ ok: true });

@@ -45,7 +45,20 @@ export interface ScreenDiff {
   extraLines: number;
   /** missing 里最靠上那行在 tmux 侧的行号；没有则 -1。 */
   firstDiff: number;
+  /**
+   * missing 各行在 tmux 侧的行号（最多 MISSING_AT_CAP 个）。
+   *
+   * 只有行号、没有任何字符 —— 日志可以贴进公开 issue，这条不能破。
+   * 它要回答的问题是**缺行的分布形状**：
+   *   - 挤在窗口末尾的连续一段 ⇒ 两侧窗口锚点错开，是比对假象；
+   *   - 散落在中段 ⇒ 内容真的被穿插着丢了。
+   * 光看 missingLines 计数区分不了这两种，firstDiff 也只给得出第一个。
+   */
+  missingAt: number[];
 }
+
+/** missingAt 的上限：够看出形状即可，不必把整窗行号搬进日志。 */
+export const MISSING_AT_CAP = 40;
 
 /**
  * 比对两份行哈希。
@@ -76,14 +89,16 @@ export function diffScreens(tmux: number[], xterm: number[]): ScreenDiff {
   const x = new Set(live(xterm));
   let missingLines = 0;
   let firstDiff = -1;
+  const missingAt: number[] = [];
   for (let i = 0; i < t.length; i++) {
     if (!x.has(t[i])) {
       missingLines++;
       if (firstDiff < 0) firstDiff = i;
+      if (missingAt.length < MISSING_AT_CAP) missingAt.push(i);
     }
   }
   const ts = new Set(t);
   let extraLines = 0;
   for (const h of live(xterm)) if (!ts.has(h)) extraLines++;
-  return { tmuxLines: tmux.length, xtermLines: xterm.length, missingLines, extraLines, firstDiff };
+  return { tmuxLines: tmux.length, xtermLines: xterm.length, missingLines, extraLines, firstDiff, missingAt };
 }

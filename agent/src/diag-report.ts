@@ -1,3 +1,5 @@
+import { MISSING_AT_CAP } from "./screen-diff";
+
 // Client-side diagnostics, sanitised and written to the agent's stdout.
 //
 // Why this exists (docs/bug/终端显示异常2): the blank-glyph failure only happens
@@ -175,6 +177,18 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     ] as const) {
       const v = num(p[k]);
       if (v !== undefined) out[k] = v;
+    }
+    // 缺行的行号分布（screen/scrollback）。**只有行号、没有字符**，所以它和
+    // 上面那些计数一样可以进公开日志。看的是形状：连续挤在窗口末尾 = 两侧
+    // 窗口锚点错开的假象，散在中段 = 内容真的被穿插丢了。
+    if (Array.isArray(p.missingAt)) {
+      const at: number[] = [];
+      for (const v of p.missingAt) {
+        if (at.length >= MISSING_AT_CAP) break;
+        const n = num(v);
+        if (n !== undefined) at.push(n);
+      }
+      if (at.length > 0) out.missingAt = at;
     }
     // 12 期 rpc 压缩埋点。只放计数与方法名，绝不放载荷内容——这条日志用户
     // 可能直接贴进公开 issue。method 与 tag 同样过 oneLine + 长度上限。

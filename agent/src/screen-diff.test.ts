@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { diffScreens, hashLine, hashLines, normLine } from "./screen-diff";
+import { diffScreens, hashLine, hashLines, normLine, MISSING_AT_CAP } from "./screen-diff";
 
 describe("normLine", () => {
   it("去行尾空白（tmux 会补空格到 pane 宽度，xterm 不会）", () => {
@@ -136,5 +136,40 @@ describe("动画行的成对特征（成对扣除的依据）", () => {
     const d = diffScreens(t, x);
     const net = d.missingLines - Math.min(d.missingLines, d.extraLines);
     expect(net).toBe(1);
+  });
+});
+
+describe("missingAt —— 缺行的分布形状", () => {
+  // 只靠 missingLines 计数分不清两件事：两侧窗口锚点错开（比对假象）与内容
+  // 真被穿插丢了。行号能分清，且行号里没有任何字符，可以进公开日志。
+  const win = (n: number, skip: (i: number) => boolean = () => false) =>
+    hashLines(Array.from({ length: n }, (_, i) => `line-${i}`).filter((_, i) => !skip(i)));
+
+  it("窗口末尾整段缺失 —— 行号连续，指向锚点错开", () => {
+    const tmux = win(50);
+    const xterm = win(50, (i) => i >= 45);
+    const d = diffScreens(tmux, xterm);
+    expect(d.missingAt).toEqual([45, 46, 47, 48, 49]);
+  });
+
+  it("中段穿插缺失 —— 行号散开，指向真丢内容", () => {
+    const tmux = win(50);
+    const xterm = win(50, (i) => i === 12 || i === 27 || i === 41);
+    const d = diffScreens(tmux, xterm);
+    expect(d.missingAt).toEqual([12, 27, 41]);
+  });
+
+  it("不缺行时为空数组，而不是 [-1] 之类的哨兵", () => {
+    const same = win(20);
+    expect(diffScreens(same, same).missingAt).toEqual([]);
+  });
+
+  it("缺行数超过上限时按 MISSING_AT_CAP 截断，计数仍是全量", () => {
+    const tmux = win(200);
+    const xterm = win(200, (i) => i >= 10);
+    const d = diffScreens(tmux, xterm);
+    expect(d.missingLines).toBe(190);
+    expect(d.missingAt).toHaveLength(MISSING_AT_CAP);
+    expect(d.missingAt[0]).toBe(10);
   });
 });
