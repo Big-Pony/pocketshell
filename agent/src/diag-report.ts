@@ -171,7 +171,7 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     for (const k of [
       "durMs", "buffered",
       "expected", "got", "missing",
-      "tmuxLines", "xtermLines", "missingLines", "extraLines", "firstDiff",
+      "tmuxLines", "xtermLines", "missingLines", "extraLines", "firstDiff", "missingBare",
       "wroteFrames", "wroteBytes", "bufDelta",
       "renderFrames", "dirtyRows", "sinceMs",
     ] as const) {

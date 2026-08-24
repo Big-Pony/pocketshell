@@ -36,6 +36,12 @@ export const normLine = (s: string): string => s.replace(/\s+$/, "");
 
 export const hashLines = (lines: string[]): number[] => lines.map((l) => hashLine(normLine(l)));
 
+/** 两端空白全去掉。必须与 app 侧 screen-probe.ts 的 normLineBare 逐字一致。 */
+export const normLineBare = (s: string): string => s.replace(/^\s+/, "").replace(/\s+$/, "");
+
+export const hashLinesBare = (lines: string[]): number[] =>
+  lines.map((l) => hashLine(normLineBare(l)));
+
 export interface ScreenDiff {
   tmuxLines: number;
   xtermLines: number;

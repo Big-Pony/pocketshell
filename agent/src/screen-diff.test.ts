@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { diffScreens, hashLine, hashLines, normLine, MISSING_AT_CAP } from "./screen-diff";
+import { diffScreens, hashLine, hashLines, hashLinesBare, normLine, normLineBare, MISSING_AT_CAP } from "./screen-diff";
 
 describe("normLine", () => {
   it("去行尾空白（tmux 会补空格到 pane 宽度，xterm 不会）", () => {
@@ -171,5 +171,39 @@ describe("missingAt —— 缺行的分布形状", () => {
     expect(d.missingLines).toBe(190);
     expect(d.missingAt).toHaveLength(MISSING_AT_CAP);
     expect(d.missingAt[0]).toBe(10);
+  });
+});
+
+// normLineBare 是「行真没了」与「缩进对不上」的分界线。它同样必须两端逐字
+// 一致：这组向量与 app/src/lib/term/screen-probe.test.ts 里的那组是**同一份**，改一侧两处同时红。
+describe("normLineBare（两端空白全去）", () => {
+  it("固定向量", () => {
+    expect(normLineBare("  abc  ")).toBe("abc");
+    expect(normLineBare("\tabc\t")).toBe("abc");
+    expect(normLineBare("abc")).toBe("abc");
+    expect(normLineBare("   ")).toBe("");
+    // 内部空白不动 —— 只去两端
+    expect(normLineBare("  a  b  ")).toBe("a  b");
+  });
+
+  it("缩进不同的同一行，normLine 认为不同、normLineBare 认为相同", () => {
+    expect(hashLine(normLine("  x"))).not.toBe(hashLine(normLine("x")));
+    expect(hashLine(normLineBare("  x"))).toBe(hashLine(normLineBare("x")));
+  });
+});
+
+describe("bare 比对把「缩进漂移」与「真丢内容」分开", () => {
+  const tmux = ["  alpha", "  bravo", "  charlie", "  delta"];
+
+  it("整体缩进漂移：严归一报缺，bare 归一不缺", () => {
+    const xterm = tmux.map((l) => l.trimStart());
+    expect(diffScreens(hashLines(tmux), hashLines(xterm)).missingLines).toBe(4);
+    expect(diffScreens(hashLinesBare(tmux), hashLinesBare(xterm)).missingLines).toBe(0);
+  });
+
+  it("真丢内容：两次都缺，bare 归一救不回来", () => {
+    const xterm = ["  alpha", "  charlie", "  delta"];
+    expect(diffScreens(hashLines(tmux), hashLines(xterm)).missingLines).toBe(1);
+    expect(diffScreens(hashLinesBare(tmux), hashLinesBare(xterm)).missingLines).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bufferTailLines, hashBufferTail, hashLine, hashViewport, normLine, viewportLines } from "./screen-probe";
+import { bufferTailLines, hashBufferTail, hashLine, hashViewport, normLine, normLineBare, viewportLines } from "./screen-probe";
 
 // agent/src/screen-diff.ts 的 hashLine 必须与这里逐字一致，否则对拍出来的差异
 // 全是假的。这组固定向量是两端的契约：**改动任一侧的哈希实现，两处测试同时红**。
@@ -98,5 +98,23 @@ describe("bufferTailLines", () => {
   it("hashBufferTail 与 bufferTailLines 一一对应", () => {
     const t = mkTerm(2, ["a", "b", "c"], 2, 2);
     expect(hashBufferTail(t, 10)).toEqual([hashLine("a"), hashLine("b")]);
+  });
+});
+
+// normLineBare 是「行真没了」与「缩进对不上」的分界线。它同样必须两端逐字
+// 一致：这组向量与 agent/src/screen-diff.test.ts 里的那组是**同一份**，改一侧两处同时红。
+describe("normLineBare（两端空白全去）", () => {
+  it("固定向量", () => {
+    expect(normLineBare("  abc  ")).toBe("abc");
+    expect(normLineBare("\tabc\t")).toBe("abc");
+    expect(normLineBare("abc")).toBe("abc");
+    expect(normLineBare("   ")).toBe("");
+    // 内部空白不动 —— 只去两端
+    expect(normLineBare("  a  b  ")).toBe("a  b");
+  });
+
+  it("缩进不同的同一行，normLine 认为不同、normLineBare 认为相同", () => {
+    expect(hashLine(normLine("  x"))).not.toBe(hashLine(normLine("x")));
+    expect(hashLine(normLineBare("  x"))).toBe(hashLine(normLineBare("x")));
   });
 });

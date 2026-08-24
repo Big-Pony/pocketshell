@@ -25,7 +25,7 @@ import { fsTree, fsRead, fsDiff, fsOp, fsUploadCheck, fsResolveName, fsUploadChu
 import { gitLog, gitBranches, gitStatus } from "./git-service";
 import { gitReview, type ReviewScope } from "./git-review";
 import { formatDiagReport } from "./diag-report";
-import { diffScreens, hashLines } from "./screen-diff";
+import { diffScreens, hashLines, hashLinesBare } from "./screen-diff";
 import { chainPathOf, wireStatusline, unwireStatusline } from "./statusline-wire";
 import { checkLatest } from "./update-check";
 import { importTheme } from "./server-theme";
@@ -208,6 +208,10 @@ export const parse = {
     hashes: Array.isArray(p.hashes)
       ? (p.hashes as unknown[]).slice(0, 2048).map((n) => (typeof n === "number" && Number.isFinite(n) ? n >>> 0 : 0))
       : [],
+    // 同一批行的「两端空白全去」哈希。老客户端不发，为空即跳过第二次比对。
+    hashesBare: Array.isArray(p.hashesBare)
+      ? (p.hashesBare as unknown[]).slice(0, 2048).map((n) => (typeof n === "number" && Number.isFinite(n) ? n >>> 0 : 0))
+      : [],
   }),
   termCapture: (p: RpcParams) => ({
     session: str(p, "session"),
@@ -306,14 +310,21 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
     // 集合比对天然不需要行号对齐（xterm 与 tmux 的 baseY 原点本来就不同）。
     if (a.scope === "scrollback") {
       const lines = a.lines ?? 300;
-      const tmux = hashLines(await ctx.terminal.scrollbackLines(a.session, lines));
-      const d = diffScreens(tmux, a.hashes);
+      const raw = await ctx.terminal.scrollbackLines(a.session, lines);
+      const d = diffScreens(hashLines(raw), a.hashes);
+      // 第二次比对：两端空白全去。它把「行真没了」与「行还在、缩进对不上」
+      // 分开 —— 后者在集合比对里同样表现为 missing+extra 成对，光看第一组
+      // 数字区分不了。老客户端不发 hashesBare，此时报 -1（读不到），别报 0
+      // （那是「查了，没缺」，与「没查」是两回事）。
+      const missingBare = a.hashesBare.length > 0
+        ? diffScreens(hashLinesBare(raw), a.hashesBare).missingLines
+        : -1;
       if (ctx.config.diag) {
         console.log(formatDiagReport({
           tag: a.session, kind: "screen", phase: "scrollback",
           tmuxLines: d.tmuxLines, xtermLines: d.xtermLines,
           missingLines: d.missingLines, extraLines: d.extraLines, firstDiff: d.firstDiff,
-          missingAt: d.missingAt,
+          missingAt: d.missingAt, missingBare,
         }));
       }
       return ok({ ok: true });

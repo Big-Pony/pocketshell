@@ -82,3 +82,17 @@ export function bufferTailLines(term: TermLike, n: number): string[] {
 
 export const hashBufferTail = (term: TermLike, n: number): number[] =>
   bufferTailLines(term, n).map((l) => hashLine(normLine(l)));
+
+/**
+ * 只留可见字符的归一：两端空白全去掉。必须与 agent 侧的 normLineBare 逐字一致。
+ *
+ * 它存在的唯一目的是**把「行真的没了」与「行还在、只是缩进对不上」分开**。
+ * normLine 保留行首缩进，所以缩进差一格就会让集合比对同时报 missing 和 extra
+ * ——那和整行丢失的指纹长得一模一样。用两端都去掉空白的哈希再比一次：
+ *   - 两次都缺 ⇒ 内容真的不在 buffer 里；
+ *   - 只有严归一那次缺 ⇒ 字是在的，差的是空白，不是丢内容。
+ */
+export const normLineBare = (s: string): string => s.replace(/^\s+/, "").replace(/\s+$/, "");
+
+export const hashBufferTailBare = (term: TermLike, n: number): number[] =>
+  bufferTailLines(term, n).map((l) => hashLine(normLineBare(l)));

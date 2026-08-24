@@ -82,7 +82,7 @@
   import { installWebgl, type WebglHandle } from "../lib/term/webgl-renderer";
   import { snapshotAtlas, formatSnapshot } from "../lib/term/atlas-probe";
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
-  import { hashLine, hashViewport, hashBufferTail } from "../lib/term/screen-probe";
+  import { hashLine, hashViewport, hashBufferTail, hashBufferTailBare } from "../lib/term/screen-probe";
   import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
   import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
   import {
@@ -477,9 +477,12 @@
             // 历史还没攒够就不比：buffer 里只有一屏时 tail 是空的，比出来
             // 「tmux 有 N 行、我一行都没有」——又是一条「拍早了」的假故障。
             if (tail.length >= 20 && tail.some((h) => h !== EMPTY)) {
+              // 同一批行送两套哈希：hashes 保留行首缩进，hashesBare 两端空白全去。
+              // 只有 hashes 那套报缺、bare 那套不缺，说明字还在、差的是空白。
               void conn.rpc("diag.screen", {
                 session: sessionId, why, scope: "scrollback",
                 lines: SCROLLBACK_LINES, hashes: tail,
+                hashesBare: hashBufferTailBare(term, SCROLLBACK_LINES),
               }).catch(() => {});
             }
           }
