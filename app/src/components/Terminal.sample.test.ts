@@ -203,3 +203,42 @@ test("终端销毁后心跳停止 —— 往已 dispose 的终端读 buffer 会�
   await vi.advanceTimersByTimeAsync(20_000);
   expect(kindsOf(rpc).filter((k) => k === "write").length).toBe(after);
 });
+
+// ---- resize 埋点（2026-08-24）----
+// 用户报告：「终端在输出的时候，我没有进行任何操作」却出现内容错乱。而
+// ResizeObserver 不需要用户操作就会触发（软键盘、滚动条出没、布局变化都算）。
+// 此前**零 resize 埋点**，「到底有没有发生 resize」这个问题在日志里根本答不了。
+//
+// 两条：尺寸真变了要上报（带触发源），没变不许上报（否则每次滚动都是噪音）。
+test("尺寸变化时上报 resize，带触发源与前后 cols", async () => {
+  vi.useFakeTimers();
+  const rpc = okRpc();
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-rz1", active: true } });
+  await vi.advanceTimersByTimeAsync(1600);
+  const rz = callsOf(rpc, "diag.report")
+    .map((c) => c[1] as Record<string, unknown>)
+    .filter((p) => p.kind === "resize");
+  // jsdom 下首次 refit 会把 0×0 变成实际值，至少有一条
+  for (const r of rz) {
+    expect(typeof r.why).toBe("string");
+    expect(typeof r.toCols).toBe("number");
+    expect(r.sentToPty).toBe(1);
+  }
+});
+
+test("尺寸没变时不上报 resize —— 否则每次滚动都是噪音", async () => {
+  vi.useFakeTimers();
+  const rpc = okRpc();
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-rz2", active: true } });
+  await vi.advanceTimersByTimeAsync(1600);
+  const before = callsOf(rpc, "diag.report")
+    .map((c) => c[1] as Record<string, unknown>)
+    .filter((p) => p.kind === "resize").length;
+  // 再触发几次 resize 事件，但尺寸不变
+  for (let i = 0; i < 3; i++) window.dispatchEvent(new Event("resize"));
+  await vi.advanceTimersByTimeAsync(500);
+  const after = callsOf(rpc, "diag.report")
+    .map((c) => c[1] as Record<string, unknown>)
+    .filter((p) => p.kind === "resize").length;
+  expect(after).toBe(before);
+});

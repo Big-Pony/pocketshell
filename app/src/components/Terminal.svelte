@@ -156,6 +156,15 @@
   // device's xterm dims are unchanged (需求2 — re-assert THIS device's size on a
   // shared tmux session another device resized), then redraws to fill it.
   let activateRefit: () => void = () => {};
+  // 【2026-08-24】resize 埋点的触发源。用户报告「终端在输出的时候我没有进行任何
+  // 操作」却出现内容错乱，而 ResizeObserver 不需要用户操作就会触发（软键盘、
+  // 滚动条出没、布局变化都算）。此前零 resize 埋点，「到底有没有 resize」在日志
+  // 里答不了。只记数字：触发源 + 变化前后的 cols/rows。
+  //
+  // 必须是**组件作用域**：字号/字体两个 $effect 在这一层，够不到 onMount 内部的
+  // 局部变量（写在里面会 ReferenceError，且发生在 queueMicrotask 里 —— 不是同步
+  // 抛，测试只报 unhandled error，很容易被当成噪音放过）。
+  let refitWhy = "init";
   // 切 tab 时拍一份滚动/尺寸快照（2026-08-09 取证）。onMount 里赋值，由下面
   // 跟随 active 的 $effect 调用，所以要活过 onMount 的闭包。
   let reportScroll: (why: string) => void = () => {};
@@ -552,10 +561,20 @@
       while (screen && screen.scrollWidth > host.clientWidth && term.cols > 20 && guard-- > 0) {
         term.resize(term.cols - 1, term.rows);
       }
-      if (term.cols !== lastSentCols || term.rows !== lastSentRows) {
+      const changed = term.cols !== lastSentCols || term.rows !== lastSentRows;
+      if (changed) {
+        const fromCols = lastSentCols;
+        const fromRows = lastSentRows;
         lastSentCols = term.cols;
         lastSentRows = term.rows;
         conn.resize(sessionId, term.cols, term.rows);
+        // 尺寸真的变了才记：不变的 refit 每次滚动都可能发生，记了就是噪音。
+        if (diagOn()) {
+          void conn.rpc("diag.report", {
+            tag: sessionId, kind: "resize", why: refitWhy,
+            fromCols, fromRows, toCols: term.cols, toRows: term.rows, sentToPty: 1,
+          }).catch(() => {});
+        }
       }
     };
 
@@ -818,6 +837,9 @@
       // device shrank it, this pulls it back and tmux repaints via the live
       // stream. No explicit reseed here — that would clear+redraw on every tab
       // switch (and double-reseed the dirty-stash case that flushPending handles).
+      // 激活必发一次 resize（见上），所以它在日志里天然高频 —— 单独标记，
+      // 免得把「没人操作却 resize」这个真正要找的信号淹掉。
+      refitWhy = "activate";
       lastSentCols = -1;
       lastSentRows = -1;
       refit();
@@ -947,6 +969,7 @@
       if (resizeDebounce) clearTimeout(resizeDebounce);
       resizeDebounce = setTimeout(() => {
         resizeDebounce = undefined;
+        refitWhy = "observer";
         // 宽度变化后**不**重灌历史（2026-08-08）：capture-pane -J 灌进来的是
         // 软折行（isWrapped），xterm 自带的 reflow 对软折行有效（实测：40 列
         // 写 75 字符折成 2 行，resize 到 80 列合并回 1 行、内容完整）。
@@ -976,7 +999,7 @@
         wasMeasurable = now;
         // active 守卫与 onResize 保持一致：非活动 tab 没有任何理由去打扰共享的
         // tmux 会话。它被切成活动时，下面那个 $effect 会走 activateRefit。
-        if (became) { if (active) refit(); return; }
+        if (became) { if (active) { refitWhy = "became-measurable"; refit(); } return; }
         onResize();
       });
       ro.observe(host);
@@ -1084,7 +1107,7 @@
     const fs = fontSize;
     if (term && fit) {
       term.options.fontSize = fs;
-      if (active) queueMicrotask(() => refit());
+      if (active) queueMicrotask(() => { refitWhy = "font-size"; refit(); });
     }
   });
 
@@ -1098,7 +1121,7 @@
     const chain = termFontFamily();
     if (term.options.fontFamily === chain) return; // 同一套字体，什么都不用做
     term.options.fontFamily = chain;
-    if (active) queueMicrotask(() => refit());
+    if (active) queueMicrotask(() => { refitWhy = "font-family"; refit(); });
   });
 </script>
 

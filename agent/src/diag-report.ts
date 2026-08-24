@@ -55,7 +55,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -126,6 +126,18 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
       "rttMs", "snapshotBytes", "framesDuringAwait", "bytesDuringAwait",
       "bufferLenBefore", "bufferLenAfter",
     ] as const) {
+      const v = num(p[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    // resize 埋点（2026-08-24）。用户明确报告「终端在输出的时候我没有进行任何
+    // 操作」，而 ResizeObserver 不需要用户操作就会触发（软键盘、滚动条出没、
+    // 布局变化都算）。此前**完全没有 resize 埋点**，所以「有没有发生 resize」
+    // 这个问题在日志里根本答不了 —— 只能靠猜。
+    //
+    // `why` 区分触发源（ro / window / activate / font / became-measurable），
+    // fromCols→toCols 给出实际变化。没有内容，只有数字。
+    if (typeof p.why === "string") out.why = oneLine(p.why, MAX_TAG);
+    for (const k of ["fromCols", "fromRows", "toCols", "toRows", "sentToPty"] as const) {
       const v = num(p[k]);
       if (v !== undefined) out[k] = v;
     }

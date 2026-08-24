@@ -181,6 +181,31 @@ for (const [session, rs] of [...bySession].sort()) {
     console.log(`      ⇒ 最严重一次损失 ${worst.before - worst.after} 行。查 reseedLines：拉的行数必须 >= 重灌前的 buffer 长度`);
   }
 
+  // resize 与屏幕缺行的时间相关性（2026-08-24）。用户报告「终端在输出的时候
+  // 我没有进行任何操作」，所以这里要回答的不是「有没有 resize」，而是
+  // **「没人操作时有没有 resize，且它是否紧挨着缺行」**。
+  //
+  // why=activate 是切 tab 必发的（lastSentCols=-1 强制下发），单独排除，
+  // 否则它会把真正要找的信号淹掉。
+  const resizes = rs.filter((r) => r.kind === "resize");
+  const spontaneous = resizes.filter((r) => r.why !== "activate");
+  if (spontaneous.length) {
+    console.log(`  ⚠ 非激活类 resize ${spontaneous.length} 次（没人切 tab 也发生了尺寸变化）`);
+    for (const r of spontaneous.slice(-5)) {
+      console.log(`      ${hhmmss(r.ts)} why=${String(r.why)} ${n(r.fromCols) ?? "?"}×${n(r.fromRows) ?? "?"} → ${n(r.toCols) ?? "?"}×${n(r.toRows) ?? "?"}`);
+    }
+    // 与缺行的时间相关：30s 内同时出现即高度可疑
+    const near = bad.filter((b) =>
+      spontaneous.some((r) => Math.abs(Date.parse(r.ts) - Date.parse(b.ts)) < 30_000));
+    if (near.length) {
+      console.log(`      ⇒ 其中 ${near.length} 次缺行发生在 resize 后 30s 内 —— 高度怀疑 resize 重排与流式输出叠加`);
+    } else {
+      console.log(`      ⇒ 但没有一次缺行落在 resize 附近 —— resize 与本次缺行无关，别顺着它查`);
+    }
+  } else if (bad.length) {
+    console.log(`  ⚠ 本时段没有任何非激活类 resize —— 缺行**不是** resize 引起的`);
+  }
+
   // 一句话结论
   const verdict = shrank.length > 0
     ? "重灌把 scrollback 抹短了 ⇒ 历史丢失（对拍看不见）"
