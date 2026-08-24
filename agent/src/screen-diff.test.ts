@@ -207,3 +207,27 @@ describe("bare 比对把「缩进漂移」与「真丢内容」分开", () => {
     expect(diffScreens(hashLinesBare(tmux), hashLinesBare(xterm)).missingLines).toBe(1);
   });
 });
+
+describe("liveTmux/liveXterm —— missingAt 下标的量纲", () => {
+  // 没有它就分不出「连续一段贴着窗口末尾」（锚点错开）与「连续一段在中间」
+  // （真丢）。踩过一次：拿含空行的 300 去推预期 firstDiff，实际非空 252。
+  it("报的是滤空之后的行数，不是原始行数", () => {
+    const tmux = hashLines(["a", "", "b", "", "c"]);
+    const xterm = hashLines(["a", "b", "c", "", "", ""]);
+    const d = diffScreens(tmux, xterm);
+    expect(d.tmuxLines).toBe(5);
+    expect(d.xtermLines).toBe(6);
+    expect(d.liveTmux).toBe(3);
+    expect(d.liveXterm).toBe(3);
+  });
+
+  it("missingAt 的下标可以直接和 liveTmux 比，判断是否贴着末尾", () => {
+    const tmux = hashLines(["a", "", "b", "c", "d"]);
+    const xterm = hashLines(["a", "b"]);
+    const d = diffScreens(tmux, xterm);
+    expect(d.liveTmux).toBe(4);
+    // 缺的是 live 下标 2、3 —— 正好是末尾两行
+    expect(d.missingAt).toEqual([2, 3]);
+    expect(d.missingAt[d.missingAt.length - 1]).toBe(d.liveTmux - 1);
+  });
+});

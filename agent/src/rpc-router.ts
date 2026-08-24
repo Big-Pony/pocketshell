@@ -323,6 +323,7 @@ export const RPC_TABLE: Record<string, RpcHandler> = {
         console.log(formatDiagReport({
           tag: a.session, kind: "screen", phase: "scrollback",
           tmuxLines: d.tmuxLines, xtermLines: d.xtermLines,
+          liveTmux: d.liveTmux, liveXterm: d.liveXterm,
           missingLines: d.missingLines, extraLines: d.extraLines, firstDiff: d.firstDiff,
           missingAt: d.missingAt, missingBare,
         }));

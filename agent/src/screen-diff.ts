@@ -52,6 +52,16 @@ export interface ScreenDiff {
   /** missing 里最靠上那行在 tmux 侧的行号；没有则 -1。 */
   firstDiff: number;
   /**
+   * 滤掉空行后两侧各自的行数。
+   *
+   * **missingAt 的行号是这个数组里的下标，不是 tmuxLines 的下标**，所以少了它
+   * 就判不出「连续一段是否恰好贴着窗口末尾」——而那正是区分锚点错开与真丢
+   * 内容的判据。踩过一次：拿 tmuxLines(300) 当live长度去推 firstDiff 的预期值，
+   * 实际非空只有 252 行，推出来的结论是错的。
+   */
+  liveTmux: number;
+  liveXterm: number;
+  /**
    * missing 各行在 tmux 侧的行号（最多 MISSING_AT_CAP 个）。
    *
    * 只有行号、没有任何字符 —— 日志可以贴进公开 issue，这条不能破。
@@ -106,5 +116,9 @@ export function diffScreens(tmux: number[], xterm: number[]): ScreenDiff {
   const ts = new Set(t);
   let extraLines = 0;
   for (const h of live(xterm)) if (!ts.has(h)) extraLines++;
-  return { tmuxLines: tmux.length, xtermLines: xterm.length, missingLines, extraLines, firstDiff, missingAt };
+  return {
+    tmuxLines: tmux.length, xtermLines: xterm.length,
+    liveTmux: t.length, liveXterm: live(xterm).length,
+    missingLines, extraLines, firstDiff, missingAt,
+  };
 }
