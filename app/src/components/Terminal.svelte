@@ -565,6 +565,13 @@
     let shrinkTimer: ReturnType<typeof setTimeout> | undefined;
     let confirmingShrink = false;
     refit = () => {
+      // 确认标志必须在**任何早退之前**取走并清零（2026-08-25 线上逮到的 bug）：
+      // 下面两道守卫（不可测量 / 尺寸不可信）会 return，若清零写在它们之后，一次
+      // 早退的确认复量就把 `true` 永久留在那里，此后**任意一次** refit 都被当成
+      // 「确认通过」而直接放行收缩 —— 迟滞被整个绕过，且会一直粘着。
+      // 线上现象：03:19:05.591 的 27→26 就是这么漏出去的（100ms 后又弹回 27）。
+      const confirming = confirmingShrink;
+      confirmingShrink = false;
       // 量不到就不量（12 期真机 bug 的根因防线，详见 lib/term/fit-guard.ts）。
       //
       // `display:none` 的元素不参与布局，`getComputedStyle(el).width` 会把**声明值**
@@ -585,8 +592,6 @@
       // 只记可信值：兜底一旦被塌陷值污染，一次性故障就变成永久故障。
       rememberDims(d);
       // 变高立刻应用，变矮先压住 —— 只有变矮会把行推进 scrollback 并永久定格。
-      const confirming = confirmingShrink;
-      confirmingShrink = false;
       if (shrinkTimer) { clearTimeout(shrinkTimer); shrinkTimer = undefined; }
       let rows = d.rows;
       if (shouldDeferShrink({ cols: term.cols, rows: term.rows }, d, confirming)) {

@@ -142,6 +142,11 @@ export const SHRINK_HOLD_MS = 600;
  * @param next       刚量到的尺寸
  * @param confirming 是否是确认窗口到点后的复量。到点了就必须放行，否则持续偏小
  *                   的尺寸会被无限期推迟，终端再也缩不下去。
+ *
+ * **调用方硬约束**：`confirming` 必须在 refit 的**所有早退守卫之前**取走并清零。写在
+ * 早退之后，一次早退的确认复量就会把它永久留成 `true`，此后任意一次 refit 都被当成
+ * 「确认通过」而直接放行收缩——迟滞被整个绕过，且一直粘着。这不是假想：2026-08-25
+ * 首次部署当天线上就漏出一次 27→26（100ms 后弹回 27），根因即此。
  */
 export function shouldDeferShrink(current: Dims, next: Dims, confirming: boolean): boolean {
   if (confirming) return false;
