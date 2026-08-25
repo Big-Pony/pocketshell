@@ -102,3 +102,48 @@ export function recallDims(store?: Storage): Dims | null {
     return null;
   }
 }
+
+// ── 行数收缩迟滞（2026-08-25，「终端中间丢行」的根因防线）───────────────────
+//
+// 症状：终端显示比 tmux 复制模式少内容、读起来不通顺。取证到的判据是
+// `missingLines == extraLines` 且 `liveTmux == liveXterm`（15 条记录无一例外）
+// ——**一个字节都没丢**，两侧行数一样多，只是其中若干行各存了**不同版本**。
+//
+// 根因链：
+//   1. ResizeObserver 在布局未稳时（软键盘、工具条、安全区）量到瞬时坍缩值；
+//   2. refit() 立刻 `term.resize()` —— xterm 当场把顶部 N 行推进 scrollback，
+//      **按那一刻的内容永久定格**（scrollback 一旦写入就不可改）；
+//   3. 同时把这个假尺寸发给 PTY，tmux 收 SIGWINCH 整屏重绘；
+//   4. ~200ms 后尺寸弹回，xterm 把那 N 行从 scrollback 拉回视口；
+//   5. tmux 按错尺寸重绘的字节一个 RTT（真机中位 1931ms）后才到，盖在被拉回的
+//      那 N 行上 —— tmux 的 history 留着旧版本，xterm 的 scrollback 换成了新版本。
+//
+// 线上实测的 22 次 resize **没有一次是真实的尺寸变化**，全是「先塌一截、随即
+// 弹回」：27→26→27（118/184/204ms）、27→25→27（178/193ms）、29→22→27（2.4s）；
+// 而缺行在 `missingAt` 里**成对相邻**，每对的行数正好等于那次塌陷的幅度。
+//
+// 对策：**变高立刻应用，变矮先压住**。变高不会把行推进 scrollback，无害；只有
+// 变矮会造成不可逆定格，所以要等它稳住再应用。代价是真实的收缩（转屏、开键盘）
+// 晚 HOLD_MS 生效，这期间底部几行被裁掉一点——远好过 scrollback 被永久写坏。
+//
+// 顺带的收益同样重要：假尺寸不再 `conn.resize` 发出去，tmux 也就不会为一次
+// 200ms 的抖动做整屏重绘 —— 那本来就是移动链路上纯粹的浪费。
+
+/**
+ * 收缩确认窗口。要盖住线上观测到的抖动区间（最长 204ms），又不能长到让真实的
+ * 转屏/开键盘明显迟滞。
+ */
+export const SHRINK_HOLD_MS = 600;
+
+/**
+ * 这次测量该不该**暂缓**应用。
+ *
+ * @param current    终端当前的格子尺寸
+ * @param next       刚量到的尺寸
+ * @param confirming 是否是确认窗口到点后的复量。到点了就必须放行，否则持续偏小
+ *                   的尺寸会被无限期推迟，终端再也缩不下去。
+ */
+export function shouldDeferShrink(current: Dims, next: Dims, confirming: boolean): boolean {
+  if (confirming) return false;
+  return next.rows < current.rows;
+}

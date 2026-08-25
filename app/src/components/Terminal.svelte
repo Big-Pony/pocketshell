@@ -84,7 +84,7 @@
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
   import { hashLine, hashViewport, hashBufferTail, hashBufferTailBare } from "../lib/term/screen-probe";
   import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
-  import { isMeasurable, isPlausible, rememberDims } from "../lib/term/fit-guard";
+  import { isMeasurable, isPlausible, rememberDims, shouldDeferShrink, SHRINK_HOLD_MS } from "../lib/term/fit-guard";
   import {
     buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite,
     historyExpectBytes, reseedLines, seedRetryDelayMs, SEED_MAX_ATTEMPTS, type ReseedTrigger,
@@ -559,6 +559,11 @@
     // size actually differs.
     let lastSentCols = 0;
     let lastSentRows = 0;
+    // 行数收缩迟滞的状态（2026-08-25，「中间丢行」的根因，详见 fit-guard.ts 末节）。
+    // 一次变矮先不应用，压 SHRINK_HOLD_MS 再复量；`confirmingShrink` 标记这一次
+    // 复量必须放行，否则持续偏小的尺寸会被无限期推迟。
+    let shrinkTimer: ReturnType<typeof setTimeout> | undefined;
+    let confirmingShrink = false;
     refit = () => {
       // 量不到就不量（12 期真机 bug 的根因防线，详见 lib/term/fit-guard.ts）。
       //
@@ -579,7 +584,22 @@
       if (!isPlausible(d)) return;
       // 只记可信值：兜底一旦被塌陷值污染，一次性故障就变成永久故障。
       rememberDims(d);
-      if (term.cols !== d.cols || term.rows !== d.rows) term.resize(d.cols, d.rows);
+      // 变高立刻应用，变矮先压住 —— 只有变矮会把行推进 scrollback 并永久定格。
+      const confirming = confirmingShrink;
+      confirmingShrink = false;
+      if (shrinkTimer) { clearTimeout(shrinkTimer); shrinkTimer = undefined; }
+      let rows = d.rows;
+      if (shouldDeferShrink({ cols: term.cols, rows: term.rows }, d, confirming)) {
+        rows = term.rows; // 本次维持原高度：不缩、也不通知 PTY
+        const why = refitWhy;
+        shrinkTimer = setTimeout(() => {
+          shrinkTimer = undefined;
+          confirmingShrink = true;
+          refitWhy = why;
+          refit(); // 到点重新量：仍然偏小才是真的变矮，那时才应用
+        }, SHRINK_HOLD_MS);
+      }
+      if (term.cols !== d.cols || term.rows !== rows) term.resize(d.cols, rows);
       // proposeDimensions can over-count by ~1 col on narrow mobile viewports
       // (padding/scrollbar rounding), clipping the rightmost cells off-screen.
       // Shrink a column at a time until the rendered screen fits the host width.
@@ -994,6 +1014,8 @@
     const onResize = () => {
       if (!active) return;
       if (resizeDebounce) clearTimeout(resizeDebounce);
+      // 挂起的收缩确认同样会 refit 一个已 dispose 的终端（同 seedTimer 的理由）。
+      if (shrinkTimer) { clearTimeout(shrinkTimer); shrinkTimer = undefined; }
       resizeDebounce = setTimeout(() => {
         resizeDebounce = undefined;
         refitWhy = "observer";

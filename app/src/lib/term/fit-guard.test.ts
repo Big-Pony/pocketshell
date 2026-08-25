@@ -1,6 +1,7 @@
 import { test, expect, describe } from "vitest";
 import {
   isMeasurable, isPlausible, rememberDims, recallDims, MIN_COLS, MIN_ROWS,
+  shouldDeferShrink, SHRINK_HOLD_MS,
 } from "./fit-guard";
 
 /** 一个够用的 Storage 替身：不碰真实 localStorage，测试之间互不串味。 */
@@ -108,5 +109,31 @@ describe("兜底尺寸的记忆与取回", () => {
   test("隐私模式下 Storage 抛异常时，读写都不炸", () => {
     expect(() => rememberDims({ cols: 41, rows: 29 }, throwingStore())).not.toThrow();
     expect(recallDims(throwingStore())).toBeNull();
+  });
+});
+
+describe("行数收缩迟滞", () => {
+  test("变高立刻应用，不迟滞", () => {
+    expect(shouldDeferShrink({ cols: 61, rows: 25 }, { cols: 61, rows: 27 }, false)).toBe(false);
+  });
+
+  test("行数不变不迟滞（只有宽度变了也照常应用）", () => {
+    expect(shouldDeferShrink({ cols: 61, rows: 27 }, { cols: 40, rows: 27 }, false)).toBe(false);
+  });
+
+  test("变矮要压住 —— 线上那五次抖动的第一跳", () => {
+    for (const rows of [26, 25, 22]) {
+      expect(shouldDeferShrink({ cols: 61, rows: 27 }, { cols: 61, rows }, false)).toBe(true);
+    }
+    // activate 量成 29 之后回落到 27，也是一次变矮
+    expect(shouldDeferShrink({ cols: 61, rows: 29 }, { cols: 61, rows: 27 }, false)).toBe(true);
+  });
+
+  test("确认窗口到点后必须放行，否则真实的收缩永远缩不下去", () => {
+    expect(shouldDeferShrink({ cols: 61, rows: 27 }, { cols: 61, rows: 22 }, true)).toBe(false);
+  });
+
+  test("确认窗口足以盖住线上观测到的抖动区间（最长 204ms）", () => {
+    expect(SHRINK_HOLD_MS).toBeGreaterThan(204);
   });
 });
