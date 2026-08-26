@@ -123,6 +123,9 @@ export class DemoAgent {
         break;
       case "renameSession":
         this.sessions = this.sessions.map((s) => (s.name === msg.sessionId ? { ...s, name: msg.name } : s));
+        // 订阅跟着会话身份走（对齐真 agent 的 server.ts）：输出从此以新名投递，
+        // 客户端不会重新 attach，不迁的话这个会话对每条连接都会当场停止推流。
+        if (this.attached.delete(msg.sessionId)) this.attached.add(msg.name);
         this.broadcastSessions();
         break;
       case "rpc":        this.onRpc(msg.id, msg.method, msg.params); break;

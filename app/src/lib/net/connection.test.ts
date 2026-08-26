@@ -1685,3 +1685,72 @@ test("多会话各自记账，互不串扰", () => {
   out("a", 9);
   expect(seen).toEqual([{ sessionId: "a", expected: 3, got: 9, missing: 6 }]);
 });
+
+describe("会话重命名 —— 本地订阅账要跟服务端一起迁（2026-08-26 回归）", () => {
+  // 服务端的订阅集**按会话名**记，rename 成功后它把订阅从旧名迁到新名。客户端
+  // attach() 有个 `subscribed` 早退守卫（避免重复 attach 白补一遍 backlog），本地这份
+  // 账一旦不迁，旧名就永远留在 attached 里，而服务端那侧根本没有它。
+  const mk = () => {
+    const { sched, advance } = makeFakeScheduler();
+    const created: FakeWS[] = [];
+    const conn = new Connection({
+      url: "ws://x", scheduler: sched, random: () => 0.5,
+      wsFactory: () => { const w = new FakeWS(); created.push(w); return w; },
+      channelFactory: passthroughInitiator,
+    });
+    completeHandshake(created[0]!);
+    return { conn, created, advance };
+  };
+  const msgs = (w: FakeWS) => businessSent(w).map((b) => decodeMsg(b) as any);
+
+  it("重命名后用同一个名字新建会话，attach 帧必须真的发出去", () => {
+    // 真机症状：重命名 aippt→teachppt 后新建的 aippt「输入什么都不显示，别的窗口正常」。
+    // 早退守卫吃掉了 attach 帧 → 服务端没有这个订阅 → 该会话每一帧输出都被丢弃。
+    const h = mk();
+    h.conn.attach("aippt");
+    h.conn.renameSession("aippt", "teachppt");
+    h.conn.attach("aippt"); // 同名新会话
+    const a = msgs(h.created[0]!).filter((m) => m.type === "attach" && m.sessionId === "aippt");
+    expect(a.length).toBe(2); // 重命名前一次、同名新会话一次
+    h.conn.dispose();
+  });
+
+  it("重命名后重连，flushAndRestore 用新名 attach，不再拿旧名", () => {
+    const h = mk();
+    h.conn.attach("aippt");
+    h.conn.renameSession("aippt", "teachppt");
+    h.created[0]!.close();
+    h.advance(500);
+    completeHandshake(h.created[1]!);
+    const ids = msgs(h.created[1]!).filter((m) => m.type === "attach").map((m) => m.sessionId);
+    expect(ids).toContain("teachppt");
+    expect(ids).not.toContain("aippt");
+    h.conn.dispose();
+  });
+
+  it("从未 attach 过的会话被重命名，不会凭空订阅新名", () => {
+    // rename 失败、或该标签页压根没打开过时，不能自作主张把新名塞进 attached，
+    // 否则重连会订阅一个用户根本没在看的会话。
+    const h = mk();
+    h.conn.renameSession("aippt", "teachppt");
+    h.created[0]!.close();
+    h.advance(500);
+    completeHandshake(h.created[1]!);
+    expect(msgs(h.created[1]!).filter((m) => m.type === "attach").length).toBe(0);
+    h.conn.dispose();
+  });
+
+  it("旧名的 seq 进度要清掉 —— 同名新会话不能拿着旧 seq 去要回放", () => {
+    // 服务端的 replay 环同样按名字建，同名新会话是一条从 1 开始的新环。带着旧名的
+    // 高 seq 去 attach，开头那几帧会被当成「已经收过」而静默跳过。
+    const h = mk();
+    h.conn.attach("aippt");
+    h.created[0]!.emit(encode({ type: "output", sessionId: "aippt", seq: 42, data: toB64(new Uint8Array([65])) }));
+    h.conn.renameSession("aippt", "teachppt");
+    h.conn.attach("aippt");
+    const a = msgs(h.created[0]!).filter((m) => m.type === "attach" && m.sessionId === "aippt");
+    expect(a.length).toBe(2); // 没发出第二个 attach 的话，下面这条断言会空过
+    expect(a[1]!.lastSeq).toBe(0);
+    h.conn.dispose();
+  });
+});

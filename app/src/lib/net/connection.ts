@@ -874,6 +874,23 @@ export class Connection {
     this.send({ type: "listSessions" });
   }
   renameSession(sessionId: string, name: string): void {
+    // 订阅是**按会话名**记的。服务端在 rename 成功后把订阅从旧名迁到新名（server.ts
+    // 的 renameSession 分支），本地这份账必须跟着迁，否则两件事会坏：
+    //   1. 旧名留在 attached 里 —— 用户拿这个名字**新建**一个会话时，attach() 的
+    //      `subscribed` 早退守卫会认为「这条连接已经订阅过了」而不发 attach 帧；服务端
+    //      那侧却从来没有过这个订阅，新会话的每一帧输出都被 deliverOutput 之前的
+    //      `conn.subscriptions.has(name)` 丢掉 —— 表现为「这个窗口输入什么都不显示，
+    //      别的窗口全正常」，且只有断线重连（flushAndRestore 重发全部 attach）能自愈。
+    //      2026-08-26 实测复现：重命名 aippt→teachppt 之后新建的 aippt 正是如此。
+    //   2. 新名不在 attached 里 —— 下次重连时 flushAndRestore 不会重新订阅它。
+    // rename 万一失败（服务端回 rename_failed），这次迁移是错的，但代价只是下次激活
+    // 该标签页时多发一次 attach（重复 attach 只多补一遍 backlog），不会丢字节。
+    if (this.attached.delete(sessionId)) this.attached.add(name);
+    // seq 账**不能**跟着迁：服务端的 replay 环同样按名字建，新名字是一条从头开始的
+    // 新环，把旧名的高 seq 带过去会让 attach 算出一个假缺口。旧名的进度也必须清掉，
+    // 否则同名会话被重建时会拿着旧 seq 去要回放，开头那几帧会被当成「已经收过」而
+    // 静默跳过。
+    this.seen.delete(sessionId);
     this.send({ type: "renameSession", sessionId, name });
   }
   listDevices(): void { this.send({ type: "listDevices" }); }
