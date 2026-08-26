@@ -213,6 +213,12 @@ describe("1b · 首屏失败不再是吸收态", () => {
 });
 
 // ── 4 ─────────────────────────────────────────────────────────────────
+// 【快照末尾为什么多一个空行】2026-08-25 起服务端的捕获终点钉在**光标那一行**
+// （`capture-pane -E <cursor_y>`），客户端相应地去掉结尾那个换行 —— 于是「快照
+// 最后一行」就是光标所在行。本节要验的是「窗口内的实时字节接在快照后面」，那批
+// 字节在真机上是从新行开始的，对应的快照就得以一个**空的光标行**收尾。写成
+// `"SNAP\n"` 会变成「光标停在 SNAP 行尾」，实时字节接上去是对的行为，但那验的
+// 就不是本节要验的东西了。
 describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
   test("★ await 期间到达的实时字节不再被 RIS 抹掉", async () => {
     let release: ((v: unknown) => void) | undefined;
@@ -235,7 +241,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     await tick();
     emit("s-win", "LIVE-A\r\nLIVE-B\r\n"); // 窗口内的实时输出
     await tick();
-    release!(hist("SNAP-1\nSNAP-2\n"));    // t1：快照到达
+    release!(hist("SNAP-1\nSNAP-2\n\n"));  // t1：快照到达（末尾空行 = 光标行）
     await tick(30);
 
     const rows = screen(xterm!);
@@ -269,7 +275,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     await tick();
     await rerender({ conn, sessionId: "s-stash", active: true } as any);
     await tick();                       // 激活 → flushPending 写进 xterm
-    release!(hist("SNAP\n"));           // t1
+    release!(hist("SNAP\n\n"));         // t1（末尾空行 = 光标行）
     await tick(30);
 
     expect(screen(xterm!)).toContain("STASHED");
@@ -296,7 +302,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     await tick();
     emit("s-other", "FOREIGN\r\n");
     await tick();
-    release!(hist("SNAP\n"));
+    release!(hist("SNAP\n\n"));
     await tick(30);
 
     expect(screen(xterm!)).toEqual(["SNAP"]);
@@ -325,9 +331,9 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     reseed?.("resync");            // 第二代（第一代就此过期）
     await tick();
     emit("s-stale", "NEW-WINDOW\r\n");
-    pending.shift()!(hist("STALE-SNAP\n")); // 第一代的快照，整份丢弃
+    pending.shift()!(hist("STALE-SNAP\n\n")); // 第一代的快照，整份丢弃
     await tick(10);
-    pending.shift()!(hist("FRESH-SNAP\n")); // 第二代的快照
+    pending.shift()!(hist("FRESH-SNAP\n\n")); // 第二代的快照
     await tick(30);
 
     const rows = screen(xterm!);

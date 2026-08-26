@@ -86,7 +86,7 @@
   import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
   import { isMeasurable, isPlausible, rememberDims, shouldDeferShrink, SHRINK_HOLD_MS } from "../lib/term/fit-guard";
   import {
-    buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite,
+    buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite, normalizeReseedRows,
     historyExpectBytes, reseedLines, seedRetryDelayMs, SEED_MAX_ATTEMPTS, type ReseedTrigger,
   } from "../lib/term/reseed";
   import { Connection } from "../lib/net/connection";
@@ -823,9 +823,10 @@
         let text = "";
         if (h?.data) {
           // 保持首屏语义不变：**不带 RIS**（终端此刻本就是空的，见上方注释），
-          // 只做换行规范化。这里刻意不走 buildReseedPayload —— 那是重灌路径的
-          // 载荷，会多一个 RIS 前缀。变的只有解码这一段。
-          text = (await decodeHistoryData(h.data, h.enc)).replace(/\n/g, "\r\n");
+          // 只做行规范化。这里刻意不走 buildReseedPayload —— 那是重灌路径的
+          // 载荷，会多一个 RIS 前缀；两者共用 normalizeReseedRows，所以「结尾
+          // 那个换行要去掉」（光标停在快照最后一行）对首屏同样成立。
+          text = normalizeReseedRows(await decodeHistoryData(h.data, h.enc));
           term.write(text, () => {
             reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
               term.buffer.active.length, text.length, false);

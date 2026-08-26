@@ -329,7 +329,7 @@ test("rpc term.capture 把 colors/back 透传给 tmux，并走同一条分片通
   const terminal = new TerminalService({
     tmux: (args) => {
       calls.push(args);
-      if (args[0] === "display-message") return ok("20\n");
+      if (args[0] === "display-message") return ok("2|20|500\n"); // cursor_x|cursor_y|history_size
       return ok("PLAIN");
     },
   });

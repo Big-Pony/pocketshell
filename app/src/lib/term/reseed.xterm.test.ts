@@ -149,7 +149,9 @@ describe("形态四：await 窗口内的实时字节被 RIS 抹掉", () => {
     windowBuf.push(live);
 
     // 快照到达：RIS + 快照 + 窗口，**一次** write。
-    t.write(concatReseedWrite(buildReseedPayload("SNAP-1\nSNAP-2\n"), windowBuf.take()));
+    // 快照末尾的空行 = 光标行（服务端 `-E <cursor_y>` 的语义，见 reseed.ts 的
+    // normalizeReseedRows）：窗口字节在真机上就是从光标那一行开始写的。
+    t.write(concatReseedWrite(buildReseedPayload("SNAP-1\nSNAP-2\n\n"), windowBuf.take()));
     await flush(t);
     expect(lines(t)).toEqual(["SNAP-1", "SNAP-2", "LIVE-A", "LIVE-B"]);
     t.dispose();
@@ -163,7 +165,7 @@ describe("形态四：await 窗口内的实时字节被 RIS 抹掉", () => {
       t.write(part);
       windowBuf.push(part);
     }
-    t.write(concatReseedWrite(buildReseedPayload("SNAP\n"), windowBuf.take()));
+    t.write(concatReseedWrite(buildReseedPayload("SNAP\n\n"), windowBuf.take()));
     await flush(t);
     expect(lines(t)).toEqual(["SNAP", "中"]);
     t.dispose();

@@ -1,7 +1,8 @@
 // A2 TerminalService: sessions are tmux sessions; a PTY attaches to each so we
 // can stream bytes. Adds heuristic state inference (via inferState), lastLine
 // capture, and a rename hook. Emits raw bytes only — seq/buffer is A4.
-import { spawnPty, type PtyHandle } from "./pty";
+import type { PtyHandle } from "./pty";
+import { PaneChannel } from "./pane-channel";
 import { inferState, StateHysteresis } from "./state";
 import { toB64 } from "./bytes";
 import { cjkFallbackLang } from "./pty-env";
@@ -11,6 +12,40 @@ import type { SessionMeta, TermHistoryResult } from "./protocol";
 // history-limit (2000) so a legitimate anchor is never rejected, small enough
 // that a corrupt value can't become a silly argv token.
 export const CAPTURE_BACK_LIMIT = 1_000_000;
+
+/**
+ * 给「取到可视区底部」的快照补上光标定位，让客户端重灌之后的**行网格与光标位置
+ * 都和 tmux 完全一致**——后面接上来的实时字节才落得对。
+ *
+ * 【为什么两件事缺一不可】窗格里的程序（Claude Code、vim…）重绘用的是**相对光标
+ * 移动**（`ESC[nA` / `ESC[nB` / `ESC[K`）。这类字节只有在「终端的光标正好在程序
+ * 以为的位置」时才画得对。重灌把一份 capture-pane 快照顺序写进 xterm，写完光标
+ * 停在**最后一行的行尾**，而 tmux 的光标可能在屏幕中间：
+ *
+ *   - 只截到光标行（`-E <cursor_y>`）：光标下方那些行**根本没写进去**。对 TUI 来说
+ *     那不是空白——Claude Code 的输入框下面还有边框和状态栏，直接被截掉；同时
+ *     xterm 光标停在视口底部，tmux 的却在中间。**2026-08-26 实测 Δy=10，27 行里
+ *     25 行对不上**，屏幕上表现为「刚打的那句话和 AI 回复整段不出现」。
+ *   - 只取整屏（`-E -`）而不摆光标：行网格对了，光标仍停在最后一行，还是错位。
+ *
+ * 所以：取整屏保证网格一致，再补一条 `ESC[<y+1>;<x+1>H` 把光标摆回去。**必须先去掉
+ * 末尾那个换行再补 CUP**，否则那个换行会让 xterm 多滚一行，视口整体偏一行。
+ *
+ * 只对「结束在可视区底部」的快照做这件事；分页取历史（有显式终点）不能补，那份
+ * 不是拿来接实时流的。
+ */
+export function withCursorFix(rows: Uint8Array, cursor: { x: number; y: number }): Uint8Array {
+  let end = rows.length;
+  if (end > 0 && rows[end - 1] === 0x0a) end--;      // \n
+  if (end > 0 && rows[end - 1] === 0x0d) end--;      // \r\n
+  const x = Number.isFinite(cursor.x) ? Math.max(0, cursor.x) : 0;
+  const y = Number.isFinite(cursor.y) ? Math.max(0, cursor.y) : 0;
+  const cup = new TextEncoder().encode(`\x1b[${y + 1};${x + 1}H`);
+  const out = new Uint8Array(end + cup.length);
+  out.set(rows.subarray(0, end), 0);
+  out.set(cup, end);
+  return out;
+}
 
 interface Live {
   pty: PtyHandle;
@@ -109,6 +144,37 @@ export class TerminalService {
     this.scanTimer = setInterval(() => this.scan(), SCAN_INTERVAL_MS);
     // Don't let the scanner keep the process (or `bun test`) alive on its own.
     (this.scanTimer as unknown as { unref?: () => void }).unref?.();
+    void this.clearStalePipes();
+  }
+
+  /**
+   * 启动时把上一条命的 `pipe-pane` 残留全部关掉。
+   *
+   * 【为什么必须做】agent 崩溃/重启时来不及 kill 通道，tmux 那边的管子还开着，
+   * 而管子另一头的 `sh -c cat > fifo` 是 **tmux server 的子进程**、不跟着 agent 死。
+   * 新 agent 起来后会 unlink 并重建同名 FIFO，于是旧 `cat` 手里剩一个孤儿 inode：
+   * 它写不进去（没有读端、管道写满）就**永久堵在 write() 上**，而 tmux 仍在往这根
+   * 堵死的管子里灌窗格输出，缓冲只增不减。只有当手机重新打开那个会话、
+   * `pipe-pane -O` 把它替换掉才会解除——没被重开的会话会一直堵着。
+   *
+   * 本机实测（2026-08-26）：两个 `sh -c cat` 分别从前一天 15:34 / 22:31 活到第二天
+   * 中午，扛过了三次 agent 重启，对应的两个会话 tmux 都报 `pane_pipe=1`。
+   *
+   * 关管子是幂等且无副作用的（`pipe-pane` 不带命令 = 关闭当前管子），对没有管子的
+   * 会话是 no-op，所以可以无差别地对**所有**会话执行，包括不是本 agent 建的。
+   */
+  private async clearStalePipes(): Promise<void> {
+    try {
+      // `-u` 和 roster 同理：launchd 的 C locale 下 tmux 会把非 ASCII 洗成 `_`，
+      // 中文名会话的名字对不上，残留管子就清不掉。
+      const res = await this.tmuxAsync(["-u", "list-sessions", "-F", "#{session_name}\t#{pane_pipe}"]);
+      if (res.exitCode !== 0) return;
+      for (const line of new TextDecoder().decode(res.stdout).split("\n")) {
+        const [name, piped] = line.split("\t");
+        if (!name || piped !== "1") continue;
+        await this.tmuxAsync(["pipe-pane", "-t", name]);
+      }
+    } catch { /* 没有 tmux / 没有会话：启动路径不因此失败 */ }
   }
 
   onOutput(cb: (name: string, chunk: Uint8Array) => void): void {
@@ -151,17 +217,36 @@ export class TerminalService {
     const now = Date.now();
     const entries = [...this.sessions.entries()];
     const probes = await Promise.all(
-      entries.map(async ([name, live]) => ({
-        name,
-        inferred: inferState({
-          hasSession: await this.hasSessionAsync(name),
-          lastOutputAt: live.lastOutputAt,
-          now,
-        }),
-      })),
+      entries.map(async ([name, live]) => {
+        const alive = await this.hasSessionAsync(name);
+        return {
+          name,
+          alive,
+          inferred: inferState({ hasSession: alive, lastOutputAt: live.lastOutputAt, now }),
+        };
+      }),
     );
     if (this.disposed) return;
     let changed = false;
+    // 会话消亡的检测点。换掉 `tmux attach` 之后（见 openChannel）不再有 PTY 退出
+    // 事件来报信，改由这个扫描器发现 —— 它本来就在查 has-session，白拿的信号。
+    //
+    // 【两条必须守住的纪律，各踩过一次】
+    // 1) **二次确认才判死**。轮询探测不是权威信号：`tmux has-session` 的 spawn
+    //    在高负载下会偶发失败，defaultTmuxAsync 把任何异常都降级成 exitCode 1，
+    //    单次 false 完全可能是假死。确认一次的成本是一个 spawn，代价是把活着的
+    //    会话误杀。
+    // 2) **不要走 onPtyExit 的「重连」分支**。那条分支是给「PTY 死了但会话还在」
+    //    设计的，会 `live.pty = openChannel(...)` 直接替换引用而不 kill 旧的 ——
+    //    从前旧 PTY 已经死了所以无害，现在旧通道还活着，替换会泄漏它的 fd/流，
+    //    而新通道构造时又会 unlink 同名 FIFO 重建 inode，旧 cat 于是把窗格输出
+    //    打进一个没人读的旧 inode：**该会话从此静默无输出**。B2 下压根没有
+    //    「detach」这回事，会话不在了就只有一个结局 —— 收尸。
+    for (const { name, alive } of probes) {
+      if (alive || !this.sessions.has(name)) continue;
+      if (this.hasSession(name)) continue; // 假死，放过
+      this.reap(name, 0);
+    }
     for (const { name, inferred } of probes) {
       if (!this.sessions.has(name)) continue; // killed/renamed while probing
       let m = this.states.get(name);
@@ -220,7 +305,7 @@ export class TerminalService {
   // 在用）。压缩与否不在这里决定：那是 rpc 载荷层的事（见 rpc-router.ts 的
   // compressHistory），这里只管产出原始快照。
   async history(name: string, seq: number, lines?: number): Promise<TermHistoryResult> {
-    const { data } = await this.capture(name, { colors: true, back: lines });
+    const { data } = await this.capture(name, { colors: true, back: lines, pinCursor: true });
     return { data, seq };
   }
 
@@ -296,7 +381,7 @@ export class TerminalService {
   // runner blocks Bun's event loop and freezes output for every other session.
   async capture(
     name: string,
-    opts?: { colors?: boolean; back?: number; endBack?: number },
+    opts?: { colors?: boolean; back?: number; endBack?: number; pinCursor?: boolean },
   ): Promise<{ data: string; atTop: boolean }> {
     const b = opts?.back;
     const e = opts?.endBack;
@@ -308,29 +393,42 @@ export class TerminalService {
     const wantsEnd = wants && valid(e) && (e as number) <= (b as number);
     let from = "-";
     let to = "-";
+    let cursor: { x: number; y: number } | null = null;
     // Without a start row the capture is the whole scrollback, which is by
     // definition already at the top.
     let atTop = true;
-    if (wants) {
+    // `pinCursor` 也要查：不带 back 的重灌同样要摆光标（见 withCursorFix）。
+    if (wants || opts?.pinCursor) {
       // tmux is the only authority on where its cursor is and how deep its
       // history goes; ask it, and fall back to the full capture if the query
       // fails (dead pane, missing tmux).
       const q = await this.tmuxAsync([
-        "display-message", "-p", "-t", name, "#{cursor_y}|#{history_size}",
+        "display-message", "-p", "-t", name, "#{cursor_x}|#{cursor_y}|#{history_size}",
       ]);
-      const [cyRaw = "", hsRaw = ""] = new TextDecoder().decode(q.stdout).trim().split("|");
-      const y = Number(cyRaw);
-      const hist = Number(hsRaw);
+      // 严格解析：空字段不能当 0。`Number("")` 是 0，回复少一个字段就会被读成
+      // 「光标在 (0,0)」，于是往快照尾巴上补一条 `ESC[1;1H` 把光标扔到左上角
+      // —— 比不补还糟。字段缺失一律按「查不到」处理，退回原样。
+      const parts = new TextDecoder().decode(q.stdout).trim().split("|");
+      const num = (v?: string) => (v !== undefined && v !== "" && Number.isFinite(Number(v)) ? Number(v) : Number.NaN);
+      const cx = num(parts[0]);
+      const y = num(parts[1]);
+      const hist = num(parts[2]);
       if (q.exitCode === 0 && Number.isFinite(y)) {
+        cursor = { x: Number.isFinite(cx) ? cx : 0, y };
+        if (!wants) { /* 不带 back：范围仍是全量，只是拿到了光标 */ }
+        else {
         const start = y - (b as number);
         from = String(start);
-        if (wantsEnd) to = String(y - (e as number));
+        // 没有显式终点时取到**可视区底部**（`-E -`），再由 withCursorFix 补一条 CUP
+        // 把光标摆回 tmux 说的位置。两件事缺一不可，理由见那个函数的注释。
+        to = wantsEnd ? String(y - (e as number)) : "-";
         if (Number.isFinite(hist)) {
           const oldest = -hist; // `-S -history_size` is the oldest addressable row
           atTop = start <= oldest;
           // The whole range sits above the oldest row: tmux would clamp and hand
           // back a duplicate of the top, so answer honestly with nothing.
           if (wantsEnd && y - (e as number) < oldest) return { data: "", atTop: true };
+        }
         }
       }
     }
@@ -339,7 +437,13 @@ export class TerminalService {
     args.push("-p", "-J", "-S", from, "-E", to, "-t", name);
     const res = await this.tmuxAsync(args);
     if (res.exitCode !== 0) return { data: "", atTop: true };
-    return { data: toB64(res.stdout), atTop };
+    // 只有重灌（history）那条路径补光标定位。**复制/导出路径绝不能补**：
+    // App.svelte 的复制也是「有 back 无 endBack」，补进去就是往用户剪贴板里塞
+    // 一段转义序列。分页取历史（有显式终点）同样不补——那份不接实时流。
+    const body = opts?.pinCursor && !wantsEnd && cursor
+      ? withCursorFix(res.stdout, cursor)
+      : res.stdout;
+    return { data: toB64(body), atTop };
   }
 
   /**
@@ -413,19 +517,25 @@ export class TerminalService {
   // (client tty byte stream grows, screen text reappears). Gentler than the
   // resize-jiggle fallback (cols±1 -> SIGWINCH -> full repaint), so the jiggle
   // is not used. Read-only: it changes no session/pane state.
+  // 「刷新」按钮：让窗格里的程序重画一屏。
+  //
+  // 【2026-08-25】原来是给每个 attach 客户端发 refresh-client。换掉 attach 之后
+  // （见 openChannel）我们不再是 tmux 的客户端，list-clients 通常为空，那条路
+  // 恒返回 false。改用**尺寸抖动**：cols-1 再 cols，让 tmux 给窗格发 SIGWINCH，
+  // 程序自己重绘 —— 那才是真正的窗格输出、才会走到 pipe-pane 里来。
+  //
+  // 实测（spike/redraw-jiggle-probe.ts）：vim 增长 2768B、less 1624B，两次 resize
+  // 相隔 0/50/200ms 结果一致（SIGWINCH 合并不构成问题）。**但对不处理 SIGWINCH 的
+  // 程序（shell 提示符、cat 出来的静态文本）它什么也不做** —— 那种情况下前端应当
+  // 走 capture-pane 重新播种，而不是指望这里。所以 ok 只表示「抖动发出去了」。
   redraw(name: string): { ok: boolean } {
-    const clients = this.tmux(["list-clients", "-t", name, "-F", "#{client_name}"]);
-    if (clients.exitCode !== 0) return { ok: false };
-    const names = new TextDecoder()
-      .decode(clients.stdout)
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
-    let ok = false;
-    for (const c of names) {
-      if (this.tmux(["refresh-client", "-t", c]).exitCode === 0) ok = true;
-    }
-    return { ok };
+    const live = this.sessions.get(name);
+    if (!live) return { ok: false };
+    const { cols, rows } = live.meta;
+    if (cols <= 1) return { ok: false };
+    const a = this.tmux(["resize-window", "-t", name, "-x", String(cols - 1), "-y", String(rows)]);
+    const b = this.tmux(["resize-window", "-t", name, "-x", String(cols), "-y", String(rows)]);
+    return { ok: a.exitCode === 0 && b.exitCode === 0 };
   }
 
   // The focused pane's real working directory (tmux #{pane_current_path}).
@@ -437,23 +547,23 @@ export class TerminalService {
     return { pwd: new TextDecoder().decode(res.stdout).trim() };
   }
 
-  // Create the attach PTY and wire byte + exit callbacks. Extracted so Task 5
-  // can re-attach on detach without duplicating wiring. Slice-3 stays S1-style:
-  // PTY exit deletes the session (real-vs-detach split lands in Task 5).
-  private attach(name: string, cols: number, rows: number): PtyHandle {
-    // `-u` forces tmux into UTF-8 mode. Under launchd (and many service
-    // managers) LANG/LC_* are unset, so tmux would otherwise decide the client
-    // is non-UTF-8 and render every CJK cell as an underscore. The client is
-    // always xterm.js (UTF-8), so forcing it is correct and needs no installed
-    // locale. Must precede the `attach` subcommand (global flag).
-    const pty = spawnPty({ cmd: ["tmux", "-u", "attach", "-t", name], cols, rows });
-    pty.onData((chunk) => {
+  // 打开窗格通道并接好字节/退出回调。
+  //
+  // 【2026-08-25 换掉了 `tmux attach`】原来这里 spawn 一个 attach 客户端，转发它的
+  // 字节。那是 tmux **画给客户端的重绘流**：备用屏 + 绝对定位，没有 scrollback，
+  // 而我们重连时又要塞 capture-pane 快照，两套行网格一错开，tmux 的绝对定位就把
+  // 手机上的内容覆盖掉 —— 「终端中间丢行」的根因。详见 pane-channel.ts 头部。
+  // 现在改成 pipe-pane 取窗格原始字节（相对定位、无备用屏），输入走 send-keys。
+  private openChannel(name: string, cols: number, rows: number): PtyHandle {
+    const ch = new PaneChannel(name, { tmux: this.tmux, tmuxAsync: this.tmuxAsync });
+    ch.onData((chunk) => {
       const live = this.sessions.get(name);
       if (live) live.lastOutputAt = Date.now();
       for (const cb of this.outputCbs) cb(name, chunk);
     });
-    pty.onExit((code) => this.onPtyExit(name, code));
-    return pty;
+    ch.onExit((code) => this.onPtyExit(name, code));
+    ch.resize(cols, rows);
+    return ch;
   }
 
   // tmux session is the source of truth: a dead PTY may just be a detach.
@@ -473,11 +583,21 @@ export class TerminalService {
         return;
       }
       live.lastReattachAt = now;
-      live.pty = this.attach(name, live.meta.cols, live.meta.rows);
+      // 先关旧通道再开新的：新通道构造时会 unlink 并重建同名 FIFO，旧通道若还
+      // 开着，它的流就悬在被删掉的旧 inode 上，永远收不到字节（见 scanAsync 的
+      // 纪律 2）。
+      live.pty.kill();
+      live.pty = this.openChannel(name, live.meta.cols, live.meta.rows);
       return;
     }
 
-    // Session is really gone -> done.
+    this.reap(name, code);
+  }
+
+  /** 会话确认没了：清账并通知。onPtyExit 与扫描器共用同一条收尸路径。 */
+  private reap(name: string, code: number): void {
+    const live = this.sessions.get(name);
+    live?.pty.kill();
     this.sessions.delete(name);
     this.states.delete(name);
     for (const cb of this.exitCbs) cb(name, code);
@@ -560,7 +680,7 @@ export class TerminalService {
       createdAt: Date.now(),
       attached: true,
     };
-    const pty = this.attach(name, cols, rows);
+    const pty = this.openChannel(name, cols, rows);
     this.sessions.set(name, { pty, meta, lastOutputAt: Date.now() });
     this.states.set(name, new StateHysteresis("run"));
     this.emitSessionsChange();
@@ -624,7 +744,7 @@ export class TerminalService {
     // otherwise output for this session keeps being emitted under the old name
     // and the client (now keyed by the new name) receives nothing.
     live.pty.kill();
-    live.pty = this.attach(newName, live.meta.cols, live.meta.rows);
+    live.pty = this.openChannel(newName, live.meta.cols, live.meta.rows);
     this.emitSessionsChange();
   }
 

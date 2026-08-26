@@ -184,7 +184,9 @@ test("首屏 seed 认得 enc=gzip 的压缩载荷", async () => {
   conn.rpc.mockImplementation(async (method: string) => {
     if (method === "term.paneInfo") return { currentCommand: "zsh", alternateOn: false, isShell: true };
     if (method === "term.history") {
-      return { data: toB64(gzipSync(Buffer.from("GZIPPED\n"))), seq: 0, enc: "gzip" };
+      // 两行：结尾那个换行会被去掉（光标停在快照最后一行），行**之间**的
+      // 换行才是这条用例要验的规范化对象。
+      return { data: toB64(gzipSync(Buffer.from("GZIPPED\nLINE2\n"))), seq: 0, enc: "gzip" };
     }
     return {};
   });
@@ -198,7 +200,7 @@ test("首屏 seed 认得 enc=gzip 的压缩载荷", async () => {
   // 首屏路径**不带 RIS**（终端本就是空的），只做换行规范化 —— 与重灌路径不同。
   await waitFor(() => {
     const all = term.written.map((w) => (typeof w === "string" ? w : dec(w))).join("");
-    expect(all).toContain("GZIPPED\r\n");
+    expect(all).toContain("GZIPPED\r\nLINE2");
     expect(all).not.toContain("\x1bc"); // RIS 只属于重灌路径
   });
 });
@@ -262,7 +264,9 @@ test("overflow while hidden reseeds via term.history instead of flushing", async
   expect(term.written.some((c) => c instanceof Uint8Array && c.byteLength > 2 * 1024 * 1024)).toBe(false);
   // 重灌走**流内 RIS**（2026-08-08）：清空与内容拼进同一次 write，所以最后一次
   // 写入是 "\x1bc" + 快照，而不是裸快照。见 lib/term/reseed.ts 的实测记录。
-  expect(term.written.at(-1)).toBe("\x1bcHISTORY\r\n"); // reseed content is the last write
+  // 结尾没有 \r\n：快照的最后一行就是光标行，那个换行会被去掉（见
+  // lib/term/reseed.ts 的 normalizeReseedRows）。
+  expect(term.written.at(-1)).toBe("\x1bcHISTORY"); // reseed content is the last write
 });
 
 // ──────────────────────────────────────────────────────────────

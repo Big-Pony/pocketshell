@@ -1,5 +1,12 @@
-import { test, expect } from "bun:test";
-import { TerminalService, type TmuxResult, type TmuxRunner } from "./terminal";
+import { describe, it, test, expect } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { TerminalService, withCursorFix, type TmuxResult, type TmuxRunner } from "./terminal";
+
+// 单测不得往用户真实家目录里造 FIFO：把窗格通道的运行目录指到临时目录。
+// 必须在任何 TerminalService 构造之前设置（PaneChannel 在构造时读它）。
+process.env.POCKETSHELL_RUN_DIR = mkdtempSync(join(tmpdir(), "ps-run-"));
 import { StateHysteresis } from "./state";
 import {
   hasTmux as tmuxAvailable,
@@ -127,16 +134,19 @@ test("history(lines) 只取最近 N 行 —— 走 capture 的 back 参数解析
   const term = new TerminalService({
     tmux: (args) => {
       calls.push(args);
-      if (args[0] === "display-message") return ok("20|1850\n"); // cursor_y|history_size
+      if (args[0] === "display-message") return ok("2|20|1850\n"); // cursor_x|cursor_y|history_size
       if (args.includes("capture-pane")) return ok("RECENT");
       return ok();
     },
   });
   const r = await term.history("work", 3, 1000);
   expect(r.seq).toBe(3);
-  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("RECENT");
+  // 载荷 = 快照 + 光标定位（cursor_y=20, cursor_x=2 → 1-based 21;3）
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("RECENT\x1b[21;3H");
   const cap = calls.find((a) => a.includes("capture-pane"))!;
-  // -S = cursor_y - back = 20 - 1000
+  // -S = cursor_y - back = 20 - 1000；-E = **可视区底部**，随后由 withCursorFix
+  // 补一条 CUP 把光标摆回 tmux 的 (x,y)。只取到光标行会截掉它下方的内容
+  // （TUI 的边框/状态栏就在那里），且光标会停在视口底部 —— 见 withCursorFix。
   expect(cap).toEqual(["-u", "capture-pane", "-e", "-p", "-J", "-S", "-980", "-E", "-", "-t", "work"]);
   term.dispose();
 });
@@ -204,7 +214,7 @@ test("capture({back}) 用 tmux 自己的 cursor_y 解析成 -S（cursor_y - back
   const term = new TerminalService({
     tmux: (args) => {
       calls.push(args);
-      if (args[0] === "display-message") return ok("23\n");
+      if (args[0] === "display-message") return ok("0|23\n");
       return ok("OUT");
     },
   });
@@ -219,7 +229,7 @@ test("capture({back}) 屏幕没滚动时得到 0 或正数（不是所有情况�
   const term = new TerminalService({
     tmux: (args) => {
       calls.push(args);
-      if (args[0] === "display-message") return ok("3\n");
+      if (args[0] === "display-message") return ok("0|3\n");
       return ok("OUT");
     },
   });
@@ -247,7 +257,7 @@ test("capture({back}) 在 cursor_y 查询失败时退回全量（不瞎猜行号
 test("capture({back}) 非整数/负数/越界一律退回全量 -S -（不把垃圾拼进 argv）", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
-    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("10\n") : ok("OUT"); },
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("0|10\n") : ok("OUT"); },
   });
   await term.capture("work", { back: Number.NaN });
   await term.capture("work", { back: 1.5 });
@@ -286,7 +296,7 @@ test("capture({back, endBack}) 把区间两端都解析成 -S/-E（不再固定 
   const term = new TerminalService({
     tmux: (args) => {
       calls.push(args);
-      if (args[0] === "display-message") return ok("23|500\n");
+      if (args[0] === "display-message") return ok("0|23|500\n");
       return ok("OUT");
     },
   });
@@ -297,12 +307,42 @@ test("capture({back, endBack}) 把区间两端都解析成 -S/-E（不再固定 
   term.dispose();
 });
 
-test("capture() 不给 endBack 时 -E 仍是 -（底部）—— 老调用方不回归", async () => {
+describe("withCursorFix —— 重灌载荷的光标定位", () => {
+  const dec = (u: Uint8Array) => new TextDecoder().decode(u);
+  const enc = (t: string) => new TextEncoder().encode(t);
+
+  it("补的是 1-based 的 CUP", () => {
+    expect(dec(withCursorFix(enc("A"), { x: 2, y: 16 }))).toBe("A\x1b[17;3H");
+  });
+
+  it("先去掉结尾换行再补 —— 留着它 xterm 会多滚一行，整屏偏一行", () => {
+    expect(dec(withCursorFix(enc("A\nB\n"), { x: 0, y: 0 }))).toBe("A\nB\x1b[1;1H");
+    expect(dec(withCursorFix(enc("A\r\n"), { x: 0, y: 0 }))).toBe("A\x1b[1;1H");
+  });
+
+  it("只去掉**一个**换行 —— 屏幕底部的空行是真实行，去多了就少一行", () => {
+    expect(dec(withCursorFix(enc("A\n\n\n"), { x: 0, y: 5 }))).toBe("A\n\n\x1b[6;1H");
+  });
+
+  it("空输入不崩", () => {
+    expect(dec(withCursorFix(new Uint8Array(), { x: 0, y: 0 }))).toBe("\x1b[1;1H");
+  });
+
+  it("坐标非法时退回 0（绝不把 NaN 拼进转义）", () => {
+    expect(dec(withCursorFix(enc("A"), { x: Number.NaN, y: -3 }))).toBe("A\x1b[1;1H");
+  });
+});
+
+test("capture() 不给 endBack 时 -E 取到可视区底部", async () => {
+  // 2026-08-26 定：**必须取整屏**。只截到光标行会把它**下方的内容**一起丢掉
+  // ——TUI 的输入框下面还有边框和状态栏；而且光标会停在视口最底部，与 tmux
+  // 的真实光标差 N 行（实测 Δy=10），随后的相对定位重绘整段落错行。
+  // 行网格靠 `-E -` 对齐，光标靠 withCursorFix 的 CUP 摆回，缺一不可。
   const calls: string[][] = [];
   const term = new TerminalService({
     tmux: (args) => {
       calls.push(args);
-      if (args[0] === "display-message") return ok("23|500\n");
+      if (args[0] === "display-message") return ok("0|23|500\n");
       return ok("OUT");
     },
   });
@@ -312,13 +352,38 @@ test("capture() 不给 endBack 时 -E 仍是 -（底部）—— 老调用方不
   term.dispose();
 });
 
+test("capture() 默认不补光标定位 —— 复制路径不能往剪贴板里塞转义", async () => {
+  // App.svelte 的复制也是「有 back 无 endBack」，与重灌走同一个函数。
+  // 只有显式 pinCursor（history 那条路）才补，否则用户复制出来的文本尾巴上
+  // 会挂一段 ESC[..H。
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("2|23|500\n") : ok("OUT")),
+  });
+  const plain = await term.capture("work", { back: 41 });
+  expect(Buffer.from(plain.data, "base64").toString("utf8")).toBe("OUT");
+  const pinned = await term.capture("work", { back: 41, pinCursor: true });
+  expect(Buffer.from(pinned.data, "base64").toString("utf8")).toBe("OUT\x1b[24;3H");
+  term.dispose();
+});
+
+test("pinCursor 遇到查不到光标时原样返回（不瞎补 ESC[1;1H）", async () => {
+  // `Number("")` 是 0：回复少一个字段若被当成 0，就会把光标扔到左上角，
+  // 比不补还糟。字段缺失一律按「查不到」处理。
+  const term = new TerminalService({
+    tmux: (args) => (args[0] === "display-message" ? ok("23\n") : ok("OUT")),
+  });
+  const r = await term.capture("work", { back: 41, pinCursor: true });
+  expect(Buffer.from(r.data, "base64").toString("utf8")).toBe("OUT");
+  term.dispose();
+});
+
 // atTop 必须由后端算：tmux 的 `-J` 会把折行接成一行，返回的**行数少于请求的行数**
 // （实测 40 列 pane 请求 6 行、-J 后只有 4 行），所以前端无法用「行数不足 200」
 // 判断到顶。越过顶部时 tmux 也不报错、不返回空行，而是**钳位重发最老那一行**
 // （实测 hist=379 时 -S -900 与 -S -379 返回同一行），前端据此判断会拿到重复内容。
 test("capture() 用 history_size 判定是否已到历史顶部（前端无法从行数推断）", async () => {
   const term = new TerminalService({
-    tmux: (args) => (args[0] === "display-message" ? ok("23|379\n") : ok("OUT")),
+    tmux: (args) => (args[0] === "display-message" ? ok("0|23|379\n") : ok("OUT")),
   });
   // -S = 23 - 300 = -277，比最老行 -379 新 → 还有更早的
   expect((await term.capture("work", { back: 300, endBack: 101 })).atTop).toBe(false);
@@ -329,7 +394,7 @@ test("capture() 用 history_size 判定是否已到历史顶部（前端无法�
 
 test("capture() 整段都在历史顶部之外时返回空，不让 tmux 钳位出重复行", async () => {
   const term = new TerminalService({
-    tmux: (args) => (args[0] === "display-message" ? ok("23|379\n") : ok("OLDEST_LINE")),
+    tmux: (args) => (args[0] === "display-message" ? ok("0|23|379\n") : ok("OLDEST_LINE")),
   });
   // -E = 23 - 500 = -477，已在最老行 -379 之上 → 整段不存在
   const r = await term.capture("work", { back: 699, endBack: 500 });
@@ -343,17 +408,17 @@ test("capture() 全量（不给 back）就是到顶的定义 —— atTop 为真
   term.dispose();
 });
 
-test("capture({endBack}) 非法值（非整数/负数/大于 back）退化为 -E -，不拼垃圾进 argv", async () => {
+test("capture({endBack}) 非法值（非整数/负数/大于 back）退回可视区底部，不拼垃圾进 argv", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
-    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("23|500\n") : ok("OUT"); },
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("0|23|500\n") : ok("OUT"); },
   });
   await term.capture("work", { back: 100, endBack: Number.NaN });
   await term.capture("work", { back: 100, endBack: 1.5 });
   await term.capture("work", { back: 100, endBack: -1 });
   await term.capture("work", { back: 100, endBack: 101 }); // 终点比起点还早
   for (const cap of calls.filter((a) => a.includes("capture-pane"))) {
-    expect(cap[cap.indexOf("-E") + 1]).toBe("-");
+    expect(cap[cap.indexOf("-E") + 1]).toBe("-"); // 退回可视区底部，不是 NaN/1.5/-1
   }
   term.dispose();
 });
@@ -361,7 +426,7 @@ test("capture({endBack}) 非法值（非整数/负数/大于 back）退化为 -E
 test("capture({endBack}) 在 back 无效时一并忽略（区间无起点就没有区间）", async () => {
   const calls: string[][] = [];
   const term = new TerminalService({
-    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("23|500\n") : ok("OUT"); },
+    tmux: (args) => { calls.push(args); return args[0] === "display-message" ? ok("0|23|500\n") : ok("OUT"); },
   });
   await term.capture("work", { back: -5, endBack: 10 });
   const cap = calls.find((a) => a.includes("capture-pane"))!;
@@ -406,22 +471,29 @@ test("paneInfo() returns a complete shape (incl. isShell) when tmux fails", () =
   term.dispose();
 });
 
-test("redraw() refreshes every client attached to the session", () => {
+test("redraw() 抖动窗口尺寸让程序自己重绘（不再依赖 attach 客户端）", () => {
+  // 【2026-08-25 契约变更】原来是给每个 attach 客户端发 refresh-client。换掉
+  // attach 之后我们不再是 tmux 的客户端，list-clients 恒为空，那条路只会返回
+  // false。新契约：cols-1 再 cols，让 tmux 给窗格发 SIGWINCH，程序自己重绘 ——
+  // 那才是真正的窗格输出，才会经 pipe-pane 回到我们手里。
   const calls: string[][] = [];
-  const term = new TerminalService({
-    tmux: (args) => {
-      calls.push(args);
-      if (args.includes("list-clients")) return ok("/dev/ttys001\n/dev/ttys002\n");
-      return ok();
-    },
-  });
+  const term = new TerminalService({ tmux: (args) => { calls.push(args); return ok(); } });
+  term.ensure("work", { cols: 80, rows: 24 });
+  calls.length = 0;
   expect(term.redraw("work")).toEqual({ ok: true });
+  const resizes = calls.filter((a) => a[0] === "resize-window");
+  expect(resizes.length).toBe(2);
+  expect(resizes[0]).toEqual(["resize-window", "-t", "work", "-x", "79", "-y", "24"]);
+  expect(resizes[1]).toEqual(["resize-window", "-t", "work", "-x", "80", "-y", "24"]);
+  // 防回潮：不得再去碰 attach 客户端
+  expect(calls.some((a) => a.includes("refresh-client"))).toBe(false);
   term.dispose();
-  expect(calls.find((a) => a.includes("list-clients"))).toEqual(
-    ["list-clients", "-t", "work", "-F", "#{client_name}"],
-  );
-  expect(calls).toContainEqual(["refresh-client", "-t", "/dev/ttys001"]);
-  expect(calls).toContainEqual(["refresh-client", "-t", "/dev/ttys002"]);
+});
+
+test("redraw() 对未持有的会话返回 false（没有尺寸可抖）", () => {
+  const term = new TerminalService({ tmux: () => ok() });
+  expect(term.redraw("never-ensured")).toEqual({ ok: false });
+  term.dispose();
 });
 
 test("redraw() degrades gracefully when tmux fails or no client is attached", () => {
@@ -721,9 +793,10 @@ test.skipIf(!hasTmux)("output is delivered under the new name after rename", asy
     svc.ensure(NAME, { cols: 80, rows: 24 });
     expect(await waitForPrompt(NAME)).toBe(true);
     svc.rename(NAME, NEW);
-    // rename() kills the old PTY and attaches a new one; wait for that attach
-    // to produce bytes under the NEW name before typing into it.
-    expect(await waitFor(() => got.length > 0)).toBe(true);
+    // 【2026-08-25 契约变更】改名不再自发产生字节：旧实现会重建 attach 客户端、
+    // 触发一次整屏重绘，新实现只是把 pipe-pane 重新指到新名字上，窗格里的程序
+    // 什么都没打。所以这里**不能**再等「重绘字节」，直接打字验证通路仍在。
+    got.length = 0;
     svc.write(NEW, new TextEncoder().encode("echo RENAMED_OUT\n"));
     // must arrive tagged with the NEW name
     expect(await waitFor(() => got.join("").includes("RENAMED_OUT"))).toBe(true);
@@ -735,6 +808,32 @@ test.skipIf(!hasTmux)("output is delivered under the new name after rename", asy
   }
 });
 
+test.skipIf(!hasTmux)("并发会话数超过 libuv 线程池仍然全部有输出", async () => {
+  // 【回归：2026-08-25 的静默失效】窗格通道最初用 createReadStream(fd) 读 FIFO，
+  // 那是 libuv **线程池里的阻塞读** —— 每个活着的会话永久占一个线程，池子默认只有
+  // 4 个。于是第 5 个之后的会话 setup 全部成功（mkfifo ok、pipe-pane exit=0）、
+  // 没有任何报错，但**一个字节都收不到**。用户视角就是「开多了终端就不动了」。
+  // 现在读端改成子进程管道（事件循环驱动，不占线程池）。
+  //
+  // 这条用例的门槛必须**高于 4**，否则回归时它照样绿。不要因为慢就把 N 调小。
+  const N = 6;
+  const svc = new TerminalService();
+  const names = Array.from({ length: N }, (_, i) => uniqueSessionName(`pool${i}`));
+  const got = new Map<string, string>();
+  svc.onOutput((n, c) => got.set(n, (got.get(n) ?? "") + new TextDecoder().decode(c)));
+  try {
+    for (const n of names) svc.ensure(n, { cols: 80, rows: 24 });
+    for (const n of names) expect(await waitForPrompt(n)).toBe(true);
+    for (const n of names) svc.write(n, new TextEncoder().encode(`echo POOL_OK\n`));
+    expect(
+      await waitFor(() => names.every((n) => (got.get(n) ?? "").includes("POOL_OK")), { timeoutMs: 12000 }),
+    ).toBe(true);
+  } finally {
+    for (const n of names) { await svc.kill(n); killSession(n); }
+    svc.dispose();
+  }
+}, 30000);
+
 test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)", async () => {
   const svc = new TerminalService();
   const NAME = uniqueSessionName("detach");
@@ -745,17 +844,20 @@ test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)
   try {
     svc.ensure(NAME, { cols: 80, rows: 24 });
     expect(await waitForPrompt(NAME)).toBe(true);
-    // Detach every client attached to the session; the tmux session must survive.
-    // Scoped by name, so this can no longer detach a concurrent run's client.
+    // 【2026-08-25 契约变更】我们不再是 tmux 的客户端，所以外部 detach-client
+    // 对本会话是**彻底的空操作** —— 旧实现会因为 attach PTY 退出而重连并重绘，
+    // 新实现连感知都不该有。断言反过来：不许冒出任何字节（冒出来就说明还有
+    // attach 客户端残留在链路上），会话照常存活、照常能收发。
     Bun.spawnSync(["tmux", "detach-client", "-s", NAME]);
-    // The re-attach is what proves the point, so wait for it rather than for a
-    // fixed 600ms: onPtyExit() sees the session is alive and re-attaches, and
-    // the fresh attach client repaints the pane.
     chunks.length = 0;
-    expect(await waitFor(() => chunks.length > 0)).toBe(true);
+    await Bun.sleep(300);
+    // 判据是**内容**不是字节数：pipe-pane 是异步的，早先的提示符字节完全可能这时
+    // 才晚到，按「一个字节都不许有」断言会假红。attach 客户端重绘的标志性特征是
+    // 切备用屏，所以直接查这个 —— 它出现就说明链路上还挂着 tmux 的重绘流。
+    expect(chunks.join("")).not.toContain("\x1b[?1049h");
     expect(exited).not.toContain(NAME);          // no exit fired
     expect((await svc.list()).some((s) => s.name === NAME)).toBe(true); // still listed
-    // And it still streams after re-attach:
+    // 而且照样能收发：
     chunks.length = 0;
     svc.write(NAME, new TextEncoder().encode("echo REATTACH_OK\n"));
     expect(await waitFor(() => chunks.join("").includes("REATTACH_OK"))).toBe(true);
@@ -764,4 +866,35 @@ test.skipIf(!hasTmux)("external detach does not end the session (auto re-attach)
     svc.dispose();
     killSession(NAME);
   }
+}, 15000);
+
+// ── 启动时清理上一条命的 pipe-pane 残留（2026-08-26）──────────────────
+// agent 崩溃/重启时 tmux 侧的管子还开着，而它另一头的 `sh -c cat` 是 tmux server
+// 的子进程、不跟着 agent 死。新 agent 重建同名 FIFO 后，旧 cat 手里只剩孤儿 inode，
+// 写不进去就永久堵在 write()，tmux 却还在往里灌。本机实测两个这样的进程活了一整天。
+test("构造时把所有 pane_pipe=1 的会话的管子关掉（pane_pipe=0 的不动）", async () => {
+  const calls: string[][] = [];
+  const term = new TerminalService({
+    tmux: (args) => {
+      calls.push(args);
+      if (args.includes("list-sessions")) {
+        return {
+          exitCode: 0,
+          stdout: new TextEncoder().encode("piped\t1\nclean\t0\n中文名\t1\n"),
+          stderr: new Uint8Array(),
+        };
+      }
+      return { exitCode: 0, stdout: new Uint8Array(), stderr: new Uint8Array() };
+    },
+  });
+  await Bun.sleep(20);
+  term.dispose();
+  const offs = calls.filter((a) => a[0] === "pipe-pane");
+  expect(offs).toContainEqual(["pipe-pane", "-t", "piped"]);
+  expect(offs).toContainEqual(["pipe-pane", "-t", "中文名"]);
+  expect(offs).not.toContainEqual(["pipe-pane", "-t", "clean"]);
+  // 关管子必须是「不带命令」的那种（带命令 = 又开一根）
+  for (const a of offs) expect(a).not.toContain("-O");
+  // 名字要能认出 CJK —— 没有 -u 时 tmux 会把它洗成 _
+  expect(calls.find((a) => a.includes("list-sessions"))![0]).toBe("-u");
 });

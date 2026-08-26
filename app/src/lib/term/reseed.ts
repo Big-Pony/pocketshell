@@ -23,14 +23,33 @@
 const RIS = "\x1bc";
 
 /**
- * 拼出一次重灌要写进 xterm 的完整字节串。
+ * 把 capture-pane 的快照规范成可以直接写进 xterm 的行。两件事：
  *
- * capture-pane 的输出是 trim 过、以裸 \n 分隔的；xterm 跑在 convertEol:false 下，
- * 裸 \n 只下移一行、不回到第 0 列，直接写会渲染成对角线楼梯（`:q` 退出 vim 后
- * 尤其明显，因为那时没有实时重绘掩盖它）。所以统一规范成 \r\n。
+ * 1. **换行规范成 \r\n**。capture-pane 以裸 \n 分隔，而 xterm 跑在
+ *    convertEol:false 下，裸 \n 只下移一行、不回到第 0 列，直接写会渲染成对角线
+ *    楼梯（`:q` 退出 vim 后尤其明显，因为那时没有实时重绘掩盖它）。
+ * 2. **去掉结尾那个换行**。带着它灌进去，xterm 会多滚一行，视口整体偏一行。
+ *
+ *    注意（2026-08-26 起）：**服务端已经自己去过一次**了 —— 它取整屏（`-E -`）
+ *    之后要在尾巴上补一条 CUP 把光标摆回 tmux 的位置，补之前必须先去掉那个换行
+ *    （见 agent/src/terminal.ts 的 withCursorFix）。所以这里通常无事可做，留着
+ *    是**兜底**：查不到光标时服务端原样返回，那份仍然带着尾换行。
+ *
+ *    历史（别再改回去）：2026-08-25 曾让服务端把终点钉在光标行（`-E <cursor_y>`），
+ *    在「光标贴着屏底」的语料上确实对齐了（LCS 555/556 → 556/556）。但那个改法
+ *    对输入框在屏幕中间的 TUI 是错的：光标下方的边框/状态栏被整段截掉，光标还
+ *    停在视口底部，实测 Δy=10、27 行里 25 行对不上。
+ *
+ * 两条重灌路径共用这一个出口：reloadHistory 走 buildReseedPayload（带 RIS），
+ * 首屏 seed 直接用本函数（终端本就是空的，不需要 RIS）。
  */
+export function normalizeReseedRows(data: string): string {
+  return data.replace(/\r?\n$/, "").replace(/\r?\n/g, "\r\n");
+}
+
+/** 拼出一次重灌要写进 xterm 的完整字节串（RIS + 规范化后的快照）。 */
 export function buildReseedPayload(data: string): string {
-  return RIS + data.replace(/\r?\n/g, "\r\n");
+  return RIS + normalizeReseedRows(data);
 }
 
 /**

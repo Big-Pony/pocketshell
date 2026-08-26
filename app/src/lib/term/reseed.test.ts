@@ -1,5 +1,5 @@
 import { describe, it, expect, test } from "vitest";
-import { buildReseedPayload, ReseedGate, reseedLines, TMUX_HISTORY_LIMIT } from "./reseed";
+import { buildReseedPayload, normalizeReseedRows, ReseedGate, reseedLines, TMUX_HISTORY_LIMIT } from "./reseed";
 
 describe("buildReseedPayload", () => {
   it("总是以 RIS 开头 —— 清空必须和内容在同一个字符串里", () => {
@@ -16,6 +16,24 @@ describe("buildReseedPayload", () => {
 
   it("空内容也要带 RIS —— 快照为空意味着 pane 是空的，屏幕也该被清干净", () => {
     expect(buildReseedPayload("")).toBe("\x1bc");
+  });
+
+  // 服务端把捕获终点钉在光标那一行（`capture-pane -E <cursor_y>`），所以快照
+  // 最后一行 = 光标行，结尾那个 \n 只是行终止符。留着它光标就掉到下一行，
+  // 重连后第一段输出（命令回显）会把提示符行劈成两半。
+  it("去掉结尾的换行 —— 光标停在快照最后一行的行尾", () => {
+    expect(buildReseedPayload("a\nb\n")).toBe("\x1bca\r\nb");
+    expect(buildReseedPayload("a\r\nb\r\n")).toBe("\x1bca\r\nb");
+  });
+
+  it("只去掉一个 —— 末尾的空行是「光标停在下一行」的编码，不能一起吃掉", () => {
+    expect(buildReseedPayload("a\nb\n\n")).toBe("\x1bca\r\nb\r\n");
+  });
+});
+
+describe("normalizeReseedRows —— 首屏 seed 与重灌共用的行规范化", () => {
+  it("与 buildReseedPayload 的差别只有 RIS 前缀", () => {
+    expect("\x1bc" + normalizeReseedRows("a\nb\n")).toBe(buildReseedPayload("a\nb\n"));
   });
 });
 
