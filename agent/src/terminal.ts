@@ -4,6 +4,7 @@
 import type { PtyHandle } from "./pty";
 import { PaneChannel } from "./pane-channel";
 import { inferState, StateHysteresis } from "./state";
+import { ChannelWatchdog } from "./channel-watchdog";
 import { toB64 } from "./bytes";
 import { cjkFallbackLang } from "./pty-env";
 import type { SessionMeta, TermHistoryResult } from "./protocol";
@@ -125,6 +126,16 @@ export class TerminalService {
   private tmuxAsync: AsyncTmuxRunner;
   private scanning = false;
   private disposed = false;
+  // 【2026-08-27 通道看门狗】B2 通道某一环瞬时阻塞（cat 不退出、tmux 不报错、
+  // agent 无异常）会表现为「会话活着、屏幕永远不动」且日志里毫无痕迹 —— 真机
+  // pocketshell 会话实锤过 36 秒零字节（tap 在涨、rx 冻结、无 drop/seqgap）。
+  // 每个会话一个判定器：喂 rx/tap/history 三个计数探头，判「堵住」即重建通道。
+  // 判定逻辑与阈值见 channel-watchdog.ts；隐私上探头只读计数，永不碰 tap 内容。
+  private watchdogs = new Map<string, ChannelWatchdog>();
+  // 正在重建的会话集合：防止重建期间的扫描 tick 重复触发同一会话。
+  private rebuilding = new Set<string>();
+  // 诊断出口（server.ts 注入 diagLog）。空 = 诊断关闭，看门狗照常工作只是不记日志。
+  onDiag?: (payload: unknown) => void;
   // UTF-8 LANG to seed into new tmux sessions when the agent's own env has no
   // locale (see ensure() for why this must land on the server, not the client).
   private langFallback: string | null;
@@ -247,6 +258,7 @@ export class TerminalService {
       if (this.hasSession(name)) continue; // 假死，放过
       this.reap(name, 0);
     }
+    await this.watchdogTick(now);
     for (const { name, inferred } of probes) {
       if (!this.sessions.has(name)) continue; // killed/renamed while probing
       let m = this.states.get(name);
@@ -259,6 +271,70 @@ export class TerminalService {
       if (m.next(inferred)) changed = true;
     }
     if (changed) this.emitSessionsChange();
+  }
+
+  // 【2026-08-27 通道看门狗】每个扫描 tick 对每个活会话喂一次探头。
+  //
+  // 探头取值全部无内容：rxBytes = PaneChannel 累计字节（onData 计数）、
+  // tapBytes = 旁录文件的 stat size、historySize = tmux #{history_size}。
+  // historySize 是唯一要 spawn 的探头，且只在 rx 静默 ≥ 5s（看门狗已进入
+  // 候选状态、就差 history 证据）时才取——空闲会话不花这个 spawn。
+  // 判定命中 = 通道某处堵死但没死：kill 旧通道（tmux pipe-pane 关闭会带走
+  // 旧 tee，closeIo 收掉旧 cat）→ openChannel 全新链路。tmux 的 pipe_offset
+  // 在 pipe-pane 重开时续传（cmd-pipe-pane.c 不重置 wpo），堵在半路的字节会
+  // 从新通道流出，不丢。守纪律：先 kill 再开（scanAsync 上方纪律 2）。
+  private async watchdogTick(now: number): Promise<void> {
+    for (const [name, live] of this.sessions.entries()) {
+      if (this.rebuilding.has(name)) continue;
+      const ch = live.pty;
+      if (!(ch instanceof PaneChannel)) continue; // shell 会话不走 FIFO 链
+      const health = ch.health();
+      let wd = this.watchdogs.get(name);
+      if (!wd) {
+        wd = new ChannelWatchdog();
+        this.watchdogs.set(name, wd);
+      }
+      // rx 静默多久了（onData 会刷新 lastOutputAt）。静默不足 5s 时
+      // history_size 探头不取（喂 null 让判定退化，省一次 spawn）。
+      const silentMs = now - live.lastOutputAt;
+      let historySize: number | null = null;
+      if (silentMs >= 5000) {
+        const r = await this.tmuxAsync(["display-message", "-p", "-t", name, "#{history_size}"]);
+        if (r.exitCode === 0) {
+          const n = Number(new TextDecoder().decode(r.stdout).trim());
+          historySize = Number.isFinite(n) ? n : null;
+        }
+      }
+      const verdict = wd.feed({ now, rxBytes: health.rxBytes, tapBytes: health.tapBytes, historySize });
+      if (verdict !== "rebuild") continue;
+      // 判定命中。记录重建前的证据快照（纯计数，可安全进日志）。
+      this.onDiag?.({
+        tag: name, kind: "chan-watchdog", phase: "rebuild",
+        silentMs, rxBytes: health.rxBytes, tapBytes: health.tapBytes, historySize,
+      });
+      await this.rebuildChannel(name);
+    }
+  }
+
+  /** 看门狗命中后的通道重建。先收旧链路再开新链路（纪律 2），诊断记一条收尾。 */
+  private async rebuildChannel(name: string): Promise<void> {
+    const live = this.sessions.get(name);
+    if (!live || this.disposed || this.rebuilding.has(name)) return;
+    this.rebuilding.add(name);
+    try {
+      live.pty.kill();
+      const meta = live.meta;
+      live.pty = this.openChannel(name, meta.cols, meta.rows);
+      this.onDiag?.({ tag: name, kind: "chan-watchdog", phase: "rebuilt" });
+    } catch (e) {
+      // 重建失败：通道留死状，交给既有的 scan 收尸路径（has-session 二次确认）。
+      this.onDiag?.({
+        tag: name, kind: "chan-watchdog", phase: "rebuild-failed",
+        error: String(e).slice(0, 120),
+      });
+    } finally {
+      this.rebuilding.delete(name);
+    }
   }
 
   // Grab the bottom-most non-empty line of the pane for the task-panel preview.

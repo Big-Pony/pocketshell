@@ -1,8 +1,9 @@
-import { describe, it, test, expect } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { describe, it, test, expect, afterEach } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TerminalService, withCursorFix, type TmuxResult, type TmuxRunner } from "./terminal";
+import { PaneChannel, fifoName } from "./pane-channel";
 
 // 单测不得往用户真实家目录里造 FIFO：把窗格通道的运行目录指到临时目录。
 // 必须在任何 TerminalService 构造之前设置（PaneChannel 在构造时读它）。
@@ -897,4 +898,88 @@ test("构造时把所有 pane_pipe=1 的会话的管子关掉（pane_pipe=0 的�
   for (const a of offs) expect(a).not.toContain("-O");
   // 名字要能认出 CJK —— 没有 -u 时 tmux 会把它洗成 _
   expect(calls.find((a) => a.includes("list-sessions"))![0]).toBe("-u");
+});
+
+// 【2026-08-27 通道看门狗】B2 通道「堵住但没死」的自愈判定接线。
+// 场景还原：rx 冻结（cat/pump 不消费）而 pane 仍在产出（tap 增长）——
+// 看门狗必须在候选窗后重建通道；纯空闲则绝不动手。
+describe("通道看门狗 watchdogTick", () => {
+  function plantWithPaneChannel() {
+    const runDir = mkdtempSync(join(tmpdir(), "ps-wd-run-"));
+    const tapDir = mkdtempSync(join(tmpdir(), "ps-wd-tap-"));
+    process.env.POCKETSHELL_RUN_DIR = runDir;
+    process.env.POCKETSHELL_PANE_TAP = tapDir;
+    const tapFile = join(tapDir, fifoName("s") + ".raw");
+    let historySize = "0";
+    const term = new TerminalService({
+      tmux: () => ok(),
+      tmuxAsync: async (args: string[]) => {
+        if (args.includes("display-message")) return ok(historySize);
+        return ok();
+      },
+    });
+    const ch = new PaneChannel("s", {
+      tmux: () => ok(),
+      tmuxAsync: async () => ok(),
+      runDir,
+    });
+    let killed = false;
+    const origKill = ch.kill.bind(ch);
+    ch.kill = () => { killed = true; origKill(); };
+    (term as any).sessions.set("s", {
+      pty: ch,
+      meta: { name: "s", state: "run", cols: 80, rows: 24, lastLine: "", createdAt: 0, attached: true },
+      // rx 已静默 60s（tick 传入的是 fake now，这里同基准倒推）
+      lastOutputAt: 1000 - 60_000,
+    });
+    const diag: unknown[] = [];
+    term.onDiag = (p) => diag.push(p);
+    const tick = (now: number) => (term as any).watchdogTick(now);
+    return { term, ch, tick, tapFile, diag, killed: () => killed, setHistory: (n: string) => { historySize = n; } };
+  }
+
+  afterEach(() => {
+    delete process.env.POCKETSHELL_RUN_DIR;
+    delete process.env.POCKETSHELL_PANE_TAP;
+  });
+
+  it("rx 冻结 + tap 增长 → 重建通道（kill 旧链路、diag 留痕）", async () => {
+    const h = plantWithPaneChannel();
+    writeFileSync(h.tapFile, "a".repeat(200)); // pane 产出证据
+    await h.tick(1000);        // 候选起点
+    writeFileSync(h.tapFile, "a".repeat(600)); // 证据继续增长
+    await h.tick(1000 + 6100); // 候选窗满 → 判定
+    await Bun.sleep(30);       // rebuildChannel 是异步的
+    expect(h.killed()).toBe(true); // 旧通道已收
+    const kinds = h.diag.map((d: any) => d.kind + ":" + d.phase);
+    expect(kinds).toContain("chan-watchdog:rebuild");
+    expect(kinds).toContain("chan-watchdog:rebuilt");
+    // live.pty 已换成新通道（不是原来那个）
+    expect((h.term as any).sessions.get("s").pty).not.toBe(h.ch);
+    h.term.dispose();
+  });
+
+  it("纯空闲（rx 冻结、tap/hist 不动）→ 不重建", async () => {
+    const h = plantWithPaneChannel();
+    h.setHistory("42");
+    await h.tick(1000);
+    await h.tick(1000 + 6100);
+    await h.tick(1000 + 12200);
+    await Bun.sleep(30);
+    expect(h.killed()).toBe(false);
+    expect(h.diag).toHaveLength(0);
+    h.term.dispose();
+  });
+
+  it("rx 冻结 + history 增长（无 tap）→ 重建", async () => {
+    const h = plantWithPaneChannel();
+    h.setHistory("10");
+    await h.tick(1000);
+    h.setHistory("15"); // 行数在涨：pane 在产出
+    await h.tick(1000 + 6100);
+    await Bun.sleep(30);
+    expect(h.killed()).toBe(true);
+    expect((h.term as any).sessions.get("s").pty).not.toBe(h.ch);
+    h.term.dispose();
+  });
 });

@@ -206,6 +206,9 @@ export function startServer(deps: Deps = {}) {
     if (!diagOn) return;
     console.log(formatDiagReport(payload));
   };
+  // 通道看门狗（terminal.ts watchdogTick）的日志走同一个总开关与出口，
+  // 不给「新埋点绕过 diagLog」留口子。
+  terminal.onDiag = diagLog;
 
   const sendSecure = (conn: Conn, msg: ServerMsg) => {
     if (!conn.ready) return;

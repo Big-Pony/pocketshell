@@ -31,7 +31,7 @@
 //    pipe-pane 重启时都会消失，没有别的写端在场时 FIFO 就 EOF，我们的读进程随之退出、
 //    通道再也回不来。持一个 O_RDWR 就堵住了这个 EOF；因为我们从不 read 它，也不会跟
 //    读进程抢字节。实测写端反复消失后通道仍存活。
-import { closeSync, constants, existsSync, mkdirSync, openSync, unlinkSync } from "node:fs";
+import { closeSync, constants, existsSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PtyHandle } from "./pty";
@@ -91,11 +91,16 @@ export class PaneChannel implements PtyHandle {
   private closed = false;
   /** 写队列：send-keys 必须**按序**到达，而异步 spawn 不保证顺序。 */
   private writeChain: Promise<unknown> = Promise.resolve();
+  /** 本通道累计收到的字节数。看门狗的 rx 探头（channel-watchdog.ts），只计数。 */
+  private rxTotal = 0;
+  /** tap 旁录目录（POCKETSHELL_PANE_TAP），off 时为 null。看门狗 stat 文件大小用。 */
+  private readonly tapDir: string | null;
 
   constructor(
     private readonly session: string,
     private readonly deps: PaneChannelDeps,
   ) {
+    this.tapDir = process.env.POCKETSHELL_PANE_TAP ?? null;
     // 目录优先级：显式注入 > POCKETSHELL_RUN_DIR > ~/.pocketshell/run。
     // 环境变量这一档是给测试用的 —— 否则每跑一次单测就往用户真实家目录里造 FIFO。
     const dir = deps.runDir ?? process.env.POCKETSHELL_RUN_DIR ?? join(homedir(), ".pocketshell", "run");
@@ -125,7 +130,7 @@ export class PaneChannel implements PtyHandle {
    * **绝不可外传**、绝不进日志、绝不进 diag 上报。文件只增不删，用完自己清。
    */
   private startPipe(): void {
-    const tapDir = process.env.POCKETSHELL_PANE_TAP;
+    const tapDir = this.tapDir;
     const sink = tapDir
       ? `tee -a '${join(tapDir, fifoName(this.session))}.raw' > '${this.fifoPath}'`
       : `cat > '${this.fifoPath}'`;
@@ -134,6 +139,22 @@ export class PaneChannel implements PtyHandle {
 
   onData(cb: (chunk: Uint8Array) => void): void {
     this.dataCbs.push(cb);
+  }
+
+  /**
+   * 看门狗探头（channel-watchdog.ts 的取样源）。只读计数与 stat size，
+   * **永不读 tap 内容**——里面是真实会话原文，红线同 pane-tap。
+   * tap 关闭（POCKETSHELL_PANE_TAP 未设）时 tapBytes 为 null，看门狗退化
+   * 为只看 history_size 证据。
+   */
+  health(): { rxBytes: number; tapBytes: number | null } {
+    let tapBytes: number | null = null;
+    if (this.tapDir !== null) {
+      try {
+        tapBytes = statSync(join(this.tapDir, fifoName(this.session)) + ".raw").size;
+      } catch { /* 尚无旁录文件 = 0 字节产出 */ tapBytes = 0; }
+    }
+    return { rxBytes: this.rxTotal, tapBytes };
   }
 
   onExit(cb: (code: number) => void): void {
@@ -197,6 +218,7 @@ export class PaneChannel implements PtyHandle {
       for await (const c of out) {
         if (this.closed) return;
         const buf = new Uint8Array(c);
+        this.rxTotal += buf.byteLength;
         for (const cb of this.dataCbs) cb(buf);
       }
     } catch { /* 关闭时的正常中断 */ }
