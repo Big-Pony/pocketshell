@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chunkForSend, fifoName, hexArgs, PaneChannel, PASTE_DIAG_BYTES, SEND_CHUNK } from "./pane-channel";
@@ -224,5 +224,29 @@ describe("PaneChannel —— 与 tmux 的交互", () => {
     ch.fail();
     ch.fail();
     expect(n).toBe(1);
+  });
+  it("health() 报 rx 计数与 tap 文件 stat size（只读计数，不读内容）", () => {
+    const s = spy();
+    const tapDir = mkdir();
+    process.env.POCKETSHELL_PANE_TAP = tapDir;
+    try {
+      const ch = new PaneChannel("dev", { tmux: s.tmux, tmuxAsync: s.tmuxAsync, runDir: mkdir() });
+      // 无 tap 文件 = 0 字节产出（不是 null）。
+      expect(ch.health()).toEqual({ rxBytes: 0, tapBytes: 0 });
+      writeFileSync(join(tapDir, fifoName("dev") + ".raw"), "x".repeat(128));
+      expect(ch.health().tapBytes).toBe(128);
+      // rx 计数在 pump 内累计、不可注入，这里覆盖 tap 侧；
+      // rx 冻结路径由 terminal.test.ts 的 watchdogTick 集成测试覆盖。
+      ch.kill();
+    } finally { delete process.env.POCKETSHELL_PANE_TAP; }
+  });
+
+  it("tap 关闭（环境变量未设）时 tapBytes 为 null —— 看门狗退化为只看 history", () => {
+    const s = spy();
+    const ch = new PaneChannel("dev", { tmux: s.tmux, tmuxAsync: s.tmuxAsync, runDir: mkdir() });
+    const h = ch.health();
+    expect(h.tapBytes).toBeNull();
+    expect(h.rxBytes).toBe(0);
+    ch.kill();
   });
 });
