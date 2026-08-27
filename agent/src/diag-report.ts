@@ -57,7 +57,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -165,7 +165,8 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     if (typeof p.phase === "string") out.phase = oneLine(p.phase, MAX_TAG);
     // 渲染服务状态（app/src/lib/term/render-probe.ts）。**布尔要保住「读不到」**：
     // 字段缺席 = 上游结构变了，与 false（确实没暂停）是两回事，别在这里补默认值。
-    for (const k of ["paused", "rendererSet", "needsFullRefresh", "domVisible"] as const) {
+    // kicked/unreadable（render-kick）同规则：解卡是否动手、上游结构是否读得到。
+    for (const k of ["paused", "rendererSet", "needsFullRefresh", "domVisible", "kicked", "unreadable"] as const) {
       if (typeof p[k] === "boolean") out[k] = p[k];
     }
     for (const k of [

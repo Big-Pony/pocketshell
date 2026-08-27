@@ -84,6 +84,7 @@
   import { snapshotScroll, formatScrollSnapshot } from "../lib/term/scroll-probe";
   import { hashLine, hashViewport, hashBufferTail, hashBufferTailBare } from "../lib/term/screen-probe";
   import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
+  import { kickRenderDebouncer } from "../lib/term/render-kick";
   import { isMeasurable, isPlausible, rememberDims, shouldDeferShrink, SHRINK_HOLD_MS } from "../lib/term/fit-guard";
   import {
     buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite, normalizeReseedRows,
@@ -313,6 +314,13 @@
     };
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
+      // 【2026-08-28 渲染去抖器解卡】回前台必做，且**不受诊断开关门控**——这是
+      // 功能修复不是取证。iOS 切后台会丢弃已排定的 rAF 回调，xterm 的
+      // RenderDebouncer 从此拿不到那个「清除句柄」的机会，所有渲染请求在
+      // 第一行 early-return，屏幕冻结而 buffer 照常更新（关掉重开才看到内容）。
+      // 这里对**本终端实例**解卡；隐藏 tab 也安全（paused 下只是记账，见
+      // render-kick.ts 文件头）。
+      kickRenderDebouncer(term);
       if (!diagOn()) return;   // 诊断默认关闭（2026-08-23）
       try {
         const snap = snapshotAtlas(webglAddon, true);
@@ -409,12 +417,14 @@
       lastSampleAt = now;
 
       // 1) 写入量 vs buffer 增量。两者长期背离 = 字节写进 xterm 却没落进 buffer。
+      // wroteBytes 增量提到 try 外面：第 2 步的解卡判定要用它对照 renderFrames。
+      const wroteBytesDelta = probeBytes - lastSampleBytes;
       try {
         const bufLen = term.buffer.active.length;
         void conn.rpc("diag.report", {
           tag: sessionId, kind: "write", phase: why,
           wroteFrames: probeFrames - lastSampleFrames,
-          wroteBytes: probeBytes - lastSampleBytes,
+          wroteBytes: wroteBytesDelta,
           // 无基线时报 -1（"读不到"），与 0（"真的没长"）区分开——这个区别在
           // diag-report.ts 里是刻意保住的，别在这里归一。
           bufDelta: lastSampleBufLen < 0 ? -1 : bufLen - lastSampleBufLen,
@@ -435,9 +445,26 @@
         // 「被暂停了」还是「渲染器指针空了」——两者修法完全不同，而 atlas 探针的
         // hasRenderer 查的是 WebGL addon 对象，答不了这个问题。见 render-probe.ts。
         const rsnap = snapshotRender(term);
+        const renderFramesDelta = renderCount - lastSampleRenderFrames;
+        // 【2026-08-28 渲染去抖器解卡】四字段同时成立 = rAF 句柄被后台丢弃后
+        // RenderDebouncer 永久卡死（字节在写、buffer 在长、两道闸都健康、
+        // 就是零渲染帧）。这是前两道防线（回前台/切 tab 各踢一次）之后的兜底：
+        // 别的路径把卡死造出来，15 秒内也能自愈，且日志里留下 render-kick 留痕。
+        // paused/domVisible 读不到（undefined）时不踢——证据不全就别动手。
+        if (
+          renderFramesDelta === 0 && wroteBytesDelta > 0 &&
+          rsnap.rendererSet === true && rsnap.paused === false && rsnap.domVisible === true
+        ) {
+          const kick = kickRenderDebouncer(term);
+          void conn.rpc("diag.report", {
+            tag: sessionId, kind: "render-kick", phase: why,
+            why: "heartbeat", kicked: kick.kicked, unreadable: kick.unreadable ?? false,
+            wroteBytes: wroteBytesDelta, sinceMs: dt,
+          }).catch(() => {});
+        }
         void conn.rpc("diag.report", {
           tag: sessionId, kind: "render", phase: why,
-          renderFrames: renderCount - lastSampleRenderFrames,
+          renderFrames: renderFramesDelta,
           dirtyRows: renderRows,
           sinceMs: dt,
           ...snap,
@@ -1124,6 +1151,10 @@
       flushPending();
       queueMicrotask(() => {
         activateRefit();
+        // 【2026-08-28 渲染去抖器解卡】切 tab 与切 App 是同一个坑的两条入口：
+        // 隐藏期间被丢弃的 rAF 句柄不清，回来后渲染请求全部 early-return。
+        // refit 之后踢，让解卡触发的全量重画画的是最终尺寸的内容。
+        kickRenderDebouncer(term);
         startPoll();
         // 取证（2026-08-09）：在 refit **之后**拍，量到的才是这个 tab 稳定下来的
         // 真实尺寸。列数塌陷与滑不动都只在切 tab 时复现，而这里是唯一必经之路。
