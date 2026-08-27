@@ -21,9 +21,9 @@ beforeAll(() => {
 afterAll(() => { window.matchMedia = origMatchMedia; });
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-const hist = (text: string) => ({ data: toB64(new TextEncoder().encode(text)), seq: 7 });
+const hist = (text: string, seq = 7) => ({ data: toB64(new TextEncoder().encode(text)), seq });
 
-type OutCb = (f: { sessionId: string; data: Uint8Array }) => void;
+type OutCb = (f: { sessionId: string; data: Uint8Array; seq: number }) => void;
 
 /** 可控的 conn 桩：暴露 onOutput 的回调，好在 await 窗口里注入实时帧。 */
 function stubConn(rpc: ReturnType<typeof vi.fn>) {
@@ -37,8 +37,10 @@ function stubConn(rpc: ReturnType<typeof vi.fn>) {
       rpc,
       hasFeature: (n: string) => n === "diag",
     } as any,
-    emit: (sessionId: string, s: string) => {
-      for (const cb of out) cb({ sessionId, data: new TextEncoder().encode(s) });
+    // seq 缺省 0 = 「没有序号信息」，与 PendingBuffer.takeAfter 的语义一致：
+    // 不关心快照分界线的用例照旧两参调用，行为不变。
+    emit: (sessionId: string, s: string, seq = 0) => {
+      for (const cb of out) cb({ sessionId, data: new TextEncoder().encode(s), seq });
     },
   };
 }
@@ -403,5 +405,83 @@ describe("5 · 重灌行数不得少于 buffer 现有行数", () => {
 
     const call = rpc.mock.calls.find((c) => c[0] === "term.history");
     expect((call![1] as { lines?: number }).lines).toBe(1000);
+  });
+});
+
+// ── 5 ─────────────────────────────────────────────────────────────────
+// 【2026-08-27 teachppt「AI 最后一次的输出不见了」】
+//
+// 隐藏的 tab 把实时字节攒在 pendingOut 里（R1），而 resync 触发的重灌**不看
+// 可见性**：它照样把 RIS + 整份 tmux 快照写进 xterm。快照拍的是 tmux 此刻的
+// 画面，攒着的那些字节早就体现在里面了。等用户切回来，flushPending 又把这批
+// **已经过时**的字节整份重放到一份正确的 buffer 上 —— 它们是 Claude Code 的
+// 增量重绘流（\r、光标上移、擦行），落在已是终态的屏幕上就是一边重复一边覆盖。
+//
+// 真机取证（agent.out.log，teachppt）：tab 隐藏 26.5 分钟期间发生两次
+// `reseed trigger:"resync"`，激活那一刻 `write phase:"activate"
+// wroteFrames:645 wroteBytes:104599 bufDelta:111` —— 104KB 陈旧字节压在快照上，
+// 随后的 scrollback 对拍 `missingLines:87 extraLines:59`。
+//
+// 分界线是现成的：term.history 是**先取号后快照**，返回的 seq 就是「这个号
+// 以前的字节都已经在快照里了」。
+describe("5 · 隐藏期的积压不得压在重灌之后（teachppt 丢内容）", () => {
+  test("★ 快照已经覆盖的那批积压字节，激活时不得再重放一遍", async () => {
+    const rpc = baseRpc(() => Promise.resolve(hist("")));
+    const { conn, emit } = stubConn(rpc);
+    let xterm: XTerm | undefined;
+    let reseed: ((t: any) => void) | undefined;
+    const props = {
+      conn, sessionId: "s-hidden", historyLines: 1000,
+      onReady: (_i: string, t: XTerm) => { xterm = t; },
+      onReseedReady: (_i: string, f: any) => { reseed = f; },
+    };
+    const { rerender } = render(Terminal, { props: { ...props, active: false } as any });
+    await tick(10);
+
+    // 隐藏期：AI 的输出到达（seq 1..2），进 pendingOut。
+    emit("s-hidden", "AI-REPLY\r\n", 1);
+    emit("s-hidden", "AI-TAIL\r\n", 2);
+    await tick();
+
+    // 掉线重连 → 服务端说 resync。快照 seq=2 ⇒ 上面两帧都已在快照里。
+    rpc.mockImplementation((m: string) =>
+      m === "term.history" ? Promise.resolve(hist("AI-REPLY\nAI-TAIL\n\n", 2))
+      : m === "term.paneInfo" ? Promise.resolve({ currentCommand: "zsh", alternateOn: false, isShell: true })
+      : Promise.resolve({}));
+    reseed?.("resync");
+    await tick(30);
+
+    // 快照之后才产生的字节（seq 3）必须留着 —— 它不在快照里。
+    emit("s-hidden", "AFTER-SNAP\r\n", 3);
+    await tick();
+
+    await rerender({ ...props, active: true } as any);
+    await tick(30);
+    await new Promise<void>((r) => xterm!.write("", () => r()));
+
+    const rows = screen(xterm!);
+    expect(rows.filter((r) => r === "AI-REPLY").length).toBe(1);
+    expect(rows.filter((r) => r === "AI-TAIL").length).toBe(1);
+    expect(rows).toContain("AFTER-SNAP");
+  });
+
+  test("没发生过重灌时，隐藏期积压照旧全量重放（R1 的原有语义不能被改坏）", async () => {
+    const rpc = baseRpc(() => Promise.resolve(hist("SEED\n\n")));
+    const { conn, emit } = stubConn(rpc);
+    let xterm: XTerm | undefined;
+    const props = {
+      conn, sessionId: "s-plain",
+      onReady: (_i: string, t: XTerm) => { xterm = t; },
+    };
+    const { rerender } = render(Terminal, { props: { ...props, active: false } as any });
+    await tick(10);
+
+    emit("s-plain", "ONLY-IN-STASH\r\n", 11);
+    await tick();
+    await rerender({ ...props, active: true } as any);
+    await tick(30);
+    await new Promise<void>((r) => xterm!.write("", () => r()));
+
+    expect(screen(xterm!)).toContain("ONLY-IN-STASH");
   });
 });

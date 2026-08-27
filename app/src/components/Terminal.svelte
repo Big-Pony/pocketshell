@@ -659,7 +659,10 @@
       probeBytes += f.data.byteLength;
       if (active) { term.write(f.data); windowBuf?.push(f.data, f.seq); return; }
       if (closed) return;
-      pendingOut.push(f.data);
+      // seq 要跟着进暂存：隐藏期间可能发生 resync 重灌，快照一落地这批字节里
+      // seq ≤ 快照号的部分就作废了（见 reloadHistory 里的 dropUpTo）。不带 seq
+      // 的话分不出哪些作废，激活时会把它们整份压在快照之后重放一遍。
+      pendingOut.push(f.data, f.seq);
     });
 
     // Seed tmux history into the shell's normal buffer, replacing what xterm
@@ -767,6 +770,11 @@
         // RIS、快照、窗口旁录必须拼进**同一次** write：拆成两次虽然队列里也有序，
         // 但中间会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
         if (!stale && !destroyed && currentBuffer === "normal") {
+          // 隐藏期攒下的积压里，seq ≤ 快照号的那部分已经体现在这份快照里了。
+          // 不在这里丢掉的话，用户切回来时 flushPending 会把它们整份重放到一份
+          // 已是终态的 buffer 上 —— 那正是 2026-08-27 teachppt「AI 最后一次的
+          // 输出不见了」的成因（真机 104,599 字节）。详见 PendingBuffer.dropUpTo。
+          pendingOut.dropUpTo(snapshotSeq);
           term.write(concatReseedWrite(buildReseedPayload(data), windowBytes), () => {
             // 回调触发 = 这批字节已解析完，此刻的行数才是真的（见 reportReseed）。
             reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,

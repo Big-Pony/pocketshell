@@ -101,3 +101,53 @@ describe("takeAfter（按快照 seq 过滤旁录）", () => {
     expect(p.takeAfter(8393)).toBeNull();
   });
 });
+
+describe("dropUpTo —— 快照落地后丢掉已被它覆盖的积压（2026-08-27 teachppt）", () => {
+  it("丢 seq ≤ 分界线的，留 seq > 分界线的，顺序不变", () => {
+    const p = new PendingBuffer();
+    p.push(b(1, 1), 1);
+    p.push(b(1, 2), 2);
+    p.push(b(1, 3), 3);
+    p.dropUpTo(2);
+    expect(Array.from(p.take()!)).toEqual([3]);
+  });
+
+  it("缓冲不清空 —— 丢完还能继续 push，激活时一起 flush", () => {
+    const p = new PendingBuffer();
+    p.push(b(1, 1), 1);
+    p.dropUpTo(1);
+    p.push(b(1, 9), 2);
+    expect(Array.from(p.take()!)).toEqual([9]);
+  });
+
+  it("整批都在快照内 ⇒ 什么都不剩（teachppt 那 104KB 的形状）", () => {
+    const p = new PendingBuffer();
+    for (let seq = 1; seq <= 645; seq++) p.push(b(160, seq % 256), seq);
+    p.dropUpTo(645);
+    expect(p.take()).toBeNull();
+  });
+
+  it("seq=0（没有序号信息）永不被丢 —— 与 takeAfter 同语义", () => {
+    const p = new PendingBuffer();
+    p.push(b(2, 7));
+    p.dropUpTo(9999);
+    expect(Array.from(p.take()!)).toEqual([7, 7]);
+  });
+
+  it("分界线非法（0 / NaN）时一个字节都不丢", () => {
+    const p = new PendingBuffer();
+    p.push(b(1, 1), 1);
+    p.dropUpTo(0);
+    p.dropUpTo(Number.NaN);
+    expect(Array.from(p.take()!)).toEqual([1]);
+  });
+
+  it("丢弃要把字节数一起扣掉 —— 否则长时间隐藏的会话会被虚高的计数推到 dirty", () => {
+    const p = new PendingBuffer(100);
+    p.push(b(80, 1), 1);
+    p.dropUpTo(1);
+    p.push(b(80, 2), 2);   // 计数没扣的话这里就越限、置 dirty
+    expect(p.dirty).toBe(false);
+    expect(Array.from(p.take()!).length).toBe(80);
+  });
+});
