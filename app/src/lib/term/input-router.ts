@@ -8,11 +8,23 @@ export type ModState = Record<ModName, ModPhase>;
 
 export const EMPTY_MODS: ModState = { Shift: "off", Ctrl: "off", Alt: "off", Cmd: "off", Fn: "off", Caps: "off" };
 
-const NEXT: Record<ModPhase, ModPhase> = { off: "armed", armed: "locked", locked: "off" };
+// 【2026-08-28 误锁陷阱修正】轻点不再进入 locked：旧循环 off→armed→locked→off 里，
+// 「连点两下再按字母」与「点一下再按字母」在按下字母那一刻完全等价（armed 和
+// locked 都让下一个键带修饰），用户无从分辨自己已把 Ctrl 锁死——真机实锤一例：
+// Ctrl+C 退出 Claude Code 时多按了一下 Ctrl，之后所有字母都以 1 字节控制码发
+// 出，cc 的输入框永远打不进字（「输入的内容看不到」排查了三天的真根因）。
+// 锁定改为**长按**专用（lockMod，Keyboard.svelte 里 500ms 长按触发），轻点只做
+// armed 开关；锁定态的可见性由键盘顶栏的锁定芯片兜底。
+const TAP: Record<ModPhase, ModPhase> = { off: "armed", armed: "off", locked: "off" };
 
-/** Tap a modifier: cycles off → armed(one-shot) → locked → off. */
+/** Tap a modifier: toggles the one-shot armed state; tapping a locked mod releases it. */
 export function tapMod(s: ModState, m: ModName): ModState {
-  return { ...s, [m]: NEXT[s[m]] };
+  return { ...s, [m]: TAP[s[m]] };
+}
+
+/** Long-press a modifier: lock it on (idempotent — long-pressing a locked mod keeps it). */
+export function lockMod(s: ModState, m: ModName): ModState {
+  return { ...s, [m]: "locked" };
 }
 
 export interface Mods { shift: boolean; caps: boolean; ctrl: boolean; alt: boolean; cmd: boolean; fn: boolean }

@@ -1,26 +1,39 @@
 // app/src/lib/input-router.test.ts
 import { test, expect } from "vitest";
-import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey } from "./input-router";
+import { EMPTY_MODS, tapMod, lockMod, activeMods, consumeAfterKey, resolveKey } from "./input-router";
 
 // ---- Task 7: Modifier sticky state machine ----
+// 【2026-08-28 修正】轻点只做 armed 开关（连点不会误锁——旧三态循环里
+// Ctrl+C 前多按一下 Ctrl 就把修饰键锁死，之后所有字母变成控制码），
+// 锁定只能长按（lockMod）。见 input-router.ts 的注释。
 
-test("tapMod cycles off -> armed -> locked -> off", () => {
+test("tapMod toggles off <-> armed; double-tap returns to off (不会误锁)", () => {
   let s = EMPTY_MODS;
   s = tapMod(s, "Ctrl"); expect(s.Ctrl).toBe("armed");
-  s = tapMod(s, "Ctrl"); expect(s.Ctrl).toBe("locked");
-  s = tapMod(s, "Ctrl"); expect(s.Ctrl).toBe("off");
+  s = tapMod(s, "Ctrl"); expect(s.Ctrl).toBe("off"); // 连点两下=关，不再进入 locked
+});
+
+test("lockMod 长按锁定；锁定态轻点即解除", () => {
+  let s = lockMod(EMPTY_MODS, "Ctrl");
+  expect(s.Ctrl).toBe("locked");
+  s = tapMod(s, "Ctrl"); expect(s.Ctrl).toBe("off"); // 轻点解除
+});
+
+test("lockMod 幂等：锁定态再长按仍是锁定", () => {
+  const s = lockMod(lockMod(EMPTY_MODS, "Alt"), "Alt");
+  expect(s.Alt).toBe("locked");
 });
 
 test("activeMods is true for armed and locked", () => {
   let s = tapMod(EMPTY_MODS, "Shift");        // armed
   expect(activeMods(s).shift).toBe(true);
-  s = tapMod(s, "Shift");                       // locked
+  s = lockMod(s, "Shift");                      // locked
   expect(activeMods(s).shift).toBe(true);
 });
 
 test("consumeAfterKey clears armed, keeps locked", () => {
   let s = tapMod(EMPTY_MODS, "Ctrl");           // armed
-  s = tapMod(s, "Shift"); s = tapMod(s, "Shift"); // Shift locked
+  s = lockMod(s, "Shift");                        // Shift locked
   const after = consumeAfterKey(s);
   expect(after.Ctrl).toBe("off");   // armed consumed
   expect(after.Shift).toBe("locked"); // locked stays
