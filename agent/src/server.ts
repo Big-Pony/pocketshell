@@ -320,8 +320,17 @@ export function startServer(deps: Deps = {}) {
   const batcher = new OutputBatcher((name, data) => {
     const frame = replay.ingest(name, data);
     const msg = { type: "output", sessionId: name, seq: frame.seq, data: toB64(data) } as const;
+    let delivered = false;
     for (const conn of conns.values()) {
-      if (conn.subscriptions.has(name)) deliverOutput(conn, msg);
+      if (conn.subscriptions.has(name)) { deliverOutput(conn, msg); delivered = true; }
+    }
+    // 【2026-08-28 投递盲区出声】pane 在产出、帧已进 replay，但没有任何连接
+    // 订阅这个会话 = 字节被静默扣下（2026-08-26 的 rename bug 是它的一个
+    // 变体）。5s 窗计数，只有帧数字节数。
+    if (!delivered) {
+      const c = deliverSkip.get(name) ?? { n: 0, bytes: 0 };
+      c.n++; c.bytes += data.length;
+      deliverSkip.set(name, c);
     }
   });
   const onTermOutput = (name: string, chunk: Uint8Array) => batcher.push(name, chunk);
@@ -385,10 +394,15 @@ export function startServer(deps: Deps = {}) {
   // （手机没发 / WS 丢了 / agent 没找到会话 / send-keys 没到 tmux）。
   // 只有计数，绝无内容。
   const inputRecv = new Map<string, { n: number; bytes: number }>();
+  const deliverSkip = new Map<string, { n: number; bytes: number }>();
   setInterval(() => {
     for (const [session, c] of inputRecv) {
       if (c.n > 0) console.log(`[pocketshell:diag] ${JSON.stringify({ kind: "input-recv", session, n: c.n, bytes: c.bytes })}`);
       inputRecv.set(session, { n: 0, bytes: 0 });
+    }
+    for (const [session, c] of deliverSkip) {
+      if (c.n > 0) console.log(`[pocketshell:diag] ${JSON.stringify({ kind: "deliver-skip", session, n: c.n, bytes: c.bytes })}`);
+      deliverSkip.set(session, { n: 0, bytes: 0 });
     }
   }, 5_000).unref?.();
   // Presence keyed by device Noise pubkey (updated by the `presence` message,
