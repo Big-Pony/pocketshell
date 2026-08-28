@@ -456,9 +456,14 @@
           rsnap.rendererSet === true && rsnap.paused === false && rsnap.domVisible === true
         ) {
           const kick = kickRenderDebouncer(term);
+          // 带上滚动状态：滚离底部（ydisp<baseY）时底行重绘被视口门拦掉是
+          // xterm 的刻意行为（见 onInput 里的回底部注释），这条留痕能直接
+          // 区分「滚上去了」与「真卡死」。
+          const buf = term.buffer.active;
           void conn.rpc("diag.report", {
             tag: sessionId, kind: "render-kick", phase: why,
             why: "heartbeat", kicked: kick.kicked, unreadable: kick.unreadable ?? false,
+            ydisp: buf.viewportY, baseY: buf.baseY, bufferLength: buf.length,
             wroteBytes: wroteBytesDelta, sinceMs: dt,
           }).catch(() => {});
         }
@@ -1024,6 +1029,12 @@
     // A4: a tombstoned session has no live pane — never re-classify for it.
     const unsubscribeInput = conn.onInput((sid) => {
       if (sid !== sessionId || closed) return;
+      // 【2026-08-28 输入回底部】真终端里打字会自动滚回底部（xterm 的
+      // scrollOnUserInput）。我们的输入走 RPC→tmux、不经过 xterm 的键盘
+      // 事件，这个行为就静默丢了——用户向上滚过之后（手机上一拖就是一行），
+      // 输入框所在的底行在视口外，而 xterm 只对视口内的脏行发重绘请求，
+      // 表现正是「打字无回显、终端像卡死，关掉重开才看到」。
+      try { term.scrollToBottom(); } catch { /* 显示层尽力而为，不牵连输入 */ }
       if (classifyDebounce) clearTimeout(classifyDebounce);
       classifyDebounce = setTimeout(() => void classifyPane(), 200);
     });

@@ -242,3 +242,31 @@ test("尺寸没变时不上报 resize —— 否则每次滚动都是噪音", as
     .filter((p) => p.kind === "resize").length;
   expect(after).toBe(before);
 });
+
+// 【2026-08-28 输入回底部】真终端里打字自动滚回底部（xterm scrollOnUserInput），
+// 我们的输入走 RPC→tmux 不经过 xterm 键盘事件，这个行为只能在 sendInput 收口处补。
+// 没有它：用户向上滚一行后，输入框所在的底行在视口外、xterm 不重绘视口外的脏行，
+// 表现为「打字无回显、终端像卡死」。
+test("输入即回底部 —— RPC 输入旁路必须补上 scrollOnUserInput 的等价行为", async () => {
+  vi.useFakeTimers();
+  let inputCb: ((sid: string) => void) | undefined;
+  const rpc = okRpc();
+  const conn = {
+    ...stubConn(rpc),
+    onInput: (cb: (sid: string) => void) => { inputCb = cb; return () => {}; },
+  };
+  let captured: any;
+  render(Terminal, {
+    props: { conn, sessionId: "s-scroll1", active: true, onReady: (_sid: string, t: any) => { captured = t; } },
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(inputCb).toBeTypeOf("function");
+  expect(captured).toBeTypeOf("object");
+  const spy = vi.spyOn(captured, "scrollToBottom");
+  inputCb!("s-scroll1");
+  expect(spy).toHaveBeenCalledTimes(1);
+  // 别的会话的输入不牵动这个终端。
+  inputCb!("other-session");
+  expect(spy).toHaveBeenCalledTimes(1);
+  spy.mockRestore();
+});
