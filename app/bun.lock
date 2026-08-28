@@ -45,6 +45,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@xterm/xterm@6.1.0-beta.292": "patches/@xterm%2Fxterm@6.1.0-beta.292.patch",
+  },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "https://mirrors.cloud.tencent.com/npm/@adobe/css-tools/-/css-tools-4.5.0.tgz", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
 
