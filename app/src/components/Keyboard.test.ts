@@ -764,29 +764,3 @@ test("换位后 Tab 仍发 \\x09、Esc 仍发 \\x1b", async () => {
   await fireEvent.pointerUp(esc);
   expect(onText).toHaveBeenCalledWith("\x1b");
 });
-
-
-// 【2026-08-28 误锁陷阱】轻点不再进入 locked（旧三态循环里 Ctrl+C 前多按一下
-// Ctrl 就把修饰键锁死，之后所有字母以 1 字节控制码发出——cc 输入框打不进字
-// 的真根因）。钉住组件层三件事：连点不锁、长按 500ms 锁、锁定芯片出现且轻点可解。
-test("修饰键连点两下=开再关不锁死；长按 500ms 才锁定并出芯片", async () => {
-  vi.useFakeTimers();
-  const { onText, r } = openOps();
-  const ctrl = r.container.querySelector('[data-key-id="Ctrl"]')!;
-  const chip = () => r.container.querySelector(".modlock-chip");
-
-  // 两次轻点：armed → off，没有芯片，也没发任何字节。
-  await fireEvent.pointerDown(ctrl); await vi.advanceTimersByTimeAsync(100); await fireEvent.pointerUp(ctrl);
-  await fireEvent.pointerDown(ctrl); await vi.advanceTimersByTimeAsync(100); await fireEvent.pointerUp(ctrl);
-  expect(onText).not.toHaveBeenCalled();
-  expect(chip()).toBeNull();
-
-  // 长按 600ms：锁定 + 芯片出现。
-  await fireEvent.pointerDown(ctrl); await vi.advanceTimersByTimeAsync(600); await fireEvent.pointerUp(ctrl);
-  expect(chip()?.textContent).toContain("Ctrl");
-
-  // 轻点锁定键：解除，芯片消失。
-  await fireEvent.pointerDown(ctrl); await vi.advanceTimersByTimeAsync(50); await fireEvent.pointerUp(ctrl);
-  expect(chip()).toBeNull();
-  vi.useRealTimers();
-});

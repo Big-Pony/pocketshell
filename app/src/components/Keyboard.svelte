@@ -8,7 +8,7 @@
     LAYOUT_BOTTOM_LAYERED, LAYOUT_BOTTOM_FLICK, LAYOUT_ARROWS, LAYER_KEY_ID,
     type KbLayoutId,
   } from "../lib/term/keymap";
-  import { EMPTY_MODS, tapMod, lockMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/term/input-router";
+  import { EMPTY_MODS, tapMod, activeMods, consumeAfterKey, resolveKey, type ModState, type ModName, type AppCommand } from "../lib/term/input-router";
   import { createKeyRepeater, type KeyRepeater } from "../lib/term/key-repeat";
   import { imeSendText } from "../lib/term/ime-send";
   import { isTap } from "../lib/term/tap-or-scroll";
@@ -132,32 +132,6 @@
     if (pendingRaf) { cancelAnimationFrame(pendingRaf); pendingRaf = undefined; }
   }
 
-  // 修饰键长按锁定（500ms）。按下即轻点切换 armed，按住满 500ms 升级为 locked
-  // （震动一下作为确认——armed 与 locked 在键帽上只有填充深浅之差，手持时太
-  // 容易看漏）。抬手/滑出（keyUp）取消。幂等：locked 态长按仍是 locked。
-  let modPressTimer: ReturnType<typeof setTimeout> | undefined;
-  function armModLongPress(m: ModName) {
-    clearTimeout(modPressTimer);
-    modPressTimer = setTimeout(() => {
-      modPressTimer = undefined;
-      if (mods[m] !== "locked") {
-        mods = lockMod(mods, m);
-        buzz();
-      }
-    }, 500);
-  }
-
-  // armed 单发的过期（6s 无任何按键）。防的是「点了 Ctrl 忘了按字母」——之后
-  // 第一个字母会凭空带上 Ctrl。locked 不受影响（那是刻意的长按状态）。
-  let armExpireTimer: ReturnType<typeof setTimeout> | undefined;
-  function scheduleArmExpiry() {
-    clearTimeout(armExpireTimer);
-    armExpireTimer = setTimeout(() => {
-      armExpireTimer = undefined;
-      mods = consumeAfterKey(mods); // 只清 armed，locked 保留
-    }, 6_000);
-  }
-
   onMount(() => {
     const onDownCap = (e: PointerEvent) => { downX = coord(e.clientX); downY = coord(e.clientY); };
     kbEl?.addEventListener("pointerdown", onDownCap, { capture: true });
@@ -177,22 +151,11 @@
   // Key down: modifiers toggle (no repeat); byte-producing keys fire once now
   // and arm a long-press repeater; app commands (Fn layer / Cmd shortcuts /
   // selection-mode arrows) fire once, exactly like before.
-  //
-  // 【2026-08-28 误锁陷阱修正】修饰键三态循环（off→armed→locked）里「连点两下
-  // 再按字母」与「点一下再按字母」在按下字母那一刻完全等价——真机实锤：用户
-  // Ctrl+C 退出 Claude Code 时多点了一下 Ctrl，锁定后所有字母以 1 字节控制码
-  // 发出，cc 的输入框永远打不进字。现改为：轻点只开关 armed；**长按 500ms 才
-  // 锁定**；armed 6 秒无按键自动过期；锁定态在键盘顶栏常显芯片（点芯片解除）。
   function keyDown(id: string) {
     buzz(); // vibrate on keydown only — repeating it would be a constant hum
-    scheduleArmExpiry();
     // 层切换键是哨兵，不在 SEQ 里，也不该走 resolveKey（那会把它当普通字符发出去）。
     if (id === LAYER_KEY_ID) { symLayer = !symLayer; return; }
-    if (MODSET.has(id)) {
-      mods = tapMod(mods, id as ModName);
-      armModLongPress(id as ModName);
-      return;
-    }
+    if (MODSET.has(id)) { mods = tapMod(mods, id as ModName); return; }
     const r = resolveKey(id, activeMods(mods));
     if (r.kind !== "bytes") {
       if (r.kind === "command") onCommand(r.command);
@@ -289,8 +252,6 @@
   }
 
   function keyUp(id: string) {
-    // 修饰键抬手：取消「长按锁定」的计时（没按满 500ms 就只是轻点）。
-    if (MODSET.has(id)) { clearTimeout(modPressTimer); modPressTimer = undefined; }
     // 滑动已判定：发对应角标字符，不发主字符，也不走 repeater。
     if (flickDir && heldKey?.id === id) {
       const ch = flickDir === "up" ? heldKey.up : heldKey.down;
@@ -330,8 +291,6 @@
 
   onDestroy(() => {
     cancelPendingShot();
-    clearTimeout(modPressTimer); modPressTimer = undefined;
-    clearTimeout(armExpireTimer); armExpireTimer = undefined;
     pendingKey = undefined;
     heldKey = undefined;
     flickDir = undefined;
@@ -368,8 +327,6 @@
 
   const isModOn = (id: string) => MODSET.has(id) && mods[id as ModName] !== "off";
   const isModLocked = (id: string) => MODSET.has(id) && mods[id as ModName] === "locked";
-  /** 当前处于 locked 的修饰键名（顶栏芯片用，见模板里的 modlock）。 */
-  const lockedMods = $derived((Object.keys(mods) as ModName[]).filter((m) => mods[m] === "locked"));
 
   /** 该键在当前布局下的上/下滑字符；非 flick 时两个都是 undefined。 */
   function capFlickOf(id: string): { up?: string; down?: string } {
@@ -452,16 +409,6 @@
         </div>
       {/if}
     </div>
-    {#if lockedMods.length > 0}
-      <!-- 【2026-08-28】锁定芯片：锁定态只在键帽上有淡色填充，太容易看漏（见
-           keyDown 的注释——看漏的代价是三天排查）。这里常显一枚芯片，点它即
-           解锁。只放键名（Ctrl/Alt/…），语言中立，无需 i18n。 -->
-      <div class="modlock">
-        {#each lockedMods as m (m)}
-          <button class="modlock-chip" onpointerdown={(e) => { e.preventDefault(); buzz(); mods = tapMod(mods, m); }}>🔒 {m}</button>
-        {/each}
-      </div>
-    {/if}
     <div class="rows" class:big={isBig}>
       {#each mainRows as row}
         <div class="row" class:indent={isBig && row.length === 9 && !row.some((k) => MODSET.has(k.id))}>
@@ -606,24 +553,6 @@
     height: 100%;
     background: var(--bg);
     padding-bottom: var(--safe-bottom);
-  }
-  /* 锁定芯片条（2026-08-28）：只在有 locked 修饰键时出现，一行高、居中。
-     视觉上必须比键帽的 locked 填充醒目——它出现本身就意味着「你的下一个
-     字母键会带上修饰」，看漏的代价见 keyDown 的注释。 */
-  .modlock {
-    display: flex;
-    justify-content: center;
-    gap: 6px;
-    padding: 4px 0 2px;
-  }
-  .modlock-chip {
-    background: var(--accent);
-    color: var(--on-accent);
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    font-size: 11px;
-    line-height: 1;
-    padding: 4px 10px;
   }
   .subtabs {
     display: flex;
