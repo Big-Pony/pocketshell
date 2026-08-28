@@ -26,8 +26,8 @@ function demoAssets(): Plugin {
     name: "pocketshell-demo-assets",
     apply: "build",
     closeBundle() {
-      const src = resolve(__dirname, "public-demo");
-      if (existsSync(src)) cpSync(src, resolve(__dirname, "dist"), { recursive: true });
+      const src = resolve(import.meta.dirname, "public-demo");
+      if (existsSync(src)) cpSync(src, resolve(import.meta.dirname, "dist"), { recursive: true });
     },
   };
 }
@@ -53,13 +53,17 @@ export default defineConfig(({ mode }) => {
       alias: { "sodium-native": "sodium-javascript" },
     },
     build: {
+      // 显式钉住「构建前清空 dist」（2026-08-28）：vite 默认只在 outDir 位于
+      // root 内时才清空，一旦将来有人把 outDir 挪走，旧 chunk 会静默混进
+      // gen-embedded 打进二进制。显式写出来，行为不随默认值漂移。
+      emptyOutDir: true,
       rollupOptions: {
         input: isDemo
           ? {
-              app: resolve(__dirname, "index.html"),
-              demo: resolve(__dirname, "demo.html"),
+              app: resolve(import.meta.dirname, "index.html"),
+              demo: resolve(import.meta.dirname, "demo.html"),
             }
-          : resolve(__dirname, "index.html"),
+          : resolve(import.meta.dirname, "index.html"),
         output: {
           manualChunks(id: string) {
             if (id.includes("node_modules/@xterm/")) return "xterm";
