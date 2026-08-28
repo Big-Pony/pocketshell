@@ -3,7 +3,19 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { svelteTesting } from "@testing-library/svelte/vite";
 import { resolve } from "node:path";
 import { cpSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import pkg from "./package.json" with { type: "json" };
+
+// 【2026-08-28 交付盲区】版本串带 git 短 SHA：SW 按版本桶缓存、注册 URL 是
+// `/sw.js?v=<版本>`——版本号不变就永远不换桶。曾有修复在未 bump 版本号的
+// 提交里部署到生产 agent，手机端因此一直跑旧缓存包、bug「复发」且日志零
+// 痕迹。带上 SHA 后每个 commit 的部署都会换桶。必须与 agent 侧
+// AGENT_VERSION（version.ts，经 --define 注入同一 SHA）同源同格式——
+// update.ts 的 shouldReloadAfterUpdate 对二者做严格相等比较。
+// git 不可用时（如 tarball 构建）退回纯 semver，与 agent 侧的退化一致。
+const gitSha = (() => {
+  try { return execSync("git rev-parse --short HEAD").toString().trim(); } catch { return ""; }
+})();
 
 // 演示专用静态资产（二维码、预览 fixture）单独放 public-demo/，**不进 public/**。
 // 理由：vite 会无条件把整个 publicDir 拷进 dist，publicDir 又只能指一个目录——
@@ -28,8 +40,9 @@ export default defineConfig(({ mode }) => {
   return {
     // Bake the app version so the service worker can namespace its cache bucket
     // (see src/lib/sw-cache.ts). Kept in lockstep with the agent by release.sh.
+    // SHA 后缀的理由见文件头——缺了它，未 bump 版本号的部署永远到不了 PWA。
     define: {
-      __APP_VERSION__: JSON.stringify(pkg.version),
+      __APP_VERSION__: JSON.stringify(gitSha ? `${pkg.version}-${gitSha}` : pkg.version),
     },
     // svelteTesting(): resolves Svelte's "browser" export condition under vitest
     // and auto-cleans mounted components between tests. Required to render .svelte

@@ -9,6 +9,12 @@ const AGENT = join(import.meta.dir, "..");
 const APP = join(AGENT, "../app");
 const OUT = join(AGENT, "dist");
 
+// Git short SHA baked into AGENT_VERSION (version.ts) — see that file for why
+// every build must carry one. Empty (plain semver) when git is unavailable
+// (e.g. building from a tarball); the vite build in app/ falls back the same way.
+const SHA = (await $`git rev-parse --short HEAD`.nothrow().text()).trim();
+if (!SHA) console.log("[build:bin] WARNING: git short SHA unavailable — version stays plain semver (SW bucket will not rotate)");
+
 // Required targets; darwin-x64 optional — drop it if you don't ship Intel macs.
 //
 // linux-x64 uses Bun's `-baseline` variant on purpose. The default x64 target
@@ -64,7 +70,7 @@ if (signOptOut) {
 for (const t of TARGETS) {
   const outfile = join(OUT, outNameFor(t));
   console.log(`[build:bin] compiling ${t} -> ${outfile}`);
-  await $`cd ${AGENT} && bun build --compile --target=${t} src/server.ts --outfile ${outfile}`;
+  await $`cd ${AGENT} && bun build --compile --target=${t} src/server.ts --outfile ${outfile} ${SHA ? ["--define", `process.env.PS_BUILD_SHA=${JSON.stringify(SHA)}`] : []}`;
   if (canSign && t.startsWith("bun-darwin")) {
     await $`codesign --force --sign ${SIGN_IDENTITY} --identifier ${SIGN_IDENTIFIER} ${outfile}`;
     console.log(`[build:bin] signed ${t} (identifier ${SIGN_IDENTIFIER})`);
