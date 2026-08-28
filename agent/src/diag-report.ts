@@ -54,10 +54,13 @@ export function diagEnabled(env: Record<string, string | undefined>, configured?
 
 const MAX_TAG = 64;
 const MAX_ERROR = 200;
+// js-error 的栈：客户端已截到 1500（app/src/lib/js-error-hook.ts），这里同上限。
+// 栈里只有代码位置与错误文本，没有终端内容，进公开日志安全。
+const MAX_STACK = 1500;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick", "input-send"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick", "input-send", "pump-kick", "js-error"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -144,6 +147,15 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
       if (v !== undefined) out[k] = v;
     }
     if (typeof p.error === "string") out.error = oneLine(p.error, MAX_ERROR);
+    // 【2026-08-28 三件套取证字段】
+    // js-error：全局 error/unhandledrejection 采集（app/src/lib/js-error-hook.ts）。
+    //   目的：WriteBuffer 楔形卡死的路径 A（setTimeout 回调同步抛异常）此前在
+    //   页面上零痕迹，这两行是让下次发作能拿到栈的唯一通道。
+    // pump-kick：写泵看门狗（app/src/lib/term/write-pump.ts）。wbPending/wbStuck/
+    //   wbOffset 是滞留量与解析位置，parserState=1 是解析器死刑态，parsePaused/
+    //   parserReset 保住「读不到=缺席」与 false 的区分（与 kicked/unreadable 同规则）。
+    if (typeof p.stack === "string") out.stack = oneLine(p.stack, MAX_STACK);
+    if (typeof p.source === "string") out.source = oneLine(p.source, MAX_ERROR);
     // attach 埋点（2026-08-19）。**唯一由 agent 自己产出、不经客户端的 kind**
     // —— 见 server.ts 的 attach 分支。走同一条格式化是为了让日志里只有一种
     // 结构化行，用户 grep [pocketshell:diag] 就能一次拿全。`tag` 是 sessionId，
@@ -166,7 +178,7 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     // 渲染服务状态（app/src/lib/term/render-probe.ts）。**布尔要保住「读不到」**：
     // 字段缺席 = 上游结构变了，与 false（确实没暂停）是两回事，别在这里补默认值。
     // kicked/unreadable（render-kick）同规则：解卡是否动手、上游结构是否读得到。
-    for (const k of ["paused", "rendererSet", "needsFullRefresh", "domVisible", "kicked", "unreadable"] as const) {
+    for (const k of ["paused", "rendererSet", "needsFullRefresh", "domVisible", "kicked", "unreadable", "parsePaused", "parserReset"] as const) {
       if (typeof p[k] === "boolean") out[k] = p[k];
     }
     for (const k of [
@@ -176,6 +188,7 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
       "missingLines", "extraLines", "firstDiff", "missingBare",
       "wroteFrames", "wroteBytes", "bufDelta",
       "renderFrames", "dirtyRows", "sinceMs",
+      "wbPending", "wbStuck", "wbOffset", "parserState",
     ] as const) {
       const v = num(p[k]);
       if (v !== undefined) out[k] = v;

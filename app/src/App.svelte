@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { Connection, type ConnStatus } from "./lib/net/connection";
   import { registerDevHelpers, unregisterDevHelpers } from "./lib/dev-helpers";
+  import { installJsErrorHook } from "./lib/js-error-hook";
   import { mergeSessions, tombstone, closeTab as closeTabFn, nextSessionName, shouldAdopt, type LocalSession } from "./lib/ui/session-view";
   import { clampSplit, type BottomPanel } from "./lib/ui/shell";
   import { recallDims } from "./lib/term/fit-guard";
@@ -473,6 +474,19 @@
       getSessions: () => sessions.map((s) => ({ name: s.name, state: s.state })),
       dropConnection: () => conn.dropConnection(),
     });
+    // 【2026-08-28 全局 JS 异常取证】WriteBuffer 楔形卡死的最可能根因是
+    // setTimeout 回调里同步抛异常（见 lib/term/write-pump.ts 文件头路径 A）——
+    // 这类异常此前在页面上零痕迹。采集、单行化、限流都在 js-error-hook 里；
+    // 这里只做 diag 门控与 rpc。诊断关着就不报（agent 侧本来也会丢）。
+    const offJsError = installJsErrorHook((r) => {
+      try {
+        if (typeof conn.hasFeature !== "function" || !conn.hasFeature("diag")) return;
+        void conn.rpc("diag.report", {
+          tag: "app", kind: "js-error",
+          error: r.message, stack: r.stack, source: r.source,
+        }).catch(() => {});
+      } catch { /* 取证绝不能影响任何东西 */ }
+    });
     topEl?.addEventListener("pointerdown", onTopPointerDown, { capture: true });
     topEl?.addEventListener("pointerup", onTopPointerUp, { capture: true });
     topEl?.addEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });
@@ -488,6 +502,7 @@
     barEl?.addEventListener("click", onBarClickCapture, { capture: true });
     return () => {
       unregisterDevHelpers();
+      offJsError();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
       topEl?.removeEventListener("pointerup", onTopPointerUp, { capture: true });
       topEl?.removeEventListener("pointercancel", onTopPointerCancelOrLeave, { capture: true });

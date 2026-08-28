@@ -261,6 +261,45 @@ test("render: 「读不到」不能被伪装成 false —— 缺席就该缺席"
   expect(out.rendererSet).toBeUndefined();
 });
 
+// 【2026-08-28 三件套】写泵看门狗与全局 JS 异常取证。两端字段名逐字对应：
+// app/src/lib/term/write-pump.ts（PumpSnapshot/PumpKickResult）与
+// app/src/lib/js-error-hook.ts（JsErrorReport）。漂移是静默的，所以这里钉住。
+test("pump-kick: kind 白名单认得，滞留量与解析器状态留得下", () => {
+  expect(p2({ tag: "s", kind: "pump-kick" }).kind).toBe("pump-kick");
+  const out = p2({
+    tag: "s", kind: "pump-kick", phase: "watchdog",
+    wroteBytes: 4096, wbPending: 4096, wbStuck: 3, wbOffset: 17, parserState: 1,
+    parsePaused: true, kicked: true, unreadable: false, parserReset: true,
+  });
+  expect(out).toMatchObject({
+    wroteBytes: 4096, wbPending: 4096, wbStuck: 3, wbOffset: 17, parserState: 1,
+    parsePaused: true, kicked: true, unreadable: false, parserReset: true,
+  });
+});
+
+test("pump-kick: 「读不到」不能变成 0/false", () => {
+  const out = p2({ tag: "s", kind: "pump-kick", wbStuck: "3", parsePaused: 1, parserReset: undefined });
+  expect(out.wbStuck).toBeUndefined();
+  expect(out.parsePaused).toBeUndefined();
+  expect(out.parserReset).toBeUndefined();
+});
+
+test("js-error: kind 白名单认得，message/stack/source 单行化留得下", () => {
+  expect(p2({ tag: "app", kind: "js-error" }).kind).toBe("js-error");
+  const out = p2({
+    tag: "app", kind: "js-error",
+    error: "boom\nat somewhere", stack: "Error: boom\n  at x.ts:1:1", source: "https://x/app.js:1:2",
+  });
+  expect(out.error).toBe("boom at somewhere");
+  expect(out.stack).toBe("Error: boom   at x.ts:1:1");
+  expect(out.source).toBe("https://x/app.js:1:2");
+});
+
+test("js-error: 栈截断到 1500, 超长的部分进不了日志", () => {
+  const out = p2({ tag: "app", kind: "js-error", stack: "s".repeat(5000) });
+  expect(out.stack.length).toBe(1500);
+});
+
 // 诊断总开关（2026-08-23）。默认关闭，环境变量优先于 agent.json。
 test("diagEnabled: 默认关闭", () => {
   expect(diagEnabled({})).toBe(false);

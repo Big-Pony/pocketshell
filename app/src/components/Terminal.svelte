@@ -85,6 +85,7 @@
   import { hashLine, hashViewport, hashBufferTail, hashBufferTailBare } from "../lib/term/screen-probe";
   import { snapshotRender, subscribeRender } from "../lib/term/render-probe";
   import { kickRenderDebouncer } from "../lib/term/render-kick";
+  import { snapshotWritePump, kickWritePump } from "../lib/term/write-pump";
   import { isMeasurable, isPlausible, rememberDims, shouldDeferShrink, SHRINK_HOLD_MS } from "../lib/term/fit-guard";
   import {
     buildReseedPayload, buildReseedReport, ReseedGate, concatReseedWrite, normalizeReseedRows,
@@ -321,6 +322,15 @@
       // 这里对**本终端实例**解卡；隐藏 tab 也安全（paused 下只是记账，见
       // render-kick.ts 文件头）。
       kickRenderDebouncer(term);
+      // 顺带看一眼写泵（2026-08-28）：回前台时若已有滞留字节或解析器停在
+      // 暂停/死刑态，重臂一次；泵健康时这是纯读 + no-op，成本可忽略。逻辑与
+      // 上面的渲染解卡一致：这是功能修复，不受诊断开关门控。
+      try {
+        const wp = snapshotWritePump(term);
+        if ((wp.stuck ?? 0) > 0 || wp.parsePaused === true || wp.parserState === 1) {
+          kickWritePump(term);
+        }
+      } catch { /* 自愈绝不能影响任何东西 */ }
       if (!diagOn()) return;   // 诊断默认关闭（2026-08-23）
       try {
         const snap = snapshotAtlas(webglAddon, true);
@@ -395,6 +405,20 @@
       renderCount++;
       renderRows += rows;
     });
+    // 【2026-08-28 渲染冻结现场取证】把终端实例暴露给控制台（仅诊断开启时）。
+    // 「buffer 对但屏不画」的故障需要交互式翻 xterm 内部状态（_isPaused /
+    // synchronizedOutput / 去抖器句柄 / GL 上下文），心跳快照覆盖不了的部分
+    // 靠它一次看全。键是 sessionId，组件卸载时移除。
+    const exposeForDiag = () => {
+      try {
+        if (!diagOn()) return () => {};
+        const w = window as unknown as { __pocketshellTerms?: Record<string, unknown> };
+        const reg = (w.__pocketshellTerms ??= {});
+        reg[sessionId] = term;
+        return () => { try { delete reg[sessionId]; } catch { /* 尽力而为 */ } };
+      } catch { return () => {}; }
+    };
+    const unexposeForDiag = exposeForDiag();
     let lastSampleAt = mountedAt;
     let lastSampleFrames = 0;
     let lastSampleBytes = 0;
@@ -404,6 +428,80 @@
     // 0 开始累计），只有 bufLen 不是从 0 开始的。
     let lastSampleBufLen = -1;
     let lastSampleRenderFrames = 0;
+
+    // ================= 自愈看门狗（2026-08-28）=================
+    //
+    // 为什么独立于 sampleChain 且**不受诊断门控**：心跳采样是取证（生产默认关），
+    // 而下面两道卡死的自愈是功能。此前自愈只在 sampleChain 里顺带做，diag 一关
+    // 前台冻结就永远不自愈 —— 真机 aippt（2026-08-28 上午）就是这个形态：字节
+    // 到了 tmux、窗口开着、屏幕冻住、只能关掉重开。
+    //
+    // 两道卡死（完整根因分析见 write-pump.ts / render-kick.ts 文件头）：
+    //   A) 渲染去抖器 rAF 句柄被系统丢弃 → refresh() 永远 early-return。
+    //      签名：新字节在到 + 渲染帧为 0 + rendererSet/paused/domVisible 三闸健康。
+    //   B) WriteBuffer 泵楔形卡死 → write() 只 push 不调度，字节永不解析。
+    //      签名：新字节在到 + 滞留>0 + 解析位置 _bufferOffset 连续两轮不动。
+    //      用 offset 而不是 stuck 当活性判据：泵死之后新写入会继续撑大
+    //      _writeBuffer.length，stuck 反而在变；只有解析位置是真的冻结。
+    //
+    // 判定窗口：健康流式输出 5s 内渲染帧不可能为 0、单帧解析不可能跨过两轮
+    // （10s）。静止会话在 bytesDelta<=0 就返回，一个数字比较，零成本。
+    let healBytesBase = 0;
+    let healFramesBase = 0;
+    let pumpOffsetBase = -1;
+    const healWatchdog = () => {
+      if (!active || destroyed) return;
+      const bytesDelta = probeBytes - healBytesBase;
+      healBytesBase = probeBytes;
+      const framesDelta = renderCount - healFramesBase;
+      healFramesBase = renderCount;
+      if (bytesDelta <= 0) { pumpOffsetBase = -1; return; }   // 这一轮没有新输出
+      // A) 渲染去抖器卡死。kick 对没卡的终端是 no-op（读不到陈旧句柄就不动），
+      //    所以每轮都问一次没有代价。
+      if (framesDelta === 0) {
+        try {
+          const rsnap = snapshotRender(term);
+          // 三闸读不到（undefined）不动手 —— 证据不全就别动手。
+          if (rsnap.rendererSet === true && rsnap.paused === false && rsnap.domVisible === true) {
+            const kick = kickRenderDebouncer(term);
+            if (kick.kicked) {
+              // 留了痕但不动 rpc：诊断关着时 console 是唯一的留痕处。
+              console.warn(`[pocketshell] render-kick(watchdog) ${sessionId}`);
+              if (diagOn()) {
+                try {
+                  const buf = term.buffer.active;
+                  void conn.rpc("diag.report", {
+                    tag: sessionId, kind: "render-kick", phase: "watchdog",
+                    why: "watchdog", kicked: true, unreadable: false,
+                    ydisp: buf.viewportY, baseY: buf.baseY, bufferLength: buf.length,
+                    wroteBytes: bytesDelta,
+                  }).catch(() => {});
+                } catch { /* 诊断绝不能影响任何东西 */ }
+              }
+            }
+          }
+        } catch { /* 自愈绝不能影响任何东西 */ }
+      }
+      // B) 写泵卡死。两轮确认：第一轮记下位置，第二轮位置没动才重臂。
+      try {
+        const wp = snapshotWritePump(term);
+        if (wp.stuck === undefined || wp.offset === undefined) { pumpOffsetBase = -1; return; }
+        if (wp.stuck === 0 || wp.offset !== pumpOffsetBase) { pumpOffsetBase = wp.offset; return; }
+        pumpOffsetBase = -1;
+        const kick = kickWritePump(term);
+        console.warn(`[pocketshell] pump-kick ${sessionId} stuck=${wp.stuck} pending=${wp.pending} kicked=${kick.kicked} parserReset=${kick.parserReset}`);
+        if (diagOn()) {
+          void conn.rpc("diag.report", {
+            tag: sessionId, kind: "pump-kick", phase: "watchdog",
+            wroteBytes: bytesDelta,
+            wbPending: wp.pending, wbStuck: wp.stuck, wbOffset: wp.offset,
+            parserState: wp.parserState, parsePaused: wp.parsePaused,
+            kicked: kick.kicked, unreadable: kick.unreadable ?? false,
+            parserReset: kick.parserReset ?? false,
+          }).catch(() => {});
+        }
+      } catch { /* 同上 */ }
+    };
 
     /**
      * 一轮全链路采样。**永远不抛**：任何一条探针因上游结构变动而失败，都不能
@@ -537,7 +635,8 @@
     // 就把日志刷成噪音，真出故障时反而翻不到。
     const heartbeat = setInterval(() => {
       if (!active || destroyed) return;
-      if (!diagOn()) return;   // 同 sampleNow：默认关闭
+      healWatchdog();   // 自愈先行：不受诊断门控（2026-08-28）
+      if (!diagOn()) return;   // 同 sampleNow：采样与上报默认关闭
       if (probeBytes === lastSampleBytes) return;   // 这一轮没有新输出
       if (Date.now() - lastSampleAt < SAMPLE_MS) return;
       sampleChain("stream");
@@ -1141,6 +1240,7 @@
       // 两条数据互相矛盾时，错的是恒为 0 的那条。
       clearInterval(heartbeat);
       unsubscribeRender?.();
+      unexposeForDiag();
       // 卸载时挂起的首屏重试必须撤掉：它会向一个已 dispose 的终端写字节。
       if (seedTimer) { clearTimeout(seedTimer); seedTimer = undefined; }
       stopPoll(); // also drops a pending input-debounced classify

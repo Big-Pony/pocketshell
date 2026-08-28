@@ -41,6 +41,15 @@ export interface RenderSnapshot {
   /** `_needsFullRefresh`：暂停期间攒下的「欠一次全量重画」标记。 */
   needsFullRefresh?: boolean;
   /**
+   * `decPrivateModes.synchronizedOutput`（DEC 2026）。true = refreshRows 全部
+   * 进 `_syncOutputHandler` 攒住、一帧不画。正常应用每个原子帧都 2026h/2026l
+   * 成对出现；若 2026l 因丢帧/截断永远不到，就靠 1s 看门狗强制解除——所以
+   * **持续为 true 超过一秒本身就是故障证据**。
+   */
+  syncOutput?: boolean;
+  /** `_syncOutputHandler._isBuffering`：2026 攒行器是否正处于攒的状态。 */
+  syncBuffering?: boolean;
+  /**
    * 终端根元素当前是否真的可见（`offsetParent`）。与 `paused` 对照：
    * **可见却仍然 paused**，就是 IntersectionObserver 没能把暂停解除掉——
    * 那正是「切回来一片空白/不更新」的直接证据。
@@ -52,10 +61,17 @@ interface RenderServiceLike {
   _isPaused?: unknown;
   _needsFullRefresh?: unknown;
   _renderer?: { value?: unknown };
+  _syncOutputHandler?: { _isBuffering?: unknown };
 }
 interface TermLike {
   element?: { offsetParent?: unknown } | null;
-  _core?: { _renderService?: RenderServiceLike };
+  _core?: {
+    _renderService?: RenderServiceLike;
+    // 注意这个字段在 xterm 6.1 的 Terminal 内核上叫 `coreService`（无下划线），
+    // 而 RenderService 内部的引用才叫 `_coreService`。两个都试，拿到哪个用哪个。
+    coreService?: { decPrivateModes?: { synchronizedOutput?: unknown } };
+    _coreService?: { decPrivateModes?: { synchronizedOutput?: unknown } };
+  };
 }
 
 /**
@@ -71,7 +87,13 @@ export function snapshotRender(term: unknown): RenderSnapshot {
       if (typeof rs._needsFullRefresh === "boolean") out.needsFullRefresh = rs._needsFullRefresh;
       // MutableDisposable：渲染器活着时 `.value` 是渲染器实例，被摘掉时是 undefined。
       if (rs._renderer && "value" in rs._renderer) out.rendererSet = !!rs._renderer.value;
+      if (typeof rs._syncOutputHandler?._isBuffering === "boolean") {
+        out.syncBuffering = rs._syncOutputHandler._isBuffering;
+      }
     }
+    const sync = t?._core?.coreService?.decPrivateModes?.synchronizedOutput
+      ?? t?._core?._coreService?.decPrivateModes?.synchronizedOutput;
+    if (typeof sync === "boolean") out.syncOutput = sync;
     const el = t?.element;
     // offsetParent 为 null ⇔ 元素或其祖先 display:none（position:fixed 除外，
     // 终端容器不是 fixed）。这是判断「DOM 上到底可不可见」最省事且不触发
