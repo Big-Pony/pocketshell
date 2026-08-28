@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { compareSemver, hasUpdate, assetNameForPlatform, parseSha256Sums } from "./update-core";
+import { compareSemver, hasUpdate, assetNameForPlatform, parseSha256Sums, versionMatchesRelease } from "./update-core";
 
 test("compareSemver orders versions", () => {
   expect(compareSemver("0.3.0", "0.3.1")).toBe(-1);
@@ -37,4 +37,18 @@ test("parseSha256Sums reads shasum output with or without ./ prefix", () => {
   const badTxt = "12345678  pocketshell-agent-linux-x64.tar.gz";
   const badM = parseSha256Sums(badTxt);
   expect(badM.get("pocketshell-agent-linux-x64.tar.gz")).toBeUndefined();
+});
+
+test("versionMatchesRelease accepts exact semver and semver with build SHA suffix", () => {
+  // 纯 semver（无 SHA 注入的构建）
+  expect(versionMatchesRelease("1.21.2", "1.21.2")).toBe(true);
+  // semver + -<构建SHA> 后缀（2026-08-28 起 release 构建的版本串形态）
+  expect(versionMatchesRelease("1.21.2-c1752ba", "1.21.2")).toBe(true);
+  // --version 输出带换行
+  expect(versionMatchesRelease("1.21.2-c1752ba\n", "1.21.2")).toBe(true);
+  // 版本不同不能匹配
+  expect(versionMatchesRelease("1.21.1", "1.21.2")).toBe(false);
+  expect(versionMatchesRelease("1.21.1-c1752ba", "1.21.2")).toBe(false);
+  // 后缀边界必须带 `-`：1.21.20 不能匹配 1.21.2
+  expect(versionMatchesRelease("1.21.20", "1.21.2")).toBe(false);
 });

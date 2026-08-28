@@ -31,6 +31,7 @@ import { AGENT_VERSION } from "./version";
 import { checkLatest } from "./update-check";
 import { readCache, writeCache, type CachedCheck } from "./update-cache";
 import { downloadAndVerify, type Phase } from "./update-apply";
+import { versionMatchesRelease } from "./update-core";
 import { signBinary } from "./codesign-provision";
 import { restartSelf } from "./self-restart";
 import { NotificationService, type DevicePresence } from "./notify-service";
@@ -547,7 +548,9 @@ export function startServer(deps: Deps = {}) {
         // Smoke check: refuse to swap over a binary that doesn't even run or
         // reports the wrong version.
         const out = await $`${newPath} --version`.nothrow().text();
-        if (out.trim() !== gate.latest) {
+        // versionMatchesRelease：--version 自 2026-08-28 起带 -<构建SHA> 后缀
+        // （version.ts），严格相等会把合法发布二进制误判失败。
+        if (!versionMatchesRelease(out, gate.latest)) {
           throw new Error(`smoke check failed: got "${out.trim()}", want "${gate.latest}"`);
         }
         emit("applying");

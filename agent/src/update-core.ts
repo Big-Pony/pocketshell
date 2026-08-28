@@ -37,3 +37,21 @@ export function parseSha256Sums(text: string): Map<string, string> {
   }
   return out;
 }
+
+/**
+ * OTA smoke check 的版本比对（server.ts runApply 用）：新二进制 `--version`
+ * 的输出必须匹配 release 的 semver。
+ *
+ * 接受两种形态：
+ *   - `"1.21.2"`        纯 semver（无 SHA 注入的构建）
+ *   - `"1.21.2-c1752ba"` semver + `-<构建SHA>` 后缀（version.ts：自 2026-08-28
+ *     起 release.sh 编译时注入 git 短 SHA，SW 按版本串分缓存桶）
+ *
+ * 严格相等曾把带 SHA 的合法发布二进制误判为「版本不对」导致更新失败
+ * （2026-08-28 v1.21.2 实测）。后缀边界必须带 `-`：`1.21.20` 不能匹配
+ * `1.21.2`。
+ */
+export function versionMatchesRelease(got: string, latest: string): boolean {
+  const g = got.trim();
+  return g === latest || g.startsWith(`${latest}-`);
+}
