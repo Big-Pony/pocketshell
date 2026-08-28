@@ -378,6 +378,19 @@ export function startServer(deps: Deps = {}) {
   // batcher/replay/fanout and exit path as tmux (keyed by sessionId), and a
   // create/kill/exit triggers a sessions broadcast so shell tabs appear/vanish.
   const shell = deps.shell ?? new ShellService();
+  // 【2026-08-28 输入链路探针】aippt 一例：手机端「shell 能打、进 cc 后按键
+  // 全部消失」，tap 里连回显都没有。逐键打日志会刷屏且含时序侧漏，这里攒
+  // 每会话 5 秒窗口的「帧数/字节数」计数，窗口内有过输入就吐一条——对照
+  // 客户端 input-send 与 pane-tap 增量，一次测试就能定位断点在哪一跳
+  // （手机没发 / WS 丢了 / agent 没找到会话 / send-keys 没到 tmux）。
+  // 只有计数，绝无内容。
+  const inputRecv = new Map<string, { n: number; bytes: number }>();
+  setInterval(() => {
+    for (const [session, c] of inputRecv) {
+      if (c.n > 0) console.log(`[pocketshell:diag] ${JSON.stringify({ kind: "input-recv", session, n: c.n, bytes: c.bytes })}`);
+      inputRecv.set(session, { n: 0, bytes: 0 });
+    }
+  }, 5_000).unref?.();
   // Presence keyed by device Noise pubkey (updated by the `presence` message,
   // cleared when a device's last live connection closes — req N's "smart
   // do-not-disturb": a device that is foregrounded AND looking at the very
@@ -745,10 +758,16 @@ export function startServer(deps: Deps = {}) {
         // and goes online, instead of looping on an "unknown_type" error.
         sendSecure(conn, { type: "paired", ok: true });
         break;
-      case "input":
-        if (shell.has(msg.sessionId)) shell.write(msg.sessionId, fromB64(msg.data));
-        else terminal.write(msg.sessionId, fromB64(msg.data));
+      case "input": {
+        const data = fromB64(msg.data);
+        // 输入链路探针（见上方 inputRecv 的注释）：只计数。
+        const c = inputRecv.get(msg.sessionId) ?? { n: 0, bytes: 0 };
+        c.n++; c.bytes += data.length;
+        inputRecv.set(msg.sessionId, c);
+        if (shell.has(msg.sessionId)) shell.write(msg.sessionId, data);
+        else terminal.write(msg.sessionId, data);
         break;
+      }
       case "resize":
         // 纵深防御：塌陷尺寸会让上游程序按错误宽度把硬换行打进 tmux 历史，而那
         // **不可逆**（tmux 只能反折自己折的软折行）。客户端已在 fit-guard.ts 修掉

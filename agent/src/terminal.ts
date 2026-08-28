@@ -132,6 +132,8 @@ export class TerminalService {
   // 每个会话一个判定器：喂 rx/tap/history 三个计数探头，判「堵住」即重建通道。
   // 判定逻辑与阈值见 channel-watchdog.ts；隐私上探头只读计数，永不碰 tap 内容。
   private watchdogs = new Map<string, ChannelWatchdog>();
+  /** input-no-session 诊断的每会话节流（见 write()）。 */
+  private inputNoSessionLoggedAt = new Map<string, number>();
   // 正在重建的会话集合：防止重建期间的扫描 tick 重复触发同一会话。
   private rebuilding = new Set<string>();
   // 诊断出口（server.ts 注入 diagLog）。空 = 诊断关闭，看门狗照常工作只是不记日志。
@@ -770,7 +772,23 @@ export class TerminalService {
   }
 
   write(name: string, data: Uint8Array): void {
-    this.sessions.get(name)?.pty.write(data);
+    const live = this.sessions.get(name);
+    // 【2026-08-28 输入静默蒸发】`?.` 的 no-op 会把「按键没到 pane」变成零痕迹
+    // （aippt 一例：shell 能打字、进 cc 后按键全部消失，tap 里连回显都没有）。
+    // 这里必须出声：会话不在 map 里 = 输入被丢，只记会话名与字节数，绝不记
+    // 内容。节流到每会话 60s 一条，坏状态不会刷屏。
+    if (!live) {
+      const now = Date.now();
+      const last = this.inputNoSessionLoggedAt.get(name) ?? 0;
+      if (now - last > 60_000) {
+        this.inputNoSessionLoggedAt.set(name, now);
+        console.log(`[pocketshell:diag] ${JSON.stringify({
+          kind: "input-no-session", session: name, bytes: data.length,
+        })}`);
+      }
+      return;
+    }
+    live.pty.write(data);
   }
 
   resize(name: string, cols: number, rows: number): void {

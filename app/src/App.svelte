@@ -605,10 +605,33 @@
   // ——切到文件 tab 时只设 activeTop、不动 activeId（selectTop / openFile /
   // closeFile 三处），于是文本会静默打进上一个终端（2026-08-09 真机 bug）。
   // 判定收敛在 inputTarget 里，那儿有单测钉着。
+  // 【2026-08-28 输入链路探针】aippt 一例：shell 能打字、进 cc 后按键全部消失。
+  // 这里与 agent 侧的 input-recv 各放一个计数（5 秒窗、只记帧数字节数无内容），
+  // 一次现场测试即可定位断点：没 send / send 了没到 agent / 到了没进会话。
+  let inputSendLast = 0;
+  let inputSendBuf = new Map<string, { n: number; bytes: number }>();
+  function inputSendDiag(target: string, len: number) {
+    try {
+      if (typeof conn.hasFeature !== "function" || !conn.hasFeature("diag")) return;
+      const now = Date.now();
+      const c = inputSendBuf.get(target) ?? { n: 0, bytes: 0 };
+      c.n++; c.bytes += len;
+      inputSendBuf.set(target, c);
+      if (now - inputSendLast < 5_000) return;
+      inputSendLast = now;
+      for (const [session, v] of inputSendBuf) {
+        if (v.n > 0) void conn.rpc("diag.report", { tag: session, kind: "input-send", frames: v.n, bytes: v.bytes }).catch(() => {});
+      }
+      inputSendBuf = new Map();
+    } catch { /* 诊断绝不影响输入 */ }
+  }
+
   function sendActive(text: string) {
     const target = inputTarget(activeTopId);
     if (!target) return; // 聚焦在文件 tab 上：这段输入不属于任何终端
-    conn.sendInput(target, new TextEncoder().encode(text));
+    const bytes = new TextEncoder().encode(text);
+    inputSendDiag(target, bytes.length);
+    conn.sendInput(target, bytes);
     // Mirror outbound bytes into the per-session command line, except while a
     // full-screen TUI (vim/htop) owns the alternate screen — then hints pause.
     // 查的是 target 的终端而不是 activeTerm()（后者读 activeId）——同一个分叉，

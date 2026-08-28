@@ -57,7 +57,7 @@ const MAX_ERROR = 200;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick", "input-send"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
