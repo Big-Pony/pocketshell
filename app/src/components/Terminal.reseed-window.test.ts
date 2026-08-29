@@ -22,6 +22,15 @@ afterAll(() => { window.matchMedia = origMatchMedia; });
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 const hist = (text: string, seq = 7) => ({ data: toB64(new TextEncoder().encode(text)), seq });
+const historyCalls = (rpc: ReturnType<typeof vi.fn>) =>
+  rpc.mock.calls.filter((call) => call[0] === "term.history").length;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
 
 type OutCb = (f: { sessionId: string; data: Uint8Array; seq: number }) => void;
 
@@ -212,6 +221,212 @@ describe("1b · 首屏失败不再是吸收态", () => {
     await tick(10);
     expect(calls).toBe(before + 1);
   }, 15_000);
+});
+
+describe("single-flight recovery requests", () => {
+  test("hidden resync requests do no history work and coalesce on activation", async () => {
+    const rpc = baseRpc(() => Promise.resolve(hist("seed\n")));
+    const { conn } = stubConn(rpc);
+    let requestReseed: ((trigger: any) => void) | undefined;
+    const props = {
+      conn,
+      sessionId: "s-hidden-request",
+      active: false,
+      streaming: true,
+      onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+    };
+    const { rerender } = render(Terminal, { props });
+    await tick(10);
+    rpc.mockClear();
+
+    requestReseed?.("resync");
+    requestReseed?.("resync");
+    requestReseed?.("resync");
+    await tick();
+    expect(historyCalls(rpc)).toBe(0);
+
+    await rerender({ ...props, active: true });
+    await tick(30);
+    expect(historyCalls(rpc)).toBe(1);
+  });
+
+  test("repeated active requests produce at most one serial follow-up", async () => {
+    const pending: Array<ReturnType<typeof deferred<unknown>>> = [];
+    let initial = true;
+    const rpc = baseRpc(() => {
+      if (initial) { initial = false; return Promise.resolve(hist("seed\n")); }
+      const next = deferred<unknown>();
+      pending.push(next);
+      return next.promise;
+    });
+    const { conn } = stubConn(rpc);
+    let requestReseed: ((trigger: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn,
+        sessionId: "s-single-flight",
+        active: true,
+        streaming: true,
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await tick(10);
+    rpc.mockClear();
+
+    requestReseed?.("resync");
+    requestReseed?.("resync");
+    requestReseed?.("resync");
+    await tick();
+    expect(historyCalls(rpc)).toBe(1);
+
+    pending[0].resolve(hist("first\n", 20));
+    await tick(30);
+    expect(historyCalls(rpc)).toBe(2);
+
+    pending[1].resolve(hist("second\n", 21));
+    await tick(30);
+    expect(historyCalls(rpc)).toBe(2);
+  });
+
+  test("a recovery hidden while pending waits for the next activation", async () => {
+    const pending: Array<ReturnType<typeof deferred<unknown>>> = [];
+    let initial = true;
+    const rpc = baseRpc(() => {
+      if (initial) { initial = false; return Promise.resolve(hist("seed\n")); }
+      const next = deferred<unknown>();
+      pending.push(next);
+      return next.promise;
+    });
+    const { conn } = stubConn(rpc);
+    let xterm: XTerm | undefined;
+    let requestReseed: ((trigger: any) => void) | undefined;
+    const props = {
+      conn,
+      sessionId: "s-hide-pending",
+      active: true,
+      streaming: true,
+      onReady: (_id: string, value: XTerm) => { xterm = value; },
+      onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+    };
+    const { rerender } = render(Terminal, { props });
+    await tick(10);
+    rpc.mockClear();
+
+    requestReseed?.("resync");
+    await tick();
+    await rerender({ ...props, active: false });
+    pending[0].resolve(hist("stale-hidden\n", 30));
+    await tick(30);
+
+    expect(historyCalls(rpc)).toBe(1);
+    expect(screen(xterm!)).not.toContain("stale-hidden");
+
+    await rerender({ ...props, active: true });
+    await tick();
+    expect(historyCalls(rpc)).toBe(2);
+    pending[1].resolve(hist("fresh-visible\n", 31));
+    await tick(30);
+    expect(screen(xterm!)).toContain("fresh-visible");
+  });
+
+  test("snapshot boundary filtering keeps the online live window atomic", async () => {
+    const pending = deferred<unknown>();
+    let initial = true;
+    const rpc = baseRpc(() => {
+      if (initial) { initial = false; return Promise.resolve(hist("seed\n")); }
+      return pending.promise;
+    });
+    const { conn, emit } = stubConn(rpc);
+    let xterm: XTerm | undefined;
+    let requestReseed: ((trigger: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn,
+        sessionId: "s-boundary",
+        active: true,
+        streaming: true,
+        onReady: (_id: string, value: XTerm) => { xterm = value; },
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await tick(10);
+    rpc.mockClear();
+
+    const writes: Array<string | Uint8Array> = [];
+    const callbacks: Array<() => void> = [];
+    (xterm as any).write = (data: string | Uint8Array, callback?: () => void) => {
+      writes.push(data);
+      if (callback) callbacks.push(callback);
+    };
+
+    requestReseed?.("resync");
+    emit("s-boundary", "AT-OR-BEFORE", 10);
+    emit("s-boundary", "AFTER-CAPTURE", 11);
+    pending.resolve(hist("SNAPSHOT\n", 10));
+    await tick(30);
+    emit("s-boundary", "AFTER-RESPONSE", 12);
+
+    const writeText = writes.map((value) =>
+      typeof value === "string" ? value : new TextDecoder().decode(value));
+    const atomic = writeText.filter((value) => value.includes("\x1bc"));
+    expect(atomic).toHaveLength(1);
+    expect(atomic[0]).toContain("SNAPSHOT");
+    expect(atomic[0]).toContain("AFTER-CAPTURE");
+    expect(atomic[0]).not.toContain("AT-OR-BEFORE");
+    expect(writeText.filter((value) => value === "AFTER-RESPONSE")).toHaveLength(1);
+
+    callbacks[0]();
+    await tick();
+    expect(historyCalls(rpc)).toBe(1);
+  });
+
+  test("a dirty live window starts one follow-up only after snapshot commit", async () => {
+    const pending: Array<ReturnType<typeof deferred<unknown>>> = [];
+    let initial = true;
+    const rpc = baseRpc(() => {
+      if (initial) { initial = false; return Promise.resolve(hist("seed\n")); }
+      const next = deferred<unknown>();
+      pending.push(next);
+      return next.promise;
+    });
+    const { conn, emit } = stubConn(rpc);
+    let xterm: XTerm | undefined;
+    let requestReseed: ((trigger: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn,
+        sessionId: "s-dirty-window",
+        active: true,
+        streaming: true,
+        onReady: (_id: string, value: XTerm) => { xterm = value; },
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await tick(10);
+    rpc.mockClear();
+
+    const commits: Array<() => void> = [];
+    (xterm as any).write = (_data: string | Uint8Array, callback?: () => void) => {
+      if (callback) commits.push(callback);
+    };
+    requestReseed?.("resync");
+    emit("s-dirty-window", "X".repeat(2 * 1024 * 1024 + 1), 50);
+    pending[0].resolve(hist("complete-first\n", 50));
+    await tick();
+
+    expect(historyCalls(rpc)).toBe(1);
+    expect(commits).toHaveLength(1);
+    commits[0]();
+    await tick();
+    expect(historyCalls(rpc)).toBe(2);
+
+    pending[1].resolve(hist("complete-second\n", 51));
+    await tick();
+    expect(commits).toHaveLength(2);
+    commits[1]();
+    await tick();
+    expect(historyCalls(rpc)).toBe(2);
+  });
 });
 
 // ── 4 ─────────────────────────────────────────────────────────────────

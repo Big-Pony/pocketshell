@@ -152,10 +152,12 @@
   let refit: () => void = () => {};
   // Same lifecycle as refit: flushes/reseeds the output stashed while hidden.
   let flushPending: () => void = () => {};
+  let resumeOutput: () => void = () => {};
   // Delivery intent is independent of visibility. App may keep a hidden tab
   // streaming during the short switch-back grace window.
   let startStreaming: () => void = () => {};
   let stopStreaming: () => void = () => {};
+  let recoverOnActivate: () => void = () => {};
   let streamingApplied = false;
   // Same lifecycle again: start/pause the classifyPane poll with visibility
   // (A4 — only the active, live session polls tmux).
@@ -888,9 +890,21 @@
       term.write(concatReseedWrite(buildReseedPayload(snapshot.text), live), onCommitted);
     };
 
-    const reloadHistory = async (trigger: ReseedTrigger = "alt-normal") => {
-      if (currentBuffer !== "normal") return;
-      const gen = reseedGate.begin();
+    let reseedInFlight = false;
+    let reseedQueued = false;
+    let queuedReseedTrigger: ReseedTrigger = "resync";
+    let historyInFlight = false;
+    let historyMode: "seed" | "online" | "offline" | null = null;
+    let offlineQueued = false;
+    let seedQueuedAttempt: number | null = null;
+    let drainHistoryQueue: () => void = () => {};
+
+    const runReseed = async (trigger: ReseedTrigger) => {
+      reseedInFlight = true;
+      historyInFlight = true;
+      historyMode = "online";
+      const gateGeneration = reseedGate.begin();
+      const generation = recoveryGeneration;
       // 埋点：量 await 窗口有多宽、期间涌进来多少实时字节。旧实现下那些字节
       // 正是会被 reset() 抹掉的内容，所以这两个数直接对应故障严重程度。
       const startedAt = Date.now();
@@ -908,12 +922,10 @@
         const wantLines = reseedLines(historyLines, lenBefore);
         const h = (await conn.rpc(
           "term.history", { session: sessionId, lines: wantLines },
-          // 让死线把响应体算进去。不传的话 N 个并发重灌与 1 个拿到完全相同的
-          // 10s 死线，8 tab 同时重进时后面的 lane 必然假超时（见 reseed.ts）。
           { expectBytes: historyExpectBytes(wantLines) },
         )) as TermHistoryResult;
         // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
-        const stale = reseedGate.isStale(gen);
+        const stale = reseedGate.isStale(gateGeneration) || generation !== recoveryGeneration;
         const data = stale ? "" : await decodeHistoryData(h?.data ?? "", h?.enc);
         // 过期的一代不许动窗口：它的旁录已经归给新一代了（windowBuf 早被覆盖）。
         // dirty 表示窗口内涌进的字节超过 2MB 上限、已被 PendingBuffer 丢弃，
@@ -923,33 +935,73 @@
         // 落进了旁录；但它们的 seq ≤ 快照 seq，**已经在快照里**。详见
         // PendingBuffer.takeAfter 的注释。h.seq 缺席时退化为不过滤（老 agent）。
         const snapshotSeq = typeof h?.seq === "number" ? h.seq : 0;
-        const windowBytes = stale || win.dirty ? null : win.takeAfter(snapshotSeq);
-        if (!stale) { windowBuf = null; }
+        const dirtyWindow = win.dirty;
+        const windowBytes = stale || dirtyWindow ? null : win.takeAfter(snapshotSeq);
+        if (windowBuf === win) windowBuf = null;
         // await 期间组件可能已卸载，或 pane 已切进 alt buffer（那里 capture-pane
         // 拿到的东西没有意义）。两者都不该再写。
         //
         // RIS、快照、窗口旁录必须拼进**同一次** write：拆成两次虽然队列里也有序，
         // 但中间会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
-        if (!stale && !destroyed && currentBuffer === "normal") {
+        const canCommit = !stale && !destroyed && active && streaming && currentBuffer === "normal";
+        if (canCommit) {
           // 隐藏期攒下的积压里，seq ≤ 快照号的那部分已经体现在这份快照里了。
           // 不在这里丢掉的话，用户切回来时 flushPending 会把它们整份重放到一份
           // 已是终态的 buffer 上 —— 那正是 2026-08-27 teachppt「AI 最后一次的
           // 输出不见了」的成因（真机 104,599 字节）。详见 PendingBuffer.dropUpTo。
           pendingOut.dropUpTo(snapshotSeq);
-          term.write(concatReseedWrite(buildReseedPayload(data), windowBytes), () => {
-            // 回调触发 = 这批字节已解析完，此刻的行数才是真的（见 reportReseed）。
-            reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
-              term.buffer.active.length, data.length, stale);
+          if (dirtyWindow) {
+            needsReseed = true;
+            reseedQueued = true;
+            queuedReseedTrigger = trigger;
+          }
+          await new Promise<void>((resolve) => {
+            term.write(concatReseedWrite(buildReseedPayload(data), windowBytes), () => {
+              const committed = !destroyed && active && streaming
+                && generation === recoveryGeneration && currentBuffer === "normal";
+              if (committed && !dirtyWindow) {
+                needsReseed = false;
+                flushPending();
+              } else needsReseed = true;
+              reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
+                term.buffer.active.length, data.length, !committed);
+              resolve();
+            });
           });
         } else {
+          needsReseed = true;
           reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
-            term.buffer.active.length, data.length, stale);
+            term.buffer.active.length, data.length, true);
         }
       } catch (e) {
         // 失败也要留下窗口的字节：它们已经写进 xterm 了，没有 RIS 来抹，不必回灌。
         if (windowBuf === win) windowBuf = null;
         reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
           term.buffer.active.length, 0, false, errLabel(e));
+        needsReseed = true;
+      } finally {
+        reseedInFlight = false;
+        historyInFlight = false;
+        historyMode = null;
+        if (!active || !streaming || destroyed) reseedQueued = false;
+        drainHistoryQueue();
+      }
+    };
+
+    function requestReseed(trigger: ReseedTrigger): void {
+      needsReseed = true;
+      queuedReseedTrigger = trigger;
+      if (!active || !streaming || destroyed || currentBuffer !== "normal") return;
+      if (historyInFlight) {
+        reseedQueued = true;
+        return;
+      }
+      reseedQueued = false;
+      void runReseed(trigger);
+    }
+    recoverOnActivate = () => {
+      if (needsReseed && !offlineQueued && historyMode !== "offline") {
+        requestReseed(queuedReseedTrigger);
       }
     };
 
@@ -980,6 +1032,13 @@
       seedTimer = undefined;
     };
     const seedFromHistory = async (attempt = 0) => {
+      if (historyInFlight) {
+        seedQueuedAttempt = attempt;
+        return;
+      }
+      seedQueuedAttempt = null;
+      historyInFlight = true;
+      historyMode = "seed";
       const gen = recoveryGeneration;
       // 重试成功后这三个必须一起归位：只清 seeding 的话，内容出来了却一直盖着
       // 一层「正在重试」的半透明提示。
@@ -1031,10 +1090,20 @@
         seeding = false;
         seedRetrying = false;
         seedFailed = true;
+      } finally {
+        historyInFlight = false;
+        historyMode = null;
+        drainHistoryQueue();
       }
     };
 
     const resumeFromHistory = async () => {
+      if (historyInFlight) {
+        offlineQueued = true;
+        return;
+      }
+      historyInFlight = true;
+      historyMode = "offline";
       const gen = ++recoveryGeneration;
       const activeAtStart = active;
       const startedAt = Date.now();
@@ -1047,13 +1116,18 @@
       try {
         const snapshot = await loadHistorySnapshot(historyLines);
         if (destroyed || !streaming || gen !== recoveryGeneration || active !== activeAtStart) return;
-        commitSnapshot(snapshot, null, () => {
-          if (destroyed || !streaming || gen !== recoveryGeneration || active !== activeAtStart) return;
-          reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
-            term.buffer.active.length, snapshot.text.length, false);
-          needsReseed = false;
-          seeding = false;
-          conn.attach(sessionId, snapshot.seq, { seed: true });
+        await new Promise<void>((resolve) => {
+          commitSnapshot(snapshot, null, () => {
+            if (!destroyed && streaming && gen === recoveryGeneration && active === activeAtStart) {
+              reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
+                term.buffer.active.length, snapshot.text.length, false);
+              needsReseed = false;
+              reseedQueued = false;
+              seeding = false;
+              conn.attach(sessionId, snapshot.seq, { seed: true });
+            }
+            resolve();
+          });
         });
       } catch (e) {
         if (destroyed || !streaming || gen !== recoveryGeneration) return;
@@ -1063,6 +1137,30 @@
         seedRetrying = false;
         seedFailed = true;
         needsReseed = true;
+      } finally {
+        historyInFlight = false;
+        historyMode = null;
+        drainHistoryQueue();
+      }
+    };
+
+    drainHistoryQueue = () => {
+      if (historyInFlight || destroyed) return;
+      if (offlineQueued && streaming) {
+        offlineQueued = false;
+        void resumeFromHistory();
+        return;
+      }
+      if (seedQueuedAttempt !== null && streaming) {
+        const attempt = seedQueuedAttempt;
+        seedQueuedAttempt = null;
+        void seedFromHistory(attempt);
+        return;
+      }
+      if (reseedQueued && active && streaming && currentBuffer === "normal") {
+        const nextTrigger = queuedReseedTrigger;
+        reseedQueued = false;
+        void runReseed(nextTrigger);
       }
     };
 
@@ -1079,6 +1177,7 @@
       pendingOut.take();
       pendingOut.clearDirty();
       cancelSeedRetry();
+      seedQueuedAttempt = null;
       needsReseed = true;
       seeding = false;
       seedRetrying = false;
@@ -1091,7 +1190,7 @@
     flushPending = () => {
       if (pendingOut.dirty) {
         pendingOut.clearDirty();
-        if (currentBuffer === "normal") void reloadHistory("stash-dirty");
+        if (currentBuffer === "normal") requestReseed("stash-dirty");
         else void conn.rpc("term.redraw", { session: sessionId }).catch(() => {});
         return;
       }
@@ -1103,6 +1202,13 @@
         // 这两个入口，两个都要挂上。
         windowBuf?.push(data);
       }
+    };
+    resumeOutput = () => {
+      if (needsReseed) {
+        recoverOnActivate();
+        return;
+      }
+      flushPending();
     };
 
     activateRefit = () => {
@@ -1173,7 +1279,7 @@
           // prior scrollback (incl. Claude Code's classic-renderer transcript) is
           // visible. The write callback fires after onBufferChange has set
           // currentBuffer = "normal", so reloadHistory won't early-return.
-          term.write("\x1b[?1049l", () => { void reloadHistory(); });
+          term.write("\x1b[?1049l", () => { requestReseed("alt-normal"); });
         } else {
           // Switch xterm into its alternate buffer, then make tmux re-push the
           // pane's current screen (term.redraw). The pane app (vim/htop) already
@@ -1234,7 +1340,8 @@
         void seedFromHistory();
         return;
       }
-      void resumeFromHistory();
+      offlineQueued = true;
+      drainHistoryQueue();
     };
     // 只有活动的 tab 才在挂载时 refit。非活动 tab 此刻是 display:none，量不到自己，
     // 而它上报的塌陷尺寸会把**共享的 tmux 会话**拽窄、连带污染别人的历史。
@@ -1244,7 +1351,7 @@
     onReady?.(sessionId, term);
     // 让外壳能对指定会话触发重灌。目前唯一的调用方是 App 的 onResync —— 服务端
     // 说「你缺了一段字节」时，只有重灌快照能补，重推当前屏补不了 scrollback。
-    onReseedReady?.(sessionId, (t) => { void reloadHistory(t); });
+    onReseedReady?.(sessionId, requestReseed);
     // The classifyPane poll is NOT started here: the visibility $effect below
     // starts it when (and only while) this terminal is active + live (A4).
 
@@ -1360,7 +1467,7 @@
   // it, and a tombstone (closed/done) stops it for good.
   $effect(() => {
     if (mounted && active && !closed && term && fit) {
-      flushPending();
+      resumeOutput();
       queueMicrotask(() => {
         activateRefit();
         // 【2026-08-28 渲染去抖器解卡】切 tab 与切 App 是同一个坑的两条入口：

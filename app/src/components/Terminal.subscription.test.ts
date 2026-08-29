@@ -244,3 +244,64 @@ test("a stopped generation cannot write or attach when its history arrives", asy
   expect(write).not.toHaveBeenCalled();
   expect(conn.attach).not.toHaveBeenCalled();
 });
+
+test("rapid stop and resume never overlaps same-terminal history requests", async () => {
+  const pending: Array<ReturnType<typeof deferred<{ data: string; seq: number }>>> = [];
+  const conn = stubConn(() => {
+    const next = deferred<{ data: string; seq: number }>();
+    pending.push(next);
+    return next.promise;
+  });
+  const props = { conn: conn as any, sessionId: "A", active: true, streaming: true };
+  const { rerender } = render(Terminal, { props });
+  await tick();
+  expect(historyCalls(conn)).toBe(1);
+
+  await rerender({ ...props, streaming: false });
+  await rerender({ ...props, streaming: true });
+  await tick();
+  expect(historyCalls(conn)).toBe(1);
+
+  pending[0].resolve({ data: toB64(new TextEncoder().encode("stale\n")), seq: 40 });
+  await tick();
+  expect(historyCalls(conn)).toBe(2);
+
+  pending[1].resolve({ data: toB64(new TextEncoder().encode("fresh\n")), seq: 41 });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 41, { seed: true }));
+});
+
+test("an initial retry due during online recovery runs after that recovery", async () => {
+  vi.useFakeTimers();
+  try {
+    const online = deferred<{ data: string; seq: number }>();
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.reject(new Error("initial-offline"));
+      if (call === 2) return online.promise;
+      return Promise.resolve({ data: toB64(new TextEncoder().encode("retry-seed\n")), seq: 52 });
+    });
+    let requestReseed: ((trigger: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn: conn as any,
+        sessionId: "A",
+        active: true,
+        streaming: true,
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls(conn)).toBe(1);
+
+    requestReseed?.("resync");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(historyCalls(conn)).toBe(2);
+
+    online.resolve({ data: toB64(new TextEncoder().encode("online\n")), seq: 51 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(historyCalls(conn)).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});

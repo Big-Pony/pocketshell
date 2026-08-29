@@ -237,7 +237,9 @@
   }
   const terms = new Map<string, Terminal>();
   // 每个终端暴露的重灌入口（onResync 用）。与 terms 同生命周期。
-  const reseeders = new Map<string, (t: "alt-normal" | "stash-dirty" | "resync") => void>();
+  // Terminal owns recovery scheduling. App only forwards a content-free trigger;
+  // the callback may defer or coalesce it while hidden or already recovering.
+  const recoveryRequests = new Map<string, (t: "alt-normal" | "stash-dirty" | "resync") => void>();
   const cmdLines = new Map<string, CmdLineState>();
   let hints = $state<string[]>([]);
   // 需求 5：用户自定义联想库。hintsChanged 广播无载荷，收到后重拉全量。
@@ -450,7 +452,7 @@
   conn.onResync((f) => {
     flash = tr("app.notice.historyLost");
     setTimeout(() => (flash = ""), 4000);
-    reseeders.get(f.sessionId)?.("resync");
+    recoveryRequests.get(f.sessionId)?.("resync");
   });
   conn.onError((f) => {
     flash = `${f.code}: ${f.message}`;
@@ -670,7 +672,7 @@
     stopStreamingNow(name);
     sessions = closeTabFn(sessions, name);
     terms.delete(name);
-    reseeders.delete(name);
+    recoveryRequests.delete(name);
     anchors.clear(name); // the xterm buffer it referenced is gone
     if (activeId === name) {
       activeId = topSessions[0]?.name ?? "";
@@ -811,7 +813,7 @@
       conn.kill(id);
       sessions = closeTabFn(sessions, id);
       terms.delete(id);
-      reseeders.delete(id);
+      recoveryRequests.delete(id);
       anchors.clear(id);
       tabOrder = removeOrder(tabOrder, id);
       if (activeId === id) activeId = topSessions.filter((x) => x.name !== id)[0]?.name ?? "";
@@ -1125,7 +1127,7 @@
         fontFamily={settings.fontFamily}
         historyLines={settings.historyLines}
         onReady={(id, t) => terms.set(id, t)}
-        onReseedReady={(id, fn) => reseeders.set(id, fn)}
+        onReseedReady={(id, fn) => recoveryRequests.set(id, fn)}
       />
     {/each}
     {#each fileTabs as t (t.id)}
