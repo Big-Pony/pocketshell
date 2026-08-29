@@ -15,6 +15,7 @@ docs/superpowers/test-reports/*/*.png
 docs/
 .claude/
 .superpowers/
+.worktrees/
 .playwright-mcp/
 spike/
 CLAUDE.md
