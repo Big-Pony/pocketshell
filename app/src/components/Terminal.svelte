@@ -1506,11 +1506,19 @@
     mounted = true;
   });
 
-  // Apply stream delivery intent only after xterm and its connection callbacks
-  // exist. Re-rendering the same value is a no-op; visibility changes alone do
-  // not tear down a grace stream.
+  // Apply the active generation before stream delivery intent. App selects a
+  // detached tab by changing active + streaming together; recovery must capture
+  // the new generation instead of being invalidated by the visibility effect
+  // later in the same update. Active-only changes still run this effect and
+  // invalidate async decode/preparation work without tearing down a grace stream.
   $effect(() => {
     if (!mounted) return;
+    const nowActive = active;
+    if (activeApplied === null) activeApplied = nowActive;
+    else if (nowActive !== activeApplied) {
+      activeApplied = nowActive;
+      invalidateActiveRecovery();
+    }
     if (streaming === streamingApplied) return;
     streamingApplied = streaming;
     if (streaming) startStreaming();
@@ -1525,11 +1533,6 @@
   $effect(() => {
     const nowActive = active;
     if (!mounted) return;
-    if (activeApplied === null) activeApplied = nowActive;
-    else if (nowActive !== activeApplied) {
-      activeApplied = nowActive;
-      invalidateActiveRecovery();
-    }
     if (nowActive && !closed && term && fit) {
       resumeOutput();
       queueMicrotask(() => {

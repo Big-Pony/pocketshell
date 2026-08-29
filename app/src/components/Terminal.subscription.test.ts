@@ -229,6 +229,48 @@ test("offline resume attaches only after the snapshot write commits", async () =
   expect(conn.attach).toHaveBeenCalledWith("A", 11, { seed: true });
 });
 
+test("selecting a detached tab starts one offline snapshot and seeded attach", async () => {
+  let call = 0;
+  const conn = stubConn(() => {
+    call++;
+    const text = call === 1 ? "old-screen\n" : "fresh-screen\n";
+    return Promise.resolve({ data: toB64(new TextEncoder().encode(text)), seq: call === 1 ? 3 : 15 });
+  });
+  let term: XTerm | undefined;
+  const props = {
+    conn: conn as any,
+    sessionId: "A",
+    active: true,
+    streaming: true,
+    onReady: (_id: string, value: XTerm) => { term = value; },
+  };
+  const { rerender } = render(Terminal, { props });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 3, { seed: true }));
+
+  await rerender({ ...props, active: false, streaming: false });
+  conn.rpc.mockClear();
+  conn.attach.mockClear();
+  const commits: Array<() => void> = [];
+  const write = vi.fn((_data: string | Uint8Array, callback?: () => void) => {
+    if (callback) commits.push(callback);
+  });
+  (term as any).write = write;
+
+  await rerender({ ...props, active: true, streaming: true });
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+  expect(historyCalls(conn)).toBe(1);
+  expect(String(write.mock.calls[0][0])).toContain("\x1bc");
+  expect(String(write.mock.calls[0][0])).toContain("fresh-screen");
+  expect(conn.attach).not.toHaveBeenCalled();
+
+  commits[0]();
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 15, { seed: true }));
+  await tick();
+  expect(historyCalls(conn)).toBe(1);
+  expect(conn.attach).toHaveBeenCalledTimes(1);
+});
+
 test("a stopped generation cannot write or attach when its history arrives", async () => {
   const history = deferred<{ data: string; seq: number }>();
   const conn = stubConn(() => history.promise);
