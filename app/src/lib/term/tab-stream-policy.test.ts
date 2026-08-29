@@ -121,6 +121,7 @@ describe("stopStream", () => {
       state: { current: null, grace: "B" },
       stream: ["B"],
       detachNow: ["A"],
+      preserveGraceTimer: false,
     });
   });
 
@@ -129,6 +130,20 @@ describe("stopStream", () => {
       state: { current: "A", grace: null },
       stream: ["A"],
       detachNow: ["B"],
+      preserveGraceTimer: false,
     });
+  });
+
+  test("preserves the live grace timer when stopping an unrelated session", () => {
+    const previous = { current: "A", grace: "B" };
+    const stop = stopStream(previous, "C");
+
+    expect(stop).toEqual({
+      state: previous,
+      stream: [],
+      detachNow: ["C"],
+      preserveGraceTimer: true,
+    });
+    expect(stop.state).toBe(previous);
   });
 });

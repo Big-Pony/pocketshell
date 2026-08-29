@@ -16,6 +16,7 @@ export interface StreamStop {
   state: StreamPolicyState;
   stream: string[];
   detachNow: string[];
+  preserveGraceTimer: boolean;
 }
 
 function streamIds(state: StreamPolicyState): string[] {
@@ -47,12 +48,26 @@ export function switchStream(
 }
 
 export function stopStream(previous: StreamPolicyState, sessionId: string): StreamStop {
+  if (previous.current !== sessionId && previous.grace !== sessionId) {
+    return {
+      state: previous,
+      stream: [],
+      detachNow: [sessionId],
+      preserveGraceTimer: true,
+    };
+  }
+
   const state = {
     current: previous.current === sessionId ? null : previous.current,
     grace: previous.grace === sessionId ? null : previous.grace,
   };
 
-  return { state, stream: streamIds(state), detachNow: [sessionId] };
+  return {
+    state,
+    stream: streamIds(state),
+    detachNow: [sessionId],
+    preserveGraceTimer: false,
+  };
 }
 
 export function graceExpiryIsCurrent(

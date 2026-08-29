@@ -184,8 +184,12 @@
   }
 
   function stopStreamingNow(sessionId: string) {
-    invalidateGraceDetach();
     const transition = stopStream(streamPolicy, sessionId);
+    if (transition.preserveGraceTimer) {
+      for (const id of transition.detachNow) conn.detach(id);
+      return;
+    }
+    invalidateGraceDetach();
     streamPolicy = transition.state;
     streamingSessions = new Set(transition.stream);
     for (const id of transition.detachNow) conn.detach(id);
