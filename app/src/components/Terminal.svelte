@@ -913,8 +913,13 @@
       generation: number;
       activeGeneration: number;
     };
+    type FailedRecovery = Pick<RecoveryRetry, "mode" | "trigger">;
     let recoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let recoveryRetryQueued: RecoveryRetry | null = null;
+    // A bounded retry may exhaust while other work is coalesced behind it.
+    // Keep the failed lane explicit: offline still owns the required seeded
+    // attach, while online must retain its live-window recovery semantics.
+    let failedRecovery: FailedRecovery | null = null;
 
     const cancelRecoveryRetry = () => {
       if (recoveryRetryTimer) clearTimeout(recoveryRetryTimer);
@@ -1043,6 +1048,7 @@
               const committed = !destroyed && active && streaming
                 && generation === recoveryGeneration && decodeActiveGeneration === activeGeneration
                 && currentBuffer === "normal";
+              if (committed) failedRecovery = null;
               if (committed && !dirtyWindow) {
                 needsReseed = false;
                 seedFailed = false;
@@ -1074,6 +1080,7 @@
           });
         needsReseed = true;
         if (!destroyed && active && streaming && generation === recoveryGeneration) {
+          failedRecovery = { mode: "online", trigger };
           scheduleRecoveryRetry("online", trigger, attempt, generation, activeGeneration);
         }
       } finally {
@@ -1089,6 +1096,10 @@
       needsReseed = true;
       queuedReseedTrigger = trigger;
       if (!active || !streaming || destroyed || currentBuffer !== "normal") return;
+      if (seedFailed && failedRecovery) {
+        reseedQueued = true;
+        return;
+      }
       if (historyInFlight || recoveryRetryTimer || recoveryRetryQueued) {
         reseedQueued = true;
         return;
@@ -1099,6 +1110,7 @@
     recoverOnActivate = () => {
       if (!needsReseed) return;
       if (recoveryRetryTimer) return;
+      if (seedFailed && failedRecovery) return;
       if (offlineQueued) { drainHistoryQueue(); return; }
       if (historyMode !== "offline") requestReseed(queuedReseedTrigger);
     };
@@ -1248,6 +1260,7 @@
               seeding = false;
               seedFailed = false;
               seedRetrying = false;
+              failedRecovery = null;
               conn.attach(sessionId, snapshot.seq, { seed: true });
             } else queueOfflineRetry();
             resolve();
@@ -1261,6 +1274,7 @@
           });
         seeding = false;
         needsReseed = true;
+        failedRecovery = { mode: "offline", trigger: "seed" };
         scheduleRecoveryRetry("offline", "seed", attempt, gen, activeGen);
       } finally {
         historyInFlight = false;
@@ -1276,6 +1290,10 @@
       // plus resync would immediately start an online request and bypass both
       // the delay and the required seeded attach.
       if (recoveryRetryTimer) return;
+      // Exhaustion is a paused recovery, not a release of lane ownership.
+      // In particular, a queued resync cannot turn a failed offline resume
+      // into an online reset before the terminal has seed-attached again.
+      if (seedFailed && failedRecovery) return;
       if (recoveryRetryQueued) {
         const retry = recoveryRetryQueued;
         recoveryRetryQueued = null;
@@ -1315,7 +1333,11 @@
     retrySeed = () => {
       if (destroyed || !streaming) return;
       cancelRecoveryRetry();
-      if (needsReseed && hasStreamed) void resumeFromHistory();
+      seedFailed = false;
+      seedRetrying = false;
+      if (failedRecovery?.mode === "offline") void resumeFromHistory();
+      else if (failedRecovery?.mode === "online") requestReseed(failedRecovery.trigger);
+      else if (needsReseed && hasStreamed) void resumeFromHistory();
       else void seedFromHistory(0);
     };
 
@@ -1328,8 +1350,10 @@
       cancelRecoveryRetry();
       seedQueuedAttempt = null;
       reseedQueued = false;
+      failedRecovery = null;
       needsReseed = true;
       seeding = false;
+      seedFailed = false;
       seedRetrying = false;
     };
 

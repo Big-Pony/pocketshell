@@ -699,6 +699,144 @@ test("online recovery retry is bounded and leaves the manual retry entry", async
   }
 });
 
+test("offline retry exhaustion retains seeded-attach ownership and its queued online follow-up", async () => {
+  vi.useFakeTimers();
+  try {
+    const firstOffline = deferred<{ data: string; seq: number }>();
+    const manualOffline = deferred<{ data: string; seq: number }>();
+    const queuedOnline = deferred<{ data: string; seq: number }>();
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      if (call === 2) return firstOffline.promise;
+      if (call === 3 || call === 4) return Promise.reject(new Error("disconnected"));
+      if (call === 5) return manualOffline.promise;
+      return queuedOnline.promise;
+    });
+    let term: XTerm | undefined;
+    let requestReseed: ((trigger: any) => void) | undefined;
+    const props = {
+      conn: conn as any,
+      sessionId: "A",
+      active: true,
+      streaming: true,
+      onReady: (_id: string, value: XTerm) => { term = value; },
+      onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+    };
+    const view = render(Terminal, { props });
+    await vi.advanceTimersByTimeAsync(0);
+    await view.rerender({ ...props, streaming: false });
+    conn.attach.mockClear();
+    const commits: Array<() => void> = [];
+    (term as any).write = vi.fn((_data: string | Uint8Array, callback?: () => void) => {
+      if (callback) commits.push(callback);
+    });
+
+    await view.rerender({ ...props, streaming: true });
+    requestReseed?.("resync");
+    requestReseed?.("resync");
+    firstOffline.reject(new Error("disconnected"));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(800);
+    await vi.advanceTimersByTimeAsync(2_400);
+    requestReseed?.("resync");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(historyCalls(conn)).toBe(4); // initial + three exhausted offline attempts
+    expect(conn.attach).not.toHaveBeenCalled();
+    const retry = view.container.querySelector(".term-seed-retry") as HTMLButtonElement;
+    expect(retry).toBeTruthy();
+
+    retry.click();
+    expect(historyCalls(conn)).toBe(5);
+    manualOffline.resolve({
+      data: toB64(new TextEncoder().encode("manual-offline\n")), seq: 50,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(commits).toHaveLength(1);
+    expect(historyCalls(conn)).toBe(5); // queued online work waits for snapshot commit + attach
+
+    commits.shift()?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(conn.attach).toHaveBeenCalledTimes(1);
+    expect(conn.attach).toHaveBeenCalledWith("A", 50, { seed: true });
+    expect(historyCalls(conn)).toBe(6);
+
+    queuedOnline.resolve({
+      data: toB64(new TextEncoder().encode("queued-online\n")), seq: 51,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(commits).toHaveLength(1);
+    commits.shift()?.();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(historyCalls(conn)).toBe(6);
+    expect(conn.attach).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("manual retry after online exhaustion stays online and preserves the live window", async () => {
+  vi.useFakeTimers();
+  try {
+    const manualOnline = deferred<{ data: string; seq: number }>();
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      if (call <= 4) return Promise.reject(new Error("rpc_timeout"));
+      return manualOnline.promise;
+    });
+    let term: XTerm | undefined;
+    let requestReseed: ((trigger: any) => void) | undefined;
+    const { container } = render(Terminal, {
+      props: {
+        conn: conn as any,
+        sessionId: "A",
+        active: true,
+        streaming: true,
+        onReady: (_id: string, value: XTerm) => { term = value; },
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    conn.attach.mockClear();
+    const write = vi.fn((_data: string | Uint8Array, callback?: () => void) => callback?.());
+    (term as any).write = write;
+
+    requestReseed?.("resync");
+    await vi.advanceTimersByTimeAsync(3_200);
+    expect(historyCalls(conn)).toBe(4);
+
+    (container.querySelector(".term-seed-retry") as HTMLButtonElement).click();
+    expect(historyCalls(conn)).toBe(5);
+    conn.emit("A", "LIVE-WINDOW", 21);
+    manualOnline.resolve({
+      data: toB64(new TextEncoder().encode("MANUAL-ONLINE\n")), seq: 20,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const snapshotWrite = write.mock.calls.find(([data]) => {
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      return text.includes("MANUAL-ONLINE");
+    });
+    expect(snapshotWrite).toBeTruthy();
+    const snapshotPayload = typeof snapshotWrite![0] === "string"
+      ? snapshotWrite![0]
+      : new TextDecoder().decode(snapshotWrite![0]);
+    expect(snapshotPayload).toContain("LIVE-WINDOW");
+    expect(conn.attach).not.toHaveBeenCalled();
+    expect(historyCalls(conn)).toBe(5);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test.each(["stop", "unmount"] as const)("%s cancels a scheduled online recovery retry", async (action) => {
   vi.useFakeTimers();
   try {
