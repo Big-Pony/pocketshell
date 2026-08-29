@@ -51,6 +51,13 @@
   import { suggestSlash } from "./lib/slash-catalog";
   import { splitPools } from "./lib/hints";
   import { CATALOG } from "./lib/command-catalog";
+  import {
+    graceExpiryIsCurrent,
+    stopStream,
+    switchStream,
+    TAB_DETACH_GRACE_MS,
+    type StreamPolicyState,
+  } from "./lib/term/tab-stream-policy";
   import { t } from "svelte-i18n";
   import { applyLanguage, tr } from "./lib/i18n";
   import { createDemoConnection } from "./demo";
@@ -137,6 +144,74 @@
   const notice = $derived(!DEMO && !getAgentPubKey() ? $t("app.notice.noPubkey") : flash);
   const demo = DEMO ? createDemoConnection(wsUrl) : null;
   const conn = demo ? demo.conn : new Connection({ url: wsUrl });
+  let streamPolicy = $state<StreamPolicyState>({ current: null, grace: null });
+  let streamingSessions = $state<Set<string>>(new Set());
+  let graceDetachTimer: ReturnType<typeof setTimeout> | null = null;
+  let graceGeneration = 0;
+  let streamingInitialized = false;
+
+  function invalidateGraceDetach() {
+    if (graceDetachTimer) clearTimeout(graceDetachTimer);
+    graceDetachTimer = null;
+    graceGeneration++;
+  }
+
+  function scheduleGraceDetach(sessionId: string | null) {
+    invalidateGraceDetach();
+    if (!sessionId) return;
+    const captured = { sessionId, generation: graceGeneration };
+    graceDetachTimer = setTimeout(() => {
+      if (captured.generation === graceGeneration) graceDetachTimer = null;
+      if (!graceExpiryIsCurrent(captured, {
+        state: streamPolicy,
+        generation: graceGeneration,
+        streaming: streamingSessions,
+      })) return;
+      streamingSessions = new Set([...streamingSessions].filter((id) => id !== sessionId));
+      streamPolicy = { ...streamPolicy, grace: null };
+      conn.detach(sessionId);
+    }, TAB_DETACH_GRACE_MS);
+  }
+
+  function transitionStreaming(nextTopId: string) {
+    const nextTerminal = nextTopId && !nextTopId.startsWith("file:") ? nextTopId : null;
+    const transition = switchStream(streamPolicy, nextTerminal);
+    if (transition.state === streamPolicy) return;
+    streamPolicy = transition.state;
+    streamingSessions = new Set(transition.stream);
+    for (const id of transition.detachNow) conn.detach(id);
+    scheduleGraceDetach(transition.scheduleDetach);
+  }
+
+  function stopStreamingNow(sessionId: string) {
+    invalidateGraceDetach();
+    const transition = stopStream(streamPolicy, sessionId);
+    streamPolicy = transition.state;
+    streamingSessions = new Set(transition.stream);
+    for (const id of transition.detachNow) conn.detach(id);
+    scheduleGraceDetach(streamPolicy.grace);
+  }
+
+  function renameStreaming(sessionId: string, nextSessionId: string) {
+    invalidateGraceDetach();
+    streamPolicy = {
+      current: streamPolicy.current === sessionId ? nextSessionId : streamPolicy.current,
+      grace: streamPolicy.grace === sessionId ? nextSessionId : streamPolicy.grace,
+    };
+    streamingSessions = new Set([...streamingSessions].map((id) => id === sessionId ? nextSessionId : id));
+    scheduleGraceDetach(streamPolicy.grace);
+  }
+
+  function removeMissingStreaming(alive: ReadonlySet<string>) {
+    if (!streamingSessions.size || [...streamingSessions].every((id) => alive.has(id))) return;
+    invalidateGraceDetach();
+    streamPolicy = {
+      current: streamPolicy.current && alive.has(streamPolicy.current) ? streamPolicy.current : null,
+      grace: streamPolicy.grace && alive.has(streamPolicy.grace) ? streamPolicy.grace : null,
+    };
+    streamingSessions = new Set([...streamingSessions].filter((id) => alive.has(id)));
+    scheduleGraceDetach(streamPolicy.grace);
+  }
   let status = $state<ConnStatus>("connecting");
   // 首次连接与断线重连是两回事：前者没什么"断开"可言，用同一句"已断开"
   // 会让第一次打开 App 的人以为出了问题（14 期需求 5）。
@@ -309,12 +384,11 @@
   //      配对断言锁住这两条）。结果是唯一上线的 attach 永远是 lastSeq=0。
   // 8 个 tab 各来一份 221KB ≈ 1.7MB，直接顶穿服务端 1MB 高水位触发背压丢帧。
   //
-  // 不需要任何替代品：topSessions 里的每个会话都挂 TerminalView，其 onMount
-  // 调 seedFromHistory，内部负责 attach（失败时退回 attach(0) 兜底）。差集
-  // 只有「alive 但 attached=false」的外部空闲会话，它们只出现在任务面板、
-  // 不挂 TerminalView，attach 来的字节本就无人消费。
+  // topSessions 负责渲染；实时订阅则由前台 current + grace 策略决定。外部空闲
+  // 会话只出现在任务面板，不进入这份订阅投影。
   conn.onSessions((list) => {
     sessions = mergeSessions(sessions, list);
+    removeMissingStreaming(new Set(list.map((s) => s.name)));
     // Drop dead sessions from the order + focus so the strip only shows sessions
     // the server still has.
     const alive = new Set(sessions.map((s) => s.name));
@@ -323,8 +397,16 @@
     // every ~3s broadcast even when nothing changed. Same length ⇒ identical.
     const keptOrder = tabOrder.filter((id) => id.startsWith("file:") || alive.has(id));
     if (keptOrder.length !== tabOrder.length) tabOrder = keptOrder;
-    if (activeId && !alive.has(activeId)) activeId = "";
-    if (!activeId) activeId = sessions.find((s) => s.attached && !s.closed)?.name ?? "";
+    let focusChanged = false;
+    if (activeId && !alive.has(activeId)) { activeId = ""; focusChanged = true; }
+    if (!activeId) {
+      activeId = sessions.find((s) => s.attached && !s.closed)?.name ?? "";
+      focusChanged = true;
+    }
+    if (!streamingInitialized || focusChanged) {
+      streamingInitialized = true;
+      transitionStreaming(activeTop || activeId);
+    }
   });
   conn.onExit((f) => { sessions = tombstone(sessions, f.sessionId); });
 
@@ -430,6 +512,7 @@
       backgrounded = new Set(saved.backgrounded);
       // activeId is re-validated against live sessions once onSessions arrives.
       if (saved.activeId) activeId = saved.activeId;
+      if (streamingInitialized) transitionStreaming(activeTop || activeId);
     }
     const onFsChange = () => { pageFullscreen = !!document.fullscreenElement; };
     document.addEventListener("fullscreenchange", onFsChange);
@@ -501,6 +584,7 @@
     barEl?.addEventListener("pointermove", onBarPointerMove, { capture: true });
     barEl?.addEventListener("click", onBarClickCapture, { capture: true });
     return () => {
+      invalidateGraceDetach();
       unregisterDevHelpers();
       offJsError();
       topEl?.removeEventListener("pointerdown", onTopPointerDown, { capture: true });
@@ -558,11 +642,13 @@
     activeId = name;
     backgrounded.delete(name); backgrounded = new Set(backgrounded);
     tabOrder = appendOrder(tabOrder, name);
+    transitionStreaming(name);
   }
   function selectSession(name: string) {
     cancelSelection();
     activeId = name;
     if (backgrounded.has(name)) { backgrounded.delete(name); backgrounded = new Set(backgrounded); }
+    transitionStreaming(name);
   }
   function enterSession(name: string) {
     const s = sessions.find((x) => x.name === name);
@@ -570,18 +656,22 @@
     selectSession(name);
   }
   function renameSession(name: string, next: string) {
+    renameStreaming(name, next);
     conn.renameSession(name, next);
     sessions = sessions.map((s) => (s.name === name ? { ...s, name: next } : s));
     if (activeId === name) activeId = next;
   }
-  function killSession(name: string) { cancelSelection(); conn.kill(name); }
+  function killSession(name: string) { cancelSelection(); stopStreamingNow(name); conn.kill(name); }
   function closeTab(name: string) {
-    conn.detach(name);
+    stopStreamingNow(name);
     sessions = closeTabFn(sessions, name);
     terms.delete(name);
     reseeders.delete(name);
     anchors.clear(name); // the xterm buffer it referenced is gone
-    if (activeId === name) activeId = topSessions[0]?.name ?? "";
+    if (activeId === name) {
+      activeId = topSessions[0]?.name ?? "";
+      transitionStreaming(activeTop || activeId);
+    }
   }
   function copyOutput(name: string) {
     const term = terms.get(name);
@@ -686,6 +776,7 @@
     fileTabs = r.tabs;
     tabOrder = appendOrder(tabOrder, r.id);
     activeTop = r.id;
+    transitionStreaming(r.id);
     if (fullscreen) fullscreen = false;
   }
   // Drawer navigation: swap the file shown by a preview tab in place, keeping the
@@ -698,7 +789,10 @@
     if (editingId === id) { editingId = null; fullscreen = false; }
     fileTabs = closeFileTab(fileTabs, id);
     tabOrder = removeOrder(tabOrder, id);
-    if (activeTop === id) activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
+    if (activeTop === id) {
+      activeTop = topOrder.filter((x) => x !== id)[0] ?? activeId ?? "";
+      transitionStreaming(activeTop || activeId);
+    }
   }
   // Close from the top strip's double-tap dialog. File tabs are removed; term
   // tabs are only backgrounded (the tmux session keeps running and reappears in
@@ -709,6 +803,7 @@
     const s = sessions.find((x) => x.name === id);
     if (s?.kind === "shell") {
       // Shell tabs are ephemeral: closing the tab kills the PTY outright.
+      stopStreamingNow(id);
       conn.kill(id);
       sessions = closeTabFn(sessions, id);
       terms.delete(id);
@@ -717,17 +812,19 @@
       tabOrder = removeOrder(tabOrder, id);
       if (activeId === id) activeId = topSessions.filter((x) => x.name !== id)[0]?.name ?? "";
       if (activeTop === id) activeTop = "";
+      transitionStreaming(activeTop || activeId);
       return;
     }
-    conn.detach(id); // backgrounded term tabs stop their output stream, same as toBackground
+    stopStreamingNow(id);
     ({ tabOrder, backgrounded } = backgroundTab(tabOrder, backgrounded, id));
     if (activeId === id) activeId = topSessions.filter((s) => s.name !== id)[0]?.name ?? "";
     if (activeTop === id) activeTop = "";
+    transitionStreaming(activeTop || activeId);
   }
   function selectTop(id: string) {
     cancelSelection();
     copyMode = false; // leaving the tab drops the copy-mode overlay (clone is stale)
-    if (id.startsWith("file:")) { activeTop = id; }
+    if (id.startsWith("file:")) { activeTop = id; transitionStreaming(id); }
     else { activeTop = ""; selectSession(id); }
     // An open editor forces fullscreen; leaving its tab must release it (the
     // divider — the usual exit — is hidden while fullscreen). Only touch
@@ -777,13 +874,14 @@
     if (!activeId) return;
     cancelSelection();
     copyMode = false;
-    conn.detach(activeId); // R2: unsubscribe; reopening re-attaches via Terminal mount
+    stopStreamingNow(activeId);
     // 2026-08-18：此前这里**漏了** tabOrder 的移除（closeTopTab 有、这里没有），
     // 于是后台化会话永久留在 tabOrder → localStorage → 重进时被无条件 attach，
     // 而它根本不挂 TerminalView，字节无人消费纯粹抢带宽。两条路径现在共用
     // backgroundTab()，对称性是结构性的而不是靠人记住。
     ({ tabOrder, backgrounded } = backgroundTab(tabOrder, backgrounded, activeId));
     activeId = topSessions[0]?.name ?? "";
+    transitionStreaming(activeTop || activeId);
   }
 
   function activeTerm() { return terms.get(activeId); }
@@ -1017,6 +1115,7 @@
         {conn}
         sessionId={s.name}
         active={activeTopId === s.name}
+        streaming={streamingSessions.has(s.name)}
         closed={s.closed ?? false}
         fontSize={settings.fontSize}
         fontFamily={settings.fontFamily}
