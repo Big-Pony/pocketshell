@@ -1,7 +1,7 @@
 // Idempotent auto-wiring of each tool's hook config. Only ever adds/removes our
 // own marked entry; never touches the user's other hooks. Every failure returns
 // a structured {ok:false, reason, detail} the UI surfaces — no silent failure.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, chmodSync } from "node:fs";
 import { dirname, join as joinPath } from "node:path";
 
 export interface WireResult { ok: boolean; reason?: string; detail?: string; }
@@ -58,6 +58,24 @@ export function unwireClaude(settingsPath: string, agentBin: string): WireResult
 // ---- codex ----
 const codexLine = (agentBin: string) => `notify = ["${agentBin}", "notify", "codex"]`;
 const isOurCodexNotify = (line: string, agentBin: string) => line.trimStart().startsWith(`notify = ["${agentBin}", "notify"`);
+export const codexNotifyChainPath = (configPath: string) => joinPath(dirname(configPath), "pocketshell-notify-chain.json");
+
+export function readCodexNotifyChain(path: string): string[] | null {
+  if (!existsSync(path)) return null;
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string") ? value : null;
+  } catch { return null; }
+}
+
+function parseCodexNotifyLine(line: string): string[] | null {
+  const eq = line.indexOf("=");
+  if (eq < 0) return null;
+  try {
+    const value = JSON.parse(line.slice(eq + 1).trim());
+    return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string") ? value : null;
+  } catch { return null; }
+}
 
 export function wireCodex(configPath: string, agentBin: string): WireResult {
   let text = "";
@@ -68,7 +86,16 @@ export function wireCodex(configPath: string, agentBin: string): WireResult {
   const lines = text.split("\n");
   const notifyLines = lines.filter((l) => l.trimStart().startsWith("notify ="));
   if (notifyLines.some((l) => isOurCodexNotify(l, agentBin))) return { ok: true }; // idempotent
-  if (notifyLines.length > 0) return { ok: false, reason: "conflict", detail: "existing notify key" };
+  if (notifyLines.length > 1) return { ok: false, reason: "conflict", detail: "multiple notify keys" };
+  if (notifyLines.length === 1) {
+    const chain = parseCodexNotifyLine(notifyLines[0]);
+    if (!chain) return { ok: false, reason: "conflict", detail: "unsupported existing notify value" };
+    try {
+      writeFileSync(codexNotifyChainPath(configPath), JSON.stringify(chain, null, 2), { mode: 0o600 });
+      chmodSync(codexNotifyChainPath(configPath), 0o600);
+    } catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
+    text = lines.filter((l) => l !== notifyLines[0]).join("\n");
+  }
   const next = `${codexLine(agentBin)}\n${text}`; // prepend before any [table]
   try { mkdirSync(dirname(configPath), { recursive: true }); writeFileSync(configPath, next); }
   catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
@@ -81,7 +108,13 @@ export function unwireCodex(configPath: string): WireResult {
   try { text = readFileSync(configPath, "utf8"); }
   catch (e) { return { ok: false, reason: "read_error", detail: String(e) }; }
   const kept = text.split("\n").filter((l) => !(l.trimStart().startsWith("notify =") && l.includes('"notify"')));
-  try { writeFileSync(configPath, kept.join("\n")); }
+  const chainPath = codexNotifyChainPath(configPath);
+  const chain = readCodexNotifyChain(chainPath);
+  if (chain) kept.unshift(`notify = ${JSON.stringify(chain)}`);
+  try {
+    writeFileSync(configPath, kept.join("\n"));
+    rmSync(chainPath, { force: true });
+  }
   catch (e) { return { ok: false, reason: "write_error", detail: String(e) }; }
   return { ok: true };
 }

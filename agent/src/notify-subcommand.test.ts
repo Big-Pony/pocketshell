@@ -66,3 +66,25 @@ test("tool arg without cwd does not crash and skips token read", async () => {
   expect(r?.tool).toBe("kimi");
   expect(r?.ctx).toBeUndefined();
 });
+
+test("codex uses thread-id without requiring cwd", async () => {
+  const { home, restore } = tmpHome();
+  try {
+    const thread = "019abcde-aaaa-bbbb-cccc-1234567890ab";
+    const dir = join(home, ".codex", "sessions", "2026", "08", "29");
+    mkdirSync(dir, { recursive: true });
+    const event = JSON.stringify({
+      type: "event_msg",
+      payload: { type: "token_count", info: {
+        last_token_usage: { input_tokens: 42000 },
+        total_token_usage: { input_tokens: 999999 },
+        model_context_window: 258400,
+      } },
+    });
+    writeFileSync(join(dir, `rollout-now-${thread}.jsonl`), event + "\n");
+    const hook = JSON.stringify({ type: "agent-turn-complete", "thread-id": thread, "last-assistant-message": "done" });
+    const r = await parseNotifyPayload(withSession, ["codex", hook], "");
+    expect(r?.body).toBe("done");
+    expect(r?.ctx).toEqual({ used: 42000, total: 258400 });
+  } finally { restore(); }
+});

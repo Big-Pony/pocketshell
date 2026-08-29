@@ -52,8 +52,12 @@ const PARSERS: Record<AiTool, LineParser | null> = {
   },
 
   codex: (j) => {
-    if (j?.type !== "token_count") return null;
-    const info = j.info;
+    // Current Codex rollouts wrap events as
+    // { type: "event_msg", payload: { type: "token_count", info: ... } }.
+    // Keep accepting the older unwrapped shape for existing session files.
+    const event = j?.type === "event_msg" ? j.payload : j;
+    if (event?.type !== "token_count") return null;
+    const info = event.info;
     const used = info?.last_token_usage?.input_tokens;
     // total_token_usage 是会话累计值，不是当前上下文占用（openai/codex#22354）。
     // 用错了会看到一个只涨不降的数字。

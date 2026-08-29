@@ -89,6 +89,14 @@ test("codex: 用 last_token_usage 而非 total_token_usage", () => {
   expect(parseAiContext("codex", text)).toEqual({ used: 45000, total: 272000 });
 });
 
+test("codex: 解析当前 event_msg.payload 包装的 token_count", () => {
+  const wrapped = JSON.stringify({
+    type: "event_msg",
+    payload: JSON.parse(codexLine(36794, 258400)),
+  });
+  expect(parseAiContext("codex", wrapped)).toEqual({ used: 36794, total: 258400 });
+});
+
 test("codex: 无 token_count 记录返回 null", () => {
   expect(parseAiContext("codex", JSON.stringify({ type: "response_item" }))).toBeNull();
 });

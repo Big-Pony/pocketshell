@@ -89,8 +89,15 @@ export function codexSessionPath(cwd: string, _sessionId: string): string | null
   // 是对的，多项目场景下至少不会比原来更差。
   const files = jsonlFilesByMtimeDesc(codexSessionsBase());
   if (files.length === 0) return null;
+  // The official notify payload's `thread-id` is the rollout/session UUID and
+  // is more precise than cwd (several concurrent threads can share one cwd).
+  // Match it first; older Codex versions or synthetic callers may omit it.
+  if (_sessionId) {
+    const exact = files.find((f) => f.endsWith(`-${_sessionId}.jsonl`));
+    if (exact) return exact;
+  }
   for (const f of files) {
-    if (rolloutCwd(f) === cwd) return f;
+    if (cwd && rolloutCwd(f) === cwd) return f;
   }
   return files[0];
 }

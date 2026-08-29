@@ -17,6 +17,10 @@ import { AGENT_VERSION } from "./version";
 import { ensureLocalIdentity } from "./codesign-provision";
 import { parseStatuslinePayload } from "./statusline-payload";
 import { chainPathOf, readChain } from "./statusline-wire";
+import { resolveNotifyRuntime } from "./notify-runtime";
+import { codexNotifyChainPath, readCodexNotifyChain } from "./notify-wire";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /** Just enough of startServer's shape for the boot branch (avoids an import cycle). */
 export type StartServerFn = (deps: { config: AgentConfig }) => unknown;
@@ -75,14 +79,36 @@ export function runNotifySubcommand(cliArgv: string[]): void {
   void (async () => {
     try {
       const { parseNotifyPayload } = await import("./notify-subcommand");
+      const hookArgv = cliArgv.slice(1);
+      if (hookArgv[0] === "codex") {
+        const chain = readCodexNotifyChain(codexNotifyChainPath(join(homedir(), ".codex", "config.toml")));
+        if (chain) {
+          try { Bun.spawn([...chain, ...hookArgv.slice(1)], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }).unref(); }
+          catch { /* a user's old notifier must not block PocketShell */ }
+        }
+      }
+      const runtime = resolveNotifyRuntime(process.env, {
+        tmuxSession: (pane) => {
+          try {
+            const p = Bun.spawnSync(["tmux", "display-message", "-p", "-t", pane, "#{session_name}"], { stderr: "ignore" });
+            if (p.exitCode !== 0) return null;
+            return new TextDecoder().decode(p.stdout).trim() || null;
+          } catch { return null; }
+        },
+        loadConfig,
+      });
+      if (!runtime) { process.exit(0); return; }
       let stdin = "";
       if (!process.stdin.isTTY) {
         try { stdin = await Bun.stdin.text(); } catch { /* no stdin */ }
       }
-      const p = await parseNotifyPayload(process.env, cliArgv.slice(1), stdin);
+      const p = await parseNotifyPayload({
+        ...process.env,
+        POCKETSHELL_NOTIFY_SESSION: runtime.sessionId,
+      }, hookArgv, stdin);
       if (!p) { process.exit(0); return; }      // not a PocketShell session
-      const url = process.env.POCKETSHELL_NOTIFY_URL;
-      const token = process.env.POCKETSHELL_NOTIFY_TOKEN;
+      const url = runtime.url;
+      const token = runtime.token;
       if (url && token) {
         const ctl = new AbortController();
         const timeoutId = setTimeout(() => ctl.abort(), 3000);

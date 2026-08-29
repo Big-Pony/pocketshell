@@ -55,8 +55,11 @@ export async function parseNotifyPayload(
     // 永远指向不存在的路径。
     // codex 例外：它按 cwd 从 rollout 里找，sessionId 用不上（见 codexSessionPath）。
     const cwd = typeof j.cwd === "string" ? j.cwd : "";
-    const toolSessionId = typeof j.session_id === "string" ? j.session_id : "";
-    if (cwd && (toolSessionId || tool === "codex")) {
+    const toolSessionId = typeof j.session_id === "string" ? j.session_id
+      : typeof j["thread-id"] === "string" ? j["thread-id"] : "";
+    // Codex's documented notify payload has thread-id but no cwd. Other tools
+    // still need cwd to construct their transcript path.
+    if ((tool === "codex" && (toolSessionId || cwd)) || (tool !== "codex" && cwd && toolSessionId)) {
       try {
         const tail = await readTail(tool, cwd, toolSessionId);
         ctx = parseAiContext(tool, tail) ?? undefined;

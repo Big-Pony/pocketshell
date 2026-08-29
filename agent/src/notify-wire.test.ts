@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi } from "./notify-wire";
+import { wireClaude, unwireClaude, wireCodex, unwireCodex, wireOpencode, unwireOpencode, wireKimi, unwireKimi, codexNotifyChainPath, readCodexNotifyChain } from "./notify-wire";
 
 const KIMI_MARK_LITERAL = "# pocketshell-notify";
 const bin = "/usr/local/bin/pocketshell-agent";
@@ -76,13 +76,17 @@ test("codex wire is idempotent", () => {
   expect(n).toBe(1);
 });
 
-test("codex existing foreign notify -> conflict", () => {
+test("codex existing foreign notify is chained and restored on unwire", () => {
   const dir = mkdtempSync(join(tmpdir(), "cx-"));
   const f = join(dir, "config.toml");
-  writeFileSync(f, `notify = ["other"]\n`);
+  writeFileSync(f, `notify = ["other", "fixed arg"]\n[tui]\n`);
   const r = wireCodex(f, bin);
-  expect(r.ok).toBe(false);
-  expect(r.reason).toBe("conflict");
+  expect(r.ok).toBe(true);
+  expect(readCodexNotifyChain(codexNotifyChainPath(f))).toEqual(["other", "fixed arg"]);
+  expect(readFileSync(f, "utf8").split("\n")[0]).toBe(`notify = ["${bin}", "notify", "codex"]`);
+  expect(unwireCodex(f).ok).toBe(true);
+  expect(readFileSync(f, "utf8")).toContain(`notify = ["other","fixed arg"]`);
+  expect(existsSync(codexNotifyChainPath(f))).toBe(false);
 });
 
 test("codex unwire removes our line only", () => {

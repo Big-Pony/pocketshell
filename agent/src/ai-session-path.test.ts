@@ -123,6 +123,20 @@ test("codexSessionPath 按 rollout 首行的 cwd 选文件，不串会话", () =
   } finally { restore(); }
 });
 
+test("codexSessionPath 优先按 notify 的 thread-id 精确选 rollout", () => {
+  const { home, restore } = tmpHome();
+  try {
+    const base = join(home, ".codex", "sessions", "2026", "08", "29");
+    mkdirSync(base, { recursive: true });
+    const a = join(base, "rollout-2026-08-29T00-00-00-thread-a.jsonl");
+    const b = join(base, "rollout-2026-08-29T00-00-01-thread-b.jsonl");
+    const meta = JSON.stringify({ type: "session_meta", payload: { cwd: "/same" } }) + "\n";
+    writeFileSync(a, meta);
+    writeFileSync(b, meta);
+    expect(codexSessionPath("", "thread-a")).toBe(a);
+  } finally { restore(); }
+});
+
 test("codexSessionPath 在 cwd 匹配不到时回落到最新文件", () => {
   const { home, restore } = tmpHome();
   try {
