@@ -18,6 +18,7 @@ function stubConn(rpc: ReturnType<typeof vi.fn>) {
     onOutput: () => () => {},
     onInput: () => () => {},
     attach: () => {},
+    detach: () => {},
     resize: () => {},
     rpc,
     hasFeature: (n: string) => n === "diag",
@@ -194,6 +195,64 @@ test("recovery diagnostics expose mode, queue state and byte counts without term
   const encoded = JSON.stringify(reports[0]);
   expect(encoded).not.toContain("SECRET-LIVE-COMMAND");
   expect(encoded).not.toContain("SECRET-SNAPSHOT-CONTENT");
+});
+
+test.each([
+  ["success", false],
+  ["failure", true],
+] as const)("offline recovery %s reports its real queued state and zero live bytes", async (_label, fail) => {
+  let historyCall = 0;
+  let settleOffline!: (value?: unknown) => void;
+  const rpc = vi.fn().mockImplementation((method: string) => {
+    if (method === "term.history") {
+      historyCall++;
+      if (historyCall === 1) {
+        return Promise.resolve({ data: toB64(new TextEncoder().encode("initial\n")), seq: 4 });
+      }
+      return new Promise((resolve, reject) => {
+        settleOffline = fail
+          ? () => reject(new Error("disconnected"))
+          : (value?: unknown) => resolve(value);
+      });
+    }
+    if (method === "term.paneInfo") {
+      return Promise.resolve({ currentCommand: "zsh", alternateOn: false, isShell: true });
+    }
+    return Promise.resolve({});
+  });
+  let requestReseed: ((trigger: any) => void) | undefined;
+  const props = {
+    conn: stubConn(rpc),
+    sessionId: `s-offline-${_label}`,
+    active: true,
+    streaming: true,
+    onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+  };
+  const { rerender } = render(Terminal, { props });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await rerender({ ...props, streaming: false });
+  rpc.mockClear();
+  await rerender({ ...props, streaming: true });
+  requestReseed?.("resync");
+  requestReseed?.("resync");
+
+  settleOffline(fail ? undefined : {
+    data: toB64(new TextEncoder().encode("SECRET-OFFLINE-SNAPSHOT\n")),
+    seq: 9,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const report = diagCalls(rpc)
+    .map((call) => call[1] as Record<string, unknown>)
+    .find((payload) => payload.kind === "reseed" && payload.trigger === "seed");
+  expect(report).toMatchObject({ mode: "offline", queued: true, liveBytes: 0 });
+  if (fail) {
+    expect(report).toHaveProperty("error", "disconnected");
+    // The queued resync must not bypass offline backoff and downgrade the
+    // detached terminal to an online recovery before it can seed-attach.
+    expect(historyCall).toBe(2);
+  }
+  expect(JSON.stringify(report)).not.toContain("SECRET-OFFLINE-SNAPSHOT");
 });
 
 test("recovery diagnostics make no RPC when the agent lacks the diag feature", async () => {

@@ -906,8 +906,65 @@
     let offlineQueued = false;
     let seedQueuedAttempt: number | null = null;
     let drainHistoryQueue: () => void = () => {};
+    type RecoveryRetry = {
+      mode: "online" | "offline";
+      trigger: ReseedTrigger;
+      attempt: number;
+      generation: number;
+      activeGeneration: number;
+    };
+    let recoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let recoveryRetryQueued: RecoveryRetry | null = null;
 
-    const runReseed = async (trigger: ReseedTrigger) => {
+    const cancelRecoveryRetry = () => {
+      if (recoveryRetryTimer) clearTimeout(recoveryRetryTimer);
+      recoveryRetryTimer = undefined;
+      recoveryRetryQueued = null;
+    };
+
+    const scheduleRecoveryRetry = (
+      mode: RecoveryRetry["mode"], trigger: ReseedTrigger, attempt: number,
+      generation: number, retryActiveGeneration: number,
+    ): boolean => {
+      if (attempt + 1 >= SEED_MAX_ATTEMPTS) {
+        seedRetrying = false;
+        seedFailed = true;
+        return false;
+      }
+      cancelRecoveryRetry();
+      const retry: RecoveryRetry = {
+        mode,
+        trigger,
+        attempt: attempt + 1,
+        generation,
+        activeGeneration: retryActiveGeneration,
+      };
+      seeding = false;
+      seedFailed = false;
+      seedRetrying = true;
+      recoveryRetryTimer = setTimeout(() => {
+        recoveryRetryTimer = undefined;
+        seedRetrying = false;
+        const generationCurrent = retry.generation === recoveryGeneration;
+        const activeCurrent = retry.activeGeneration === activeGeneration;
+        if (!destroyed && active && streaming && generationCurrent && activeCurrent) {
+          recoveryRetryQueued = retry;
+        } else if (!destroyed && streaming && generationCurrent && needsReseed) {
+          // A hide/show during backoff invalidates the token just like it does
+          // during decode, but activation must retain the original recovery
+          // mode (offline still needs a seeded attach).
+          if (retry.mode === "offline") offlineQueued = true;
+          else {
+            reseedQueued = true;
+            queuedReseedTrigger = retry.trigger;
+          }
+        }
+        drainHistoryQueue();
+      }, seedRetryDelayMs(attempt));
+      return true;
+    };
+
+    const runReseed = async (trigger: ReseedTrigger, attempt = 0) => {
       reseedInFlight = true;
       historyInFlight = true;
       historyMode = "online";
@@ -988,6 +1045,8 @@
                 && currentBuffer === "normal";
               if (committed && !dirtyWindow) {
                 needsReseed = false;
+                seedFailed = false;
+                seedRetrying = false;
                 flushPending();
               } else needsReseed = true;
               reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
@@ -1014,6 +1073,9 @@
             mode: "online", queued: reseedQueued, liveBytes: 0,
           });
         needsReseed = true;
+        if (!destroyed && active && streaming && generation === recoveryGeneration) {
+          scheduleRecoveryRetry("online", trigger, attempt, generation, activeGeneration);
+        }
       } finally {
         reseedInFlight = false;
         historyInFlight = false;
@@ -1027,7 +1089,7 @@
       needsReseed = true;
       queuedReseedTrigger = trigger;
       if (!active || !streaming || destroyed || currentBuffer !== "normal") return;
-      if (historyInFlight) {
+      if (historyInFlight || recoveryRetryTimer || recoveryRetryQueued) {
         reseedQueued = true;
         return;
       }
@@ -1036,6 +1098,7 @@
     }
     recoverOnActivate = () => {
       if (!needsReseed) return;
+      if (recoveryRetryTimer) return;
       if (offlineQueued) { drainHistoryQueue(); return; }
       if (historyMode !== "offline") requestReseed(queuedReseedTrigger);
     };
@@ -1140,7 +1203,7 @@
       }
     };
 
-    const resumeFromHistory = async () => {
+    const resumeFromHistory = async (attempt = 0) => {
       if (historyInFlight) {
         offlineQueued = true;
         return;
@@ -1178,9 +1241,13 @@
           commitSnapshot(snapshot, null, () => {
             if (resumeIsCurrent()) {
               reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
-                term.buffer.active.length, snapshot.text.length, false);
+                term.buffer.active.length, snapshot.text.length, false, undefined, {
+                  mode: "offline", queued: reseedQueued, liveBytes: 0,
+                });
               needsReseed = reseedQueued;
               seeding = false;
+              seedFailed = false;
+              seedRetrying = false;
               conn.attach(sessionId, snapshot.seq, { seed: true });
             } else queueOfflineRetry();
             resolve();
@@ -1189,11 +1256,12 @@
       } catch (e) {
         if (!resumeIsCurrent()) { queueOfflineRetry(); return; }
         reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
-          term.buffer.active.length, 0, false, errLabel(e));
+          term.buffer.active.length, 0, false, errLabel(e), {
+            mode: "offline", queued: reseedQueued, liveBytes: 0,
+          });
         seeding = false;
-        seedRetrying = false;
-        seedFailed = true;
         needsReseed = true;
+        scheduleRecoveryRetry("offline", "seed", attempt, gen, activeGen);
       } finally {
         historyInFlight = false;
         historyMode = null;
@@ -1203,6 +1271,28 @@
 
     drainHistoryQueue = () => {
       if (historyInFlight || destroyed) return;
+      // A failed recovery owns the lane while its backoff is pending. Requests
+      // arriving in that window stay coalesced; otherwise an offline failure
+      // plus resync would immediately start an online request and bypass both
+      // the delay and the required seeded attach.
+      if (recoveryRetryTimer) return;
+      if (recoveryRetryQueued) {
+        const retry = recoveryRetryQueued;
+        recoveryRetryQueued = null;
+        if (retry.generation === recoveryGeneration
+          && retry.activeGeneration === activeGeneration && active && streaming) {
+          if (retry.mode === "offline") void resumeFromHistory(retry.attempt);
+          else void runReseed(retry.trigger, retry.attempt);
+          return;
+        }
+        if (active && streaming && needsReseed && retry.generation === recoveryGeneration) {
+          if (retry.mode === "offline") offlineQueued = true;
+          else {
+            reseedQueued = true;
+            queuedReseedTrigger = retry.trigger;
+          }
+        }
+      }
       if (offlineQueued && active && streaming) {
         offlineQueued = false;
         void resumeFromHistory();
@@ -1224,6 +1314,7 @@
     /** 手动重试。从第 0 次重新计数；离线恢复失败则保留旧屏并重试恢复。 */
     retrySeed = () => {
       if (destroyed || !streaming) return;
+      cancelRecoveryRetry();
       if (needsReseed && hasStreamed) void resumeFromHistory();
       else void seedFromHistory(0);
     };
@@ -1234,7 +1325,9 @@
       pendingOut.take();
       pendingOut.clearDirty();
       cancelSeedRetry();
+      cancelRecoveryRetry();
       seedQueuedAttempt = null;
+      reseedQueued = false;
       needsReseed = true;
       seeding = false;
       seedRetrying = false;
@@ -1497,6 +1590,7 @@
       unexposeForDiag();
       // 卸载时挂起的首屏重试必须撤掉：它会向一个已 dispose 的终端写字节。
       cancelSeedRetry();
+      cancelRecoveryRetry();
       stopPoll(); // also drops a pending input-debounced classify
       // Release the WebGL addon BEFORE the terminal: it also stops any pending
       // context-loss handler from rebuilding a renderer onto a dead terminal.

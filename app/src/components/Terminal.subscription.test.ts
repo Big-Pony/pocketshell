@@ -532,3 +532,204 @@ test("an initial retry due during online recovery runs after that recovery", asy
     vi.useRealTimers();
   }
 });
+
+test("a failed online resync backs off once and succeeds automatically", async () => {
+  vi.useFakeTimers();
+  try {
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      if (call === 2) return Promise.reject(new Error("rpc_timeout"));
+      return Promise.resolve({ data: toB64(new TextEncoder().encode("recovered\n")), seq: 20 });
+    });
+    let term: XTerm | undefined;
+    let requestReseed: ((trigger: any) => void) | undefined;
+    render(Terminal, {
+      props: {
+        conn: conn as any,
+        sessionId: "A",
+        active: true,
+        streaming: true,
+        onReady: (_id: string, value: XTerm) => { term = value; },
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const write = vi.fn((_data: string | Uint8Array, callback?: () => void) => callback?.());
+    (term as any).write = write;
+
+    requestReseed?.("resync");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls(conn)).toBe(2);
+    await vi.advanceTimersByTimeAsync(799);
+    expect(historyCalls(conn)).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(historyCalls(conn)).toBe(3);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(String(write.mock.calls[0][0])).toContain("recovered");
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(historyCalls(conn)).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a failed offline resume retries after reconnect and seed-attaches the snapshot", async () => {
+  vi.useFakeTimers();
+  try {
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      if (call === 2) return Promise.reject(new Error("disconnected"));
+      return Promise.resolve({ data: toB64(new TextEncoder().encode("reconnected\n")), seq: 33 });
+    });
+    let term: XTerm | undefined;
+    const props = {
+      conn: conn as any,
+      sessionId: "A",
+      active: true,
+      streaming: true,
+      onReady: (_id: string, value: XTerm) => { term = value; },
+    };
+    const { rerender } = render(Terminal, { props });
+    await vi.advanceTimersByTimeAsync(0);
+    await rerender({ ...props, streaming: false });
+    conn.attach.mockClear();
+    const write = vi.fn((_data: string | Uint8Array, callback?: () => void) => callback?.());
+    (term as any).write = write;
+
+    await rerender({ ...props, streaming: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls(conn)).toBe(2);
+    expect(conn.attach).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(800);
+    expect(historyCalls(conn)).toBe(3);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(conn.attach).toHaveBeenCalledWith("A", 33, { seed: true });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("offline retry expiring while hidden preserves seeded attach for activation", async () => {
+  vi.useFakeTimers();
+  try {
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      if (call === 2) return Promise.reject(new Error("disconnected"));
+      return Promise.resolve({ data: toB64(new TextEncoder().encode("active-again\n")), seq: 44 });
+    });
+    let term: XTerm | undefined;
+    const props = {
+      conn: conn as any,
+      sessionId: "A",
+      active: true,
+      streaming: true,
+      onReady: (_id: string, value: XTerm) => { term = value; },
+    };
+    const view = render(Terminal, { props });
+    await vi.advanceTimersByTimeAsync(0);
+    await view.rerender({ ...props, streaming: false });
+    conn.attach.mockClear();
+    (term as any).write = vi.fn((_data: string | Uint8Array, callback?: () => void) => callback?.());
+
+    await view.rerender({ ...props, streaming: true });
+    await vi.advanceTimersByTimeAsync(0);
+    await view.rerender({ ...props, active: false });
+    await vi.advanceTimersByTimeAsync(800);
+    expect(historyCalls(conn)).toBe(2);
+
+    await view.rerender({ ...props, active: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls(conn)).toBe(3);
+    expect(conn.attach).toHaveBeenCalledWith("A", 44, { seed: true });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("online recovery retry is bounded and leaves the manual retry entry", async () => {
+  vi.useFakeTimers();
+  try {
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      return Promise.reject(new Error("rpc_timeout"));
+    });
+    let requestReseed: ((trigger: any) => void) | undefined;
+    const { container } = render(Terminal, {
+      props: {
+        conn: conn as any,
+        sessionId: "A",
+        active: true,
+        streaming: true,
+        onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    requestReseed?.("resync");
+    await vi.advanceTimersByTimeAsync(3_200);
+    expect(historyCalls(conn)).toBe(4); // initial + three bounded recovery attempts
+    expect(container.querySelector(".term-seed-retry")).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(historyCalls(conn)).toBe(4);
+    (container.querySelector(".term-seed-retry") as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls(conn)).toBe(5);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each(["stop", "unmount"] as const)("%s cancels a scheduled online recovery retry", async (action) => {
+  vi.useFakeTimers();
+  try {
+    let call = 0;
+    const conn = stubConn(() => {
+      call++;
+      if (call === 1) return Promise.resolve({
+        data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+      });
+      return Promise.reject(new Error("rpc_timeout"));
+    });
+    let requestReseed: ((trigger: any) => void) | undefined;
+    const props = {
+      conn: conn as any,
+      sessionId: "A",
+      active: true,
+      streaming: true,
+      onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+    };
+    const view = render(Terminal, { props });
+    await vi.advanceTimersByTimeAsync(0);
+    requestReseed?.("resync");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls(conn)).toBe(2);
+
+    if (action === "stop") await view.rerender({ ...props, streaming: false });
+    else view.unmount();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(historyCalls(conn)).toBe(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
