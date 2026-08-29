@@ -122,7 +122,7 @@ const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: unknown) => new TextDecoder().decode(b as Uint8Array);
 
 function propsFor(conn: ReturnType<typeof stubConn>, active: boolean, closed = false) {
-  return { conn: conn as unknown as Connection, sessionId: "s1", active, closed, fontSize: 14 };
+  return { conn: conn as unknown as Connection, sessionId: "s1", active, streaming: true, closed, fontSize: 14 };
 }
 
 // Wait until onMount finished. 首屏现在走 seedFromHistory：先拉 term.history
@@ -457,7 +457,7 @@ afterAll(() => {
 test("hardens the xterm helper textarea against mobile IME", async () => {
   xtermCtl.useMock = false; // this one needs the real xterm DOM
   try {
-    const { container } = render(TerminalView, { props: { conn: imeStubConn(), sessionId: "s1", active: true } });
+    const { container } = render(TerminalView, { props: { conn: imeStubConn(), sessionId: "s1", active: true, streaming: true } });
     // Wait a tick for onMount's async body (font load + term.open).
     await new Promise((r) => setTimeout(r, 0));
     const ta = container.querySelector("textarea.xterm-helper-textarea") as HTMLTextAreaElement | null;

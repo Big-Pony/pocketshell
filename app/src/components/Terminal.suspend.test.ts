@@ -40,14 +40,14 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 test("switching a terminal between hidden and visible never throws", async () => {
   // 没有 WebGL 时 suspend/resume 都是 no-op，但绝不能因此炸掉切 tab 这条主路径。
   const { rerender } = render(Terminal, {
-    props: { conn: stubConn(), sessionId: "s1", active: true },
+    props: { conn: stubConn(), sessionId: "s1", active: true, streaming: true },
   });
   await tick();
 
   for (let i = 0; i < 3; i++) {
-    await rerender({ conn: stubConn(), sessionId: "s1", active: false });
+    await rerender({ conn: stubConn(), sessionId: "s1", active: false, streaming: true });
     await tick();
-    await rerender({ conn: stubConn(), sessionId: "s1", active: true });
+    await rerender({ conn: stubConn(), sessionId: "s1", active: true, streaming: true });
     await tick();
   }
   // 走到这里没抛就是通过；上下文计数在 webgl-renderer.test.ts 里断言。
@@ -58,7 +58,7 @@ test("a terminal that mounts hidden does not take a context", async () => {
   // 打开新 tab 时，其它 tab 是隐藏挂载的。如果隐藏挂载也拿上下文，那么「一次开
   // 很多 tab」照样会顶到上限——这正是原来的行为。
   const { unmount } = render(Terminal, {
-    props: { conn: stubConn(), sessionId: "s2", active: false },
+    props: { conn: stubConn(), sessionId: "s2", active: false, streaming: true },
   });
   await tick();
   expect(() => unmount()).not.toThrow();

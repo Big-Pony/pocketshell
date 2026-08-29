@@ -103,6 +103,7 @@
     conn,
     sessionId,
     active,
+    streaming,
     closed = false,
     fontSize = 14,
     fontFamily = "maple-mono",
@@ -113,6 +114,7 @@
     conn: Connection;
     sessionId: string;
     active: boolean;
+    streaming: boolean;
     closed?: boolean;
     fontSize?: number;
     fontFamily?: FontId;
@@ -150,6 +152,11 @@
   let refit: () => void = () => {};
   // Same lifecycle as refit: flushes/reseeds the output stashed while hidden.
   let flushPending: () => void = () => {};
+  // Delivery intent is independent of visibility. App may keep a hidden tab
+  // streaming during the short switch-back grace window.
+  let startStreaming: () => void = () => {};
+  let stopStreaming: () => void = () => {};
+  let streamingApplied = false;
   // Same lifecycle again: start/pause the classifyPane poll with visibility
   // (A4 — only the active, live session polls tmux).
   let startPoll: () => void = () => {};
@@ -786,6 +793,7 @@
     let windowBuf: PendingBuffer | null = null;
     const unsubscribeOutput = conn.onOutput((f) => {
       if (f.sessionId !== sessionId) return;
+      if (!streaming) return;
       probeFrames++;
       probeBytes += f.data.byteLength;
       if (active) { term.write(f.data); windowBuf?.push(f.data, f.seq); return; }
@@ -812,6 +820,8 @@
     // 故障后来又回来了。真正的解法是 xterm 上游注释里写的那条：用流内 RIS。
     // 载荷拼装与代际闸门在 lib/term/reseed.ts，那里有完整的实测记录。
     const reseedGate = new ReseedGate();
+    let recoveryGeneration = 0;
+    let needsReseed = false;
 
     /**
      * 上报一次重灌的诊断。
@@ -856,6 +866,26 @@
     const errLabel = (e: unknown): string => {
       const x = e as { code?: string; message?: string } | null;
       return String(x?.code ?? x?.message ?? "error").slice(0, 120);
+    };
+
+    type HistorySnapshot = { text: string; seq: number };
+    const loadHistorySnapshot = async (lines: number): Promise<HistorySnapshot> => {
+      const h = (await conn.rpc(
+        "term.history", { session: sessionId, lines },
+        { expectBytes: historyExpectBytes(lines) },
+      )) as TermHistoryResult;
+      return {
+        text: h?.data ? await decodeHistoryData(h.data, h.enc) : "",
+        seq: typeof h?.seq === "number" ? h.seq : 0,
+      };
+    };
+
+    const commitSnapshot = (
+      snapshot: HistorySnapshot,
+      live: Uint8Array | null,
+      onCommitted: () => void,
+    ) => {
+      term.write(concatReseedWrite(buildReseedPayload(snapshot.text), live), onCommitted);
     };
 
     const reloadHistory = async (trigger: ReseedTrigger = "alt-normal") => {
@@ -943,7 +973,14 @@
     // 现在：退避重试 SEED_MAX_ATTEMPTS 次，全用尽后**保留可见且可点的重试入口**，
     // 而不是让提示静默消失。
     let seedTimer: ReturnType<typeof setTimeout> | undefined;
+    let hasStreamed = false;
+    const cancelSeedRetry = () => {
+      if (!seedTimer) return;
+      clearTimeout(seedTimer);
+      seedTimer = undefined;
+    };
     const seedFromHistory = async (attempt = 0) => {
+      const gen = recoveryGeneration;
       // 重试成功后这三个必须一起归位：只清 seeding 的话，内容出来了却一直盖着
       // 一层「正在重试」的半透明提示。
       seedFailed = false;
@@ -954,18 +991,15 @@
       const bytesAtStart = probeBytes;
       const lenBefore = term.buffer.active.length;
       try {
-        const h = (await conn.rpc(
-          "term.history", { session: sessionId, lines: historyLines },
-          { expectBytes: historyExpectBytes(historyLines) },
-        )) as TermHistoryResult;
-        if (destroyed) return;
+        const snapshot = await loadHistorySnapshot(historyLines);
+        if (destroyed || !streaming || gen !== recoveryGeneration) return;
         let text = "";
-        if (h?.data) {
+        if (snapshot.text) {
           // 保持首屏语义不变：**不带 RIS**（终端此刻本就是空的，见上方注释），
           // 只做行规范化。这里刻意不走 buildReseedPayload —— 那是重灌路径的
           // 载荷，会多一个 RIS 前缀；两者共用 normalizeReseedRows，所以「结尾
           // 那个换行要去掉」（光标停在快照最后一行）对首屏同样成立。
-          text = normalizeReseedRows(await decodeHistoryData(h.data, h.enc));
+          text = normalizeReseedRows(snapshot.text);
           term.write(text, () => {
             reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
               term.buffer.active.length, text.length, false);
@@ -974,10 +1008,11 @@
           reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
             term.buffer.active.length, 0, false);
         }
-        conn.attach(sessionId, h?.seq ?? 0, { seed: true });
+        conn.attach(sessionId, snapshot.seq, { seed: true });
         seeding = false;
+        needsReseed = false;
       } catch (e) {
-        if (destroyed) return;
+        if (destroyed || !streaming || gen !== recoveryGeneration) return;
         // 首屏路径此前**零埋点**，而它才是「重进应用」的主路径 —— 首屏空白在日志里
         // 一个直接证据都没有。这条补上后才谈得上验证修复。
         reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
@@ -998,8 +1033,56 @@
         seedFailed = true;
       }
     };
-    /** 手动重试（模板里的按钮）。从第 0 次重新计数，用户愿意再等就再给三次。 */
-    retrySeed = () => { if (!destroyed) void seedFromHistory(0); };
+
+    const resumeFromHistory = async () => {
+      const gen = ++recoveryGeneration;
+      const activeAtStart = active;
+      const startedAt = Date.now();
+      const framesAtStart = probeFrames;
+      const bytesAtStart = probeBytes;
+      const lenBefore = term.buffer.active.length;
+      seedFailed = false;
+      seedRetrying = false;
+      seeding = true;
+      try {
+        const snapshot = await loadHistorySnapshot(historyLines);
+        if (destroyed || !streaming || gen !== recoveryGeneration || active !== activeAtStart) return;
+        commitSnapshot(snapshot, null, () => {
+          if (destroyed || !streaming || gen !== recoveryGeneration || active !== activeAtStart) return;
+          reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
+            term.buffer.active.length, snapshot.text.length, false);
+          needsReseed = false;
+          seeding = false;
+          conn.attach(sessionId, snapshot.seq, { seed: true });
+        });
+      } catch (e) {
+        if (destroyed || !streaming || gen !== recoveryGeneration) return;
+        reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
+          term.buffer.active.length, 0, false, errLabel(e));
+        seeding = false;
+        seedRetrying = false;
+        seedFailed = true;
+        needsReseed = true;
+      }
+    };
+
+    /** 手动重试。从第 0 次重新计数；离线恢复失败则保留旧屏并重试恢复。 */
+    retrySeed = () => {
+      if (destroyed || !streaming) return;
+      if (needsReseed && hasStreamed) void resumeFromHistory();
+      else void seedFromHistory(0);
+    };
+
+    stopStreaming = () => {
+      recoveryGeneration++;
+      conn.detach(sessionId);
+      pendingOut.take();
+      pendingOut.clearDirty();
+      cancelSeedRetry();
+      needsReseed = true;
+      seeding = false;
+      seedRetrying = false;
+    };
 
     // Activation path (R1). A dirty stash means the byte stream is incomplete,
     // so replaying it would corrupt the screen: reseed from tmux instead — or,
@@ -1145,7 +1228,14 @@
     // 首屏走 history 快照而不是 attach 重放：tmux 的 capture-pane 是真实画面，
     // 而 replay 环形缓冲只有 256KB 且只覆盖「agent 启动以来」，接管外部或
     // 重启前的 tmux 会话时可能是空的。seedFromHistory 内部负责 attach。
-    void seedFromHistory();
+    startStreaming = () => {
+      if (!hasStreamed) {
+        hasStreamed = true;
+        void seedFromHistory();
+        return;
+      }
+      void resumeFromHistory();
+    };
     // 只有活动的 tab 才在挂载时 refit。非活动 tab 此刻是 display:none，量不到自己，
     // 而它上报的塌陷尺寸会把**共享的 tmux 会话**拽窄、连带污染别人的历史。
     // refit() 内部也有 isMeasurable 守卫，这里显式判 active 是让意图落在代码上：
@@ -1242,7 +1332,7 @@
       unsubscribeRender?.();
       unexposeForDiag();
       // 卸载时挂起的首屏重试必须撤掉：它会向一个已 dispose 的终端写字节。
-      if (seedTimer) { clearTimeout(seedTimer); seedTimer = undefined; }
+      cancelSeedRetry();
       stopPoll(); // also drops a pending input-debounced classify
       // Release the WebGL addon BEFORE the terminal: it also stops any pending
       // context-loss handler from rebuilding a renderer onto a dead terminal.
@@ -1250,6 +1340,17 @@
       term?.dispose();
     };
     mounted = true;
+  });
+
+  // Apply stream delivery intent only after xterm and its connection callbacks
+  // exist. Re-rendering the same value is a no-op; visibility changes alone do
+  // not tear down a grace stream.
+  $effect(() => {
+    if (!mounted) return;
+    if (streaming === streamingApplied) return;
+    streamingApplied = streaming;
+    if (streaming) startStreaming();
+    else stopStreaming();
   });
 
   // Re-fit when this session becomes visible (xterm can't measure while hidden).

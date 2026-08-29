@@ -74,7 +74,7 @@ describe("1a · term.history 的死线记账", () => {
     const rpc = baseRpc(() => Promise.resolve(hist("hello\n")));
     const { conn } = stubConn(rpc);
     let reseed: ((t: any) => void) | undefined;
-    render(Terminal, { props: { conn, sessionId: "s-eb", active: true, historyLines: 1000, onReseedReady: (_i: string, f: any) => { reseed = f; } } });
+    render(Terminal, { props: { conn, sessionId: "s-eb", active: true, streaming: true, historyLines: 1000, onReseedReady: (_i: string, f: any) => { reseed = f; } } });
     await tick();
 
     // 首屏 seed 这一次
@@ -98,7 +98,7 @@ describe("1c · 埋点：失败要上报，bufferLenAfter 要在 write 回调里
     const rpc = baseRpc(() => Promise.resolve(hist(many)));
     const { conn } = stubConn(rpc);
     let reseed: ((t: any) => void) | undefined;
-    render(Terminal, { props: { conn, sessionId: "s-len", active: true, onReseedReady: (_i: string, f: any) => { reseed = f; } } });
+    render(Terminal, { props: { conn, sessionId: "s-len", active: true, streaming: true, onReseedReady: (_i: string, f: any) => { reseed = f; } } });
     await tick();
     rpc.mockClear();
 
@@ -116,7 +116,7 @@ describe("1c · 埋点：失败要上报，bufferLenAfter 要在 write 回调里
     const rpc = baseRpc(() => Promise.reject(Object.assign(new Error("rpc_timeout"), { code: "rpc_timeout" })));
     const { conn } = stubConn(rpc);
     let reseed: ((t: any) => void) | undefined;
-    render(Terminal, { props: { conn, sessionId: "s-fail", active: true, onReseedReady: (_i: string, f: any) => { reseed = f; } } });
+    render(Terminal, { props: { conn, sessionId: "s-fail", active: true, streaming: true, onReseedReady: (_i: string, f: any) => { reseed = f; } } });
     await tick(10);
     rpc.mockClear();
 
@@ -132,7 +132,7 @@ describe("1c · 埋点：失败要上报，bufferLenAfter 要在 write 回调里
   test("seedFromHistory 失败必须上报 trigger:\"seed\" —— 首屏此前零埋点", async () => {
     const rpc = baseRpc(() => Promise.reject(new Error("rpc_timeout")));
     const { conn } = stubConn(rpc);
-    render(Terminal, { props: { conn, sessionId: "s-seedfail", active: true } });
+    render(Terminal, { props: { conn, sessionId: "s-seedfail", active: true, streaming: true } });
     await tick(10);
 
     const reports = diagOf(rpc, "seed");
@@ -143,7 +143,7 @@ describe("1c · 埋点：失败要上报，bufferLenAfter 要在 write 回调里
   test("seedFromHistory 成功也上报 —— 没有成功基线就分不清「变好了」和「没人用」", async () => {
     const rpc = baseRpc(() => Promise.resolve(hist("ok\n")));
     const { conn } = stubConn(rpc);
-    render(Terminal, { props: { conn, sessionId: "s-seedok", active: true } });
+    render(Terminal, { props: { conn, sessionId: "s-seedok", active: true, streaming: true } });
     await tick(10);
 
     const reports = diagOf(rpc, "seed");
@@ -162,7 +162,7 @@ describe("1b · 首屏失败不再是吸收态", () => {
     });
     const { conn } = stubConn(rpc);
     let xterm: XTerm | undefined;
-    render(Terminal, { props: { conn, sessionId: "s-retry", active: true, onReady: (_i: string, t: XTerm) => { xterm = t; } } });
+    render(Terminal, { props: { conn, sessionId: "s-retry", active: true, streaming: true, onReady: (_i: string, t: XTerm) => { xterm = t; } } });
     await tick(10);
     expect(calls).toBe(1); // 还没到重试点
 
@@ -179,7 +179,7 @@ describe("1b · 首屏失败不再是吸收态", () => {
       return calls === 1 ? Promise.reject(new Error("rpc_timeout")) : Promise.resolve(hist("OK\n"));
     });
     const { conn } = stubConn(rpc);
-    const { container } = render(Terminal, { props: { conn, sessionId: "s-clear", active: true } });
+    const { container } = render(Terminal, { props: { conn, sessionId: "s-clear", active: true, streaming: true } });
     await tick(1500);
 
     expect(container.querySelector(".term-seed")).toBeNull();
@@ -189,7 +189,7 @@ describe("1b · 首屏失败不再是吸收态", () => {
   test("重试全部用尽后必须留下可见的重试入口（i18n，不得静默消失）", async () => {
     const rpc = baseRpc(() => Promise.reject(new Error("rpc_timeout")));
     const { conn } = stubConn(rpc);
-    const { container } = render(Terminal, { props: { conn, sessionId: "s-give-up", active: true } });
+    const { container } = render(Terminal, { props: { conn, sessionId: "s-give-up", active: true, streaming: true } });
     // 800 + 2400 = 3200ms 两次退避，留足余量。
     await tick(5000);
 
@@ -204,7 +204,7 @@ describe("1b · 首屏失败不再是吸收态", () => {
     let calls = 0;
     const rpc = baseRpc(() => { calls++; return Promise.reject(new Error("rpc_timeout")); });
     const { conn } = stubConn(rpc);
-    const { container } = render(Terminal, { props: { conn, sessionId: "s-manual", active: true } });
+    const { container } = render(Terminal, { props: { conn, sessionId: "s-manual", active: true, streaming: true } });
     await tick(5000);
     const before = calls;
 
@@ -230,7 +230,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     let reseed: ((t: any) => void) | undefined;
     render(Terminal, {
       props: {
-        conn, sessionId: "s-win", active: true,
+        conn, sessionId: "s-win", active: true, streaming: true,
         onReady: (_i: string, t: XTerm) => { xterm = t; },
         onReseedReady: (_i: string, f: any) => { reseed = f; },
       },
@@ -261,7 +261,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     let reseed: ((t: any) => void) | undefined;
     const { rerender } = render(Terminal, {
       props: {
-        conn, sessionId: "s-stash", active: true,
+        conn, sessionId: "s-stash", active: true, streaming: true,
         onReady: (_i: string, t: XTerm) => { xterm = t; },
         onReseedReady: (_i: string, f: any) => { reseed = f; },
       },
@@ -272,10 +272,10 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
 
     reseed?.("resync");                 // t0
     await tick();
-    await rerender({ conn, sessionId: "s-stash", active: false } as any);
+    await rerender({ conn, sessionId: "s-stash", active: false, streaming: true } as any);
     emit("s-stash", "STASHED\r\n");    // 隐藏期到达 → pendingOut
     await tick();
-    await rerender({ conn, sessionId: "s-stash", active: true } as any);
+    await rerender({ conn, sessionId: "s-stash", active: true, streaming: true } as any);
     await tick();                       // 激活 → flushPending 写进 xterm
     release!(hist("SNAP\n\n"));         // t1（末尾空行 = 光标行）
     await tick(30);
@@ -291,7 +291,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     let reseed: ((t: any) => void) | undefined;
     render(Terminal, {
       props: {
-        conn, sessionId: "s-mine", active: true,
+        conn, sessionId: "s-mine", active: true, streaming: true,
         onReady: (_i: string, t: XTerm) => { xterm = t; },
         onReseedReady: (_i: string, f: any) => { reseed = f; },
       },
@@ -318,7 +318,7 @@ describe("4 · reloadHistory 的 t0..t1 窗口旁录", () => {
     let reseed: ((t: any) => void) | undefined;
     render(Terminal, {
       props: {
-        conn, sessionId: "s-stale", active: true,
+        conn, sessionId: "s-stale", active: true, streaming: true,
         onReady: (_i: string, t: XTerm) => { xterm = t; },
         onReseedReady: (_i: string, f: any) => { reseed = f; },
       },
@@ -366,7 +366,7 @@ describe("5 · 重灌行数不得少于 buffer 现有行数", () => {
     let reseed: ((t: any) => void) | undefined;
     render(Terminal, {
       props: {
-        conn, sessionId: "s-lines", active: true, historyLines: 1000,
+        conn, sessionId: "s-lines", active: true, streaming: true, historyLines: 1000,
         onReseedReady: (_i: string, f: any) => { reseed = f; },
       },
     });
@@ -393,7 +393,7 @@ describe("5 · 重灌行数不得少于 buffer 现有行数", () => {
     let reseed: ((t: any) => void) | undefined;
     render(Terminal, {
       props: {
-        conn, sessionId: "s-lines2", active: true, historyLines: 1000,
+        conn, sessionId: "s-lines2", active: true, streaming: true, historyLines: 1000,
         onReseedReady: (_i: string, f: any) => { reseed = f; },
       },
     });
@@ -431,7 +431,7 @@ describe("5 · 隐藏期的积压不得压在重灌之后（teachppt 丢内容�
     let xterm: XTerm | undefined;
     let reseed: ((t: any) => void) | undefined;
     const props = {
-      conn, sessionId: "s-hidden", historyLines: 1000,
+      conn, sessionId: "s-hidden", streaming: true, historyLines: 1000,
       onReady: (_i: string, t: XTerm) => { xterm = t; },
       onReseedReady: (_i: string, f: any) => { reseed = f; },
     };
@@ -470,7 +470,7 @@ describe("5 · 隐藏期的积压不得压在重灌之后（teachppt 丢内容�
     const { conn, emit } = stubConn(rpc);
     let xterm: XTerm | undefined;
     const props = {
-      conn, sessionId: "s-plain",
+      conn, sessionId: "s-plain", streaming: true,
       onReady: (_i: string, t: XTerm) => { xterm = t; },
     };
     const { rerender } = render(Terminal, { props: { ...props, active: false } as any });
