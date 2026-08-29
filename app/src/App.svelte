@@ -659,22 +659,29 @@
     return { kind: "term" as const, id, title: id, state: s?.state ?? "idle", closed: s?.closed ?? false, shell: s?.kind === "shell" };
   }));
 
+  // Every non-tab-strip terminal entry (new session, task panel, notification,
+  // deep link, dev helper) converges here. Clear a still-valid file focus first:
+  // activeTopId projects visibility from activeTop before it falls back to
+  // activeId, so updating only activeId would stream a hidden terminal.
+  function focusTerminal(name: string) {
+    activeTop = "";
+    activeId = name;
+    if (backgrounded.has(name)) { backgrounded.delete(name); backgrounded = new Set(backgrounded); }
+    transitionStreaming(name);
+  }
+
   function newSession(name: string, kind: "tmux" | "shell" = "tmux") {
     // 兜底尺寸：让新会话一开始就按本机宽度排版，而不是先用 agent 默认的 80x24
     // 跑一段、再由 refit 纠正——纠正前打进历史的硬换行是回不来的。
     // 没有兜底（首次使用、隐私模式）时 recallDims 返回 null，行为与从前一致。
     const d = recallDims();
     conn.newSession(name, { kind, cols: d?.cols, rows: d?.rows });
-    activeId = name;
-    backgrounded.delete(name); backgrounded = new Set(backgrounded);
     tabOrder = appendOrder(tabOrder, name);
-    transitionStreaming(name);
+    focusTerminal(name);
   }
   function selectSession(name: string) {
     cancelSelection();
-    activeId = name;
-    if (backgrounded.has(name)) { backgrounded.delete(name); backgrounded = new Set(backgrounded); }
-    transitionStreaming(name);
+    focusTerminal(name);
   }
   function enterSession(name: string) {
     const s = sessions.find((x) => x.name === name);
@@ -851,7 +858,7 @@
     cancelSelection();
     copyMode = false; // leaving the tab drops the copy-mode overlay (clone is stale)
     if (id.startsWith("file:")) { activeTop = id; transitionStreaming(id); }
-    else { activeTop = ""; selectSession(id); }
+    else selectSession(id);
     // An open editor forces fullscreen; leaving its tab must release it (the
     // divider — the usual exit — is hidden while fullscreen). Only touch
     // fullscreen when an editor is actually open, so manual terminal-fullscreen
