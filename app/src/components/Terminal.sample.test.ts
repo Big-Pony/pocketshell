@@ -55,7 +55,7 @@ afterEach(() => { vi.useRealTimers(); });
 test("激活后不立刻采样 —— 那一刻首屏 seed 往往还在路上", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp1", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp1", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(0);
   // 激活当刻：write/render 都还没发
   expect(kindsOf(rpc).filter((k) => k === "write" || k === "render")).toHaveLength(0);
@@ -64,7 +64,7 @@ test("激活后不立刻采样 —— 那一刻首屏 seed 往往还在路上", 
 test("激活 1.5s 后采样落地：write 与 render 各一条", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp2", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp2", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   const kinds = kindsOf(rpc);
   expect(kinds.filter((k) => k === "write").length).toBeGreaterThanOrEqual(1);
@@ -74,7 +74,7 @@ test("激活 1.5s 后采样落地：write 与 render 各一条", async () => {
 test("空视口**不发** diag.screen —— 否则 tmux 的每一非空行都会被报成缺失", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp3", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp3", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   // jsdom 里终端始终没有内容 ⇒ 视口全空 ⇒ 对拍必须被跳过
   expect(callsOf(rpc, "diag.screen")).toHaveLength(0);
@@ -83,7 +83,7 @@ test("空视口**不发** diag.screen —— 否则 tmux 的每一非空行都�
 test("隐藏的终端不参与采样（它本来就不渲染）", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp4", active: false } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp4", active: false, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   expect(kindsOf(rpc).filter((k) => k === "write" || k === "render")).toHaveLength(0);
 });
@@ -91,7 +91,7 @@ test("隐藏的终端不参与采样（它本来就不渲染）", async () => {
 test("会话静止时心跳不产生日志 —— 十几个会话挂一夜不该把日志刷成噪音", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp5", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp5", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   const after = kindsOf(rpc).filter((k) => k === "write").length;
   // 再推进 60s：期间没有任何字节到达，心跳必须一条都不发
@@ -107,7 +107,7 @@ test("采样失败不抛、不产生未捕获拒绝", async () => {
   });
   const onRejection = vi.fn();
   window.addEventListener("unhandledrejection", onRejection);
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp6", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-smp6", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   window.removeEventListener("unhandledrejection", onRejection);
   expect(onRejection).not.toHaveBeenCalled();
@@ -134,7 +134,7 @@ test("agent 不带 diag 能力位时，一条诊断 rpc 都不发", async () => 
   const rpc = okRpc();
   const conn = stubConn(rpc);
   (conn as { hasFeature: (n: string) => boolean }).hasFeature = () => false;
-  render(Terminal, { props: { conn, sessionId: "s-smp7", active: true } });
+  render(Terminal, { props: { conn, sessionId: "s-smp7", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   document.dispatchEvent(new Event("visibilitychange"));
   await vi.advanceTimersByTimeAsync(1600);
@@ -145,7 +145,7 @@ test("agent 不带 diag 能力位时，一条诊断 rpc 都不发", async () => 
 test("连接对象没有 hasFeature 时按关闭处理，且不影响首屏 seed", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: featlessConn(rpc), sessionId: "s-smp8", active: true } });
+  render(Terminal, { props: { conn: featlessConn(rpc), sessionId: "s-smp8", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   expect(callsOf(rpc, "diag.report")).toHaveLength(0);
   // 首屏 seed 照常发生 —— 诊断判断抛出的话这条会挂
@@ -177,7 +177,7 @@ test("窗口 resize 之后心跳仍在采样 —— 清理属于销毁，不属�
   vi.useFakeTimers();
   const rpc = okRpc();
   const { conn, emit } = outConn(rpc);
-  render(Terminal, { props: { conn, sessionId: "s-smp9", active: true } });
+  render(Terminal, { props: { conn, sessionId: "s-smp9", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   const before = kindsOf(rpc).filter((k) => k === "write").length;
 
@@ -195,7 +195,7 @@ test("终端销毁后心跳停止 —— 往已 dispose 的终端读 buffer 会�
   vi.useFakeTimers();
   const rpc = okRpc();
   const { conn, emit } = outConn(rpc);
-  const { unmount } = render(Terminal, { props: { conn, sessionId: "s-smp10", active: true } });
+  const { unmount } = render(Terminal, { props: { conn, sessionId: "s-smp10", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   unmount();
   const after = kindsOf(rpc).filter((k) => k === "write").length;
@@ -213,7 +213,7 @@ test("终端销毁后心跳停止 —— 往已 dispose 的终端读 buffer 会�
 test("尺寸变化时上报 resize，带触发源与前后 cols", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-rz1", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-rz1", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   const rz = callsOf(rpc, "diag.report")
     .map((c) => c[1] as Record<string, unknown>)
@@ -229,7 +229,7 @@ test("尺寸变化时上报 resize，带触发源与前后 cols", async () => {
 test("尺寸没变时不上报 resize —— 否则每次滚动都是噪音", async () => {
   vi.useFakeTimers();
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-rz2", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-rz2", active: true, streaming: true } });
   await vi.advanceTimersByTimeAsync(1600);
   const before = callsOf(rpc, "diag.report")
     .map((c) => c[1] as Record<string, unknown>)
@@ -257,7 +257,7 @@ test("输入即回底部 —— RPC 输入旁路必须补上 scrollOnUserInput �
   };
   let captured: any;
   render(Terminal, {
-    props: { conn, sessionId: "s-scroll1", active: true, onReady: (_sid: string, t: any) => { captured = t; } },
+    props: { conn, sessionId: "s-scroll1", active: true, streaming: true, onReady: (_sid: string, t: any) => { captured = t; } },
   });
   await vi.advanceTimersByTimeAsync(0);
   expect(inputCb).toBeTypeOf("function");

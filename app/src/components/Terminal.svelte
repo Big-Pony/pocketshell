@@ -844,6 +844,7 @@
       startedAt: number, framesAtStart: number, bytesAtStart: number,
       lenBefore: number, lenAfter: number,
       snapshotBytes: number, discarded: boolean, error?: string,
+      recovery?: { mode: "online" | "offline"; queued: boolean; liveBytes: number },
     ) => {
       if (!diagOn()) return;   // 诊断默认关闭（2026-08-23）
       try {
@@ -860,6 +861,9 @@
             bufferLenAfter: lenAfter,
             error,
           }),
+          mode: recovery?.mode ?? (trigger === "seed" ? "offline" : "online"),
+          queued: recovery?.queued ?? false,
+          liveBytes: recovery?.liveBytes ?? 0,
         }).catch(() => {});
       } catch { /* 探针永不影响终端本身 */ }
     };
@@ -964,20 +968,28 @@
                 flushPending();
               } else needsReseed = true;
               reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
-                term.buffer.active.length, data.length, !committed);
+                term.buffer.active.length, data.length, !committed, undefined, {
+                  mode: "online",
+                  queued: reseedQueued,
+                  liveBytes: windowBytes?.byteLength ?? 0,
+                });
               resolve();
             });
           });
         } else {
           needsReseed = true;
           reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
-            term.buffer.active.length, data.length, true);
+            term.buffer.active.length, data.length, true, undefined, {
+              mode: "online", queued: reseedQueued, liveBytes: 0,
+            });
         }
       } catch (e) {
         // 失败也要留下窗口的字节：它们已经写进 xterm 了，没有 RIS 来抹，不必回灌。
         if (windowBuf === win) windowBuf = null;
         reportReseed(trigger, startedAt, framesAtStart, bytesAtStart, lenBefore,
-          term.buffer.active.length, 0, false, errLabel(e));
+          term.buffer.active.length, 0, false, errLabel(e), {
+            mode: "online", queued: reseedQueued, liveBytes: 0,
+          });
         needsReseed = true;
       } finally {
         reseedInFlight = false;

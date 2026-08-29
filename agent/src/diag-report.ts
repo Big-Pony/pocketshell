@@ -60,7 +60,7 @@ const MAX_STACK = 1500;
 const MAX_ARRAY = 64;
 
 /** Kinds the agent is willing to record. Anything else is logged as "unknown". */
-const KINDS = new Set(["atlas", "scroll", "reseed", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick", "input-send", "pump-kick", "js-error"]);
+const KINDS = new Set(["atlas", "scroll", "reseed", "stream-policy", "rpc", "attach", "seqgap", "drop", "screen", "write", "render", "resize", "render-kick", "input-send", "pump-kick", "js-error"]);
 
 const oneLine = (s: string, max: number) =>
   s.replace(/[\r\n\t]+/g, " ").slice(0, max);
@@ -127,10 +127,23 @@ export function formatDiagReport(input: unknown, now: () => number = Date.now): 
     // ReseedReportInput 逐字对应。只有计数，没有终端内容。
     if (typeof p.trigger === "string") out.trigger = oneLine(p.trigger, MAX_TAG);
     if (typeof p.discarded === "boolean") out.discarded = p.discarded;
+    if (typeof p.mode === "string") out.mode = oneLine(p.mode, MAX_TAG);
+    if (typeof p.queued === "boolean") out.queued = p.queued;
     for (const k of [
       "rttMs", "snapshotBytes", "framesDuringAwait", "bytesDuringAwait",
-      "bufferLenBefore", "bufferLenAfter",
+      "bufferLenBefore", "bufferLenAfter", "liveBytes",
     ] as const) {
+      const v = num(p[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    // Foreground streaming policy diagnostics. Session identifiers are bounded
+    // single-line tags; the remaining fields are counts. No terminal payload is
+    // accepted by this whitelist.
+    for (const k of ["current", "grace"] as const) {
+      if (p[k] === null) out[k] = null;
+      else if (typeof p[k] === "string") out[k] = oneLine(p[k], MAX_TAG);
+    }
+    for (const k of ["streamingCount", "detachedCount"] as const) {
       const v = num(p[k]);
       if (v !== undefined) out[k] = v;
     }

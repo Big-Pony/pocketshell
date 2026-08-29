@@ -46,6 +46,7 @@ test("挂载时不可测量，绝不把塌陷尺寸发给 PTY", async () => {
       conn: stubConn((_id, cols, rows) => sent.push({ cols, rows })),
       sessionId: "s1",
       active: true,
+      streaming: true,
     },
   });
   await tick();
@@ -66,6 +67,7 @@ test("隐藏挂载的 tab 不得向 PTY 发任何尺寸", async () => {
       conn: stubConn((_id, cols, rows) => sent.push({ cols, rows })),
       sessionId: "s2",
       active: false,
+      streaming: true,
     },
   });
   await tick();
@@ -77,14 +79,14 @@ test("反复切换隐藏/显示，发出去的尺寸始终可信", async () => {
   const sent: Array<{ cols: number; rows: number }> = [];
   const conn = stubConn((_id, cols, rows) => sent.push({ cols, rows }));
   const { rerender } = render(Terminal, {
-    props: { conn, sessionId: "s3", active: true },
+    props: { conn, sessionId: "s3", active: true, streaming: true },
   });
   await tick();
 
   for (let i = 0; i < 3; i++) {
-    await rerender({ conn, sessionId: "s3", active: false });
+    await rerender({ conn, sessionId: "s3", active: false, streaming: true });
     await tick();
-    await rerender({ conn, sessionId: "s3", active: true });
+    await rerender({ conn, sessionId: "s3", active: true, streaming: true });
     await tick();
   }
 

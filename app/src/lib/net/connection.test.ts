@@ -1076,6 +1076,25 @@ test("re-attach after detach resumes from the last received seq", () => {
   conn.dispose();
 });
 
+test("seed attach after detach sends a frame and overwrites the retained seen value", () => {
+  const h = harness();
+  h.conn.attach("work");
+  h.deliver({ type: "output", sessionId: "work", seq: 9, data: toB64(new Uint8Array([65])) } as any);
+  h.conn.detach("work");
+  const before = h.sent.length;
+
+  h.conn.attach("work", 4, { seed: true });
+
+  expect(h.sent.length).toBe(before + 1);
+  const attach = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(attach).toEqual({ type: "attach", sessionId: "work", lastSeq: 4 });
+
+  h.conn.detach("work");
+  h.conn.attach("work");
+  const resumed = decodeClient(new TextDecoder().decode(h.sent[h.sent.length - 1])) as any;
+  expect(resumed).toEqual({ type: "attach", sessionId: "work", lastSeq: 4 });
+});
+
 // ──────────────────────────────────────────────────────────────
 // WP-3b (A9): the reconnect backoff carries ±20% jitter — random=0 pins the
 // 500ms first backoff to its 400ms floor

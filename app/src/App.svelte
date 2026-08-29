@@ -150,6 +150,19 @@
   let graceGeneration = 0;
   let streamingInitialized = false;
 
+  function reportStreamPolicy(detachedCount: number) {
+    try {
+      if (typeof conn.hasFeature !== "function" || !conn.hasFeature("diag")) return;
+      void conn.rpc("diag.report", {
+        kind: "stream-policy",
+        current: streamPolicy.current,
+        grace: streamPolicy.grace,
+        streamingCount: streamingSessions.size,
+        detachedCount,
+      }).catch(() => {});
+    } catch { /* diagnostics never affect stream policy */ }
+  }
+
   function invalidateGraceDetach() {
     if (graceDetachTimer) clearTimeout(graceDetachTimer);
     graceDetachTimer = null;
@@ -170,6 +183,7 @@
       streamingSessions = new Set([...streamingSessions].filter((id) => id !== sessionId));
       streamPolicy = { ...streamPolicy, grace: null };
       conn.detach(sessionId);
+      reportStreamPolicy(1);
     }, TAB_DETACH_GRACE_MS);
   }
 
@@ -181,12 +195,14 @@
     streamingSessions = new Set(transition.stream);
     for (const id of transition.detachNow) conn.detach(id);
     scheduleGraceDetach(transition.scheduleDetach);
+    reportStreamPolicy(transition.detachNow.length);
   }
 
   function stopStreamingNow(sessionId: string) {
     const transition = stopStream(streamPolicy, sessionId);
     if (transition.preserveGraceTimer) {
       for (const id of transition.detachNow) conn.detach(id);
+      reportStreamPolicy(transition.detachNow.length);
       return;
     }
     invalidateGraceDetach();
@@ -194,6 +210,7 @@
     streamingSessions = new Set(transition.stream);
     for (const id of transition.detachNow) conn.detach(id);
     scheduleGraceDetach(streamPolicy.grace);
+    reportStreamPolicy(transition.detachNow.length);
   }
 
   function renameStreaming(sessionId: string, nextSessionId: string) {
@@ -204,6 +221,7 @@
     };
     streamingSessions = new Set([...streamingSessions].map((id) => id === sessionId ? nextSessionId : id));
     scheduleGraceDetach(streamPolicy.grace);
+    reportStreamPolicy(0);
   }
 
   function removeMissingStreaming(alive: ReadonlySet<string>) {
@@ -213,8 +231,10 @@
       current: streamPolicy.current && alive.has(streamPolicy.current) ? streamPolicy.current : null,
       grace: streamPolicy.grace && alive.has(streamPolicy.grace) ? streamPolicy.grace : null,
     };
+    const before = streamingSessions.size;
     streamingSessions = new Set([...streamingSessions].filter((id) => alive.has(id)));
     scheduleGraceDetach(streamPolicy.grace);
+    reportStreamPolicy(before - streamingSessions.size);
   }
   let status = $state<ConnStatus>("connecting");
   // 首次连接与断线重连是两回事：前者没什么"断开"可言，用同一句"已断开"

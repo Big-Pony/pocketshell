@@ -1,6 +1,7 @@
 import { test, expect, vi, beforeAll, afterAll } from "vitest";
 import { render } from "@testing-library/svelte";
 import Terminal from "./Terminal.svelte";
+import { toB64 } from "../lib/bytes";
 
 // 回前台自动上报图集状态（docs/bug/终端显示异常2）。
 //
@@ -46,7 +47,7 @@ afterAll(() => {
 
 test("reports the atlas state to the agent every time the app returns to the foreground", async () => {
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-diag", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-diag", active: true, streaming: true } });
   await new Promise((r) => setTimeout(r, 0));
   rpc.mockClear();
 
@@ -71,7 +72,7 @@ test("a failing report never propagates — diagnostics must not break the sessi
     if (method === "diag.report") return Promise.reject(new Error("rpc_timeout"));
     return Promise.resolve({ data: "", currentCommand: "", alternateOn: false, isShell: true });
   });
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-diag2", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-diag2", active: true, streaming: true } });
   await new Promise((r) => setTimeout(r, 0));
 
   const onRejection = vi.fn();
@@ -104,7 +105,7 @@ test("a failing report never propagates — diagnostics must not break the sessi
 
 test("stops reporting once the terminal is unmounted", async () => {
   const rpc = okRpc();
-  const { unmount } = render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-diag3", active: true } });
+  const { unmount } = render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-diag3", active: true, streaming: true } });
   await new Promise((r) => setTimeout(r, 0));
   unmount();
   rpc.mockClear();
@@ -119,7 +120,7 @@ test("stops reporting once the terminal is unmounted", async () => {
 // onVisible 里发，因为「回前台」正是这个 bug 唯一的发作时机。
 test("reports a scroll snapshot when the page comes back to the foreground", async () => {
   const rpc = okRpc();
-  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-scroll", active: true } });
+  render(Terminal, { props: { conn: stubConn(rpc), sessionId: "s-scroll", active: true, streaming: true } });
   await new Promise((r) => setTimeout(r, 0));
   rpc.mockClear();
 
@@ -135,4 +136,73 @@ test("reports a scroll snapshot when the page comes back to the foreground", asy
   expect(scrollCalls[0][1]).toHaveProperty("bufferLength");
   expect(scrollCalls[0][1]).toHaveProperty("cellHeight");
   expect(scrollCalls[0][1]).toHaveProperty("scrollHeight");
+});
+
+test("recovery diagnostics expose mode, queue state and byte counts without terminal content", async () => {
+  let historyCall = 0;
+  let resolveHistory!: (value: unknown) => void;
+  const rpc = vi.fn().mockImplementation((method: string) => {
+    if (method === "term.history") {
+      historyCall++;
+      if (historyCall === 1) {
+        return Promise.resolve({ data: toB64(new TextEncoder().encode("initial\n")), seq: 6 });
+      }
+      if (historyCall === 2) return new Promise((resolve) => { resolveHistory = resolve; });
+      return Promise.resolve({ data: toB64(new TextEncoder().encode("follow-up\n")), seq: 8 });
+    }
+    if (method === "term.paneInfo") {
+      return Promise.resolve({ currentCommand: "zsh", alternateOn: false, isShell: true });
+    }
+    return Promise.resolve({});
+  });
+  const outputCallbacks: Array<(frame: { sessionId: string; seq: number; data: Uint8Array }) => void> = [];
+  let requestReseed: ((trigger: any) => void) | undefined;
+  const conn = {
+    ...stubConn(rpc),
+    onOutput: (cb: (frame: { sessionId: string; seq: number; data: Uint8Array }) => void) => {
+      outputCallbacks.push(cb);
+      return () => {};
+    },
+  } as any;
+  render(Terminal, {
+    props: {
+      conn,
+      sessionId: "s-recovery-diag",
+      active: true,
+      streaming: true,
+      onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  rpc.mockClear();
+
+  requestReseed?.("resync");
+  requestReseed?.("resync");
+  const live = new TextEncoder().encode("SECRET-LIVE-COMMAND");
+  for (const cb of outputCallbacks) cb({ sessionId: "s-recovery-diag", seq: 8, data: live });
+  resolveHistory({
+    data: toB64(new TextEncoder().encode("SECRET-SNAPSHOT-CONTENT\n")),
+    seq: 7,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const reports = diagCalls(rpc)
+    .map((call) => call[1] as Record<string, unknown>)
+    .filter((payload) => payload.kind === "reseed" && payload.trigger === "resync");
+  expect(reports.length).toBeGreaterThanOrEqual(1);
+  expect(reports[0]).toMatchObject({ mode: "online", queued: true, liveBytes: live.byteLength });
+  const encoded = JSON.stringify(reports[0]);
+  expect(encoded).not.toContain("SECRET-LIVE-COMMAND");
+  expect(encoded).not.toContain("SECRET-SNAPSHOT-CONTENT");
+});
+
+test("recovery diagnostics make no RPC when the agent lacks the diag feature", async () => {
+  const rpc = okRpc();
+  const conn = stubConn(rpc);
+  conn.hasFeature = () => false;
+  render(Terminal, {
+    props: { conn, sessionId: "s-no-recovery-diag", active: true, streaming: true },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(diagCalls(rpc)).toHaveLength(0);
 });

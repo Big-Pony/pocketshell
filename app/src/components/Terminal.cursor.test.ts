@@ -47,7 +47,7 @@ test("renders a visible cursor while the pane is permanently unfocused", async (
   // reads its options from, so this asserts the real terminal, not a copy.
   let term: any;
   render(Terminal, {
-    props: { conn: stubConn(), sessionId: "s1", active: true, onReady: (_id: string, t: any) => (term = t) },
+    props: { conn: stubConn(), sessionId: "s1", active: true, streaming: true, onReady: (_id: string, t: any) => (term = t) },
   });
   await new Promise((r) => setTimeout(r, 0));
 

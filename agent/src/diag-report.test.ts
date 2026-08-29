@@ -174,6 +174,42 @@ test("reseed 诊断：trigger 里的换行被抹平，不能伪造第二行日�
   expect(line.split("\n").length).toBe(1);
 });
 
+test("reseed recovery scheduling metadata survives without terminal content", () => {
+  const body = parse(formatDiagReport({
+    kind: "reseed", mode: "online", queued: true, liveBytes: 8192,
+    snapshot: "SECRET-SNAPSHOT", text: "SECRET-TEXT", data: "SECRET-DATA",
+  }, at));
+  expect(body).toMatchObject({
+    kind: "reseed", mode: "online", queued: true, liveBytes: 8192,
+  });
+  expect(JSON.stringify(body)).not.toContain("SECRET");
+});
+
+test("stream-policy accepts bounded identifiers and content-free counters", () => {
+  const body = parse(formatDiagReport({
+    kind: "stream-policy",
+    current: "current\nforged" + "x".repeat(100),
+    grace: "grace\tforged",
+    streamingCount: 2,
+    detachedCount: 1,
+    snapshot: "SECRET-SNAPSHOT",
+    text: "SECRET-TEXT",
+  }, at));
+  expect(body.kind).toBe("stream-policy");
+  expect(body.current).not.toContain("\n");
+  expect(body.current.length).toBeLessThanOrEqual(64);
+  expect(body.grace).toBe("grace forged");
+  expect(body.streamingCount).toBe(2);
+  expect(body.detachedCount).toBe(1);
+  expect(JSON.stringify(body)).not.toContain("SECRET");
+});
+
+test("stream-policy preserves absent current and grace as null", () => {
+  expect(parse(formatDiagReport({
+    kind: "stream-policy", current: null, grace: null,
+  }, at))).toMatchObject({ kind: "stream-policy", current: null, grace: null });
+});
+
 test("kind rpc keeps the five wire counters and drops everything else", () => {
   const line = formatDiagReport({
     kind: "rpc", tag: "t", method: "fs.read", rttMs: 820,
