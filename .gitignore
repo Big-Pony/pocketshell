@@ -18,6 +18,7 @@ docs/
 .playwright-mcp/
 spike/
 CLAUDE.md
+/AGENTS.md
 deploy-info/
 .agents/
 skills-lock.json
