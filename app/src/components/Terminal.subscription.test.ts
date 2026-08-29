@@ -1,8 +1,15 @@
-import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { render, waitFor } from "@testing-library/svelte";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import Terminal from "./Terminal.svelte";
 import { toB64 } from "../lib/bytes";
+
+const gunzipControl = vi.hoisted(() => ({
+  decode: (bytes: Uint8Array) => Promise.resolve(bytes),
+}));
+vi.mock("../lib/gunzip", () => ({
+  gunzip: (bytes: Uint8Array) => gunzipControl.decode(bytes),
+}));
 
 type OutputFrame = { sessionId: string; seq: number; data: Uint8Array };
 
@@ -69,6 +76,9 @@ beforeAll(() => {
 });
 afterAll(() => {
   window.matchMedia = originalMatchMedia;
+});
+afterEach(() => {
+  gunzipControl.decode = (bytes: Uint8Array) => Promise.resolve(bytes);
 });
 
 test("a hidden non-streaming mount does no history work and starts once streaming", async () => {
@@ -243,6 +253,181 @@ test("a stopped generation cannot write or attach when its history arrives", asy
 
   expect(write).not.toHaveBeenCalled();
   expect(conn.attach).not.toHaveBeenCalled();
+});
+
+test("a hidden stale offline response retries offline on activation and reattaches", async () => {
+  const stale = deferred<{ data: string; seq: number }>();
+  const fresh = deferred<{ data: string; seq: number }>();
+  let call = 0;
+  const conn = stubConn(() => {
+    call++;
+    if (call === 1) return Promise.resolve({
+      data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+    });
+    if (call === 2) return stale.promise;
+    return fresh.promise;
+  });
+  const props = { conn: conn as any, sessionId: "A", active: true, streaming: true };
+  const { rerender } = render(Terminal, { props });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 3, { seed: true }));
+
+  await rerender({ ...props, streaming: false });
+  conn.attach.mockClear();
+  await rerender({ ...props, streaming: true });
+  expect(historyCalls(conn)).toBe(2);
+
+  await rerender({ ...props, active: false });
+  stale.resolve({ data: toB64(new TextEncoder().encode("stale-hidden\n")), seq: 10 });
+  await tick();
+  expect(historyCalls(conn)).toBe(2);
+  expect(conn.attach).not.toHaveBeenCalled();
+
+  await rerender({ ...props, active: true });
+  await waitFor(() => expect(historyCalls(conn)).toBe(3));
+  fresh.resolve({ data: toB64(new TextEncoder().encode("fresh-active\n")), seq: 12 });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 12, { seed: true }));
+});
+
+test("streaming roundtrip during online gzip decode cannot enqueue a stale RIS write", async () => {
+  const decode = deferred<Uint8Array>();
+  const followUp = deferred<{ data: string; seq: number }>();
+  gunzipControl.decode = vi.fn(() => decode.promise);
+  let call = 0;
+  const staleBytes = new TextEncoder().encode("stale-online\n");
+  const conn = stubConn(() => {
+    call++;
+    if (call === 1) return Promise.resolve({
+      data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+    });
+    if (call === 2) return Promise.resolve({ data: toB64(staleBytes), enc: "gzip", seq: 20 });
+    return followUp.promise;
+  });
+  let term: XTerm | undefined;
+  let requestReseed: ((trigger: any) => void) | undefined;
+  const props = {
+    conn: conn as any, sessionId: "A", active: true, streaming: true,
+    onReady: (_id: string, value: XTerm) => { term = value; },
+    onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+  };
+  const { rerender } = render(Terminal, { props });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 3, { seed: true }));
+  const write = vi.fn();
+  (term as any).write = write;
+  conn.attach.mockClear();
+
+  requestReseed?.("resync");
+  await waitFor(() => expect(gunzipControl.decode).toHaveBeenCalledTimes(1));
+  await rerender({ ...props, streaming: false });
+  await rerender({ ...props, streaming: true });
+  decode.resolve(staleBytes);
+  await waitFor(() => expect(historyCalls(conn)).toBe(3));
+
+  expect(write).not.toHaveBeenCalled();
+  expect(conn.attach).not.toHaveBeenCalled();
+});
+
+test("active roundtrip during online gzip decode cannot enqueue a stale RIS write", async () => {
+  const decode = deferred<Uint8Array>();
+  const followUp = deferred<{ data: string; seq: number }>();
+  gunzipControl.decode = vi.fn(() => decode.promise);
+  let call = 0;
+  const staleBytes = new TextEncoder().encode("stale-online\n");
+  const conn = stubConn(() => {
+    call++;
+    if (call === 1) return Promise.resolve({
+      data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+    });
+    if (call === 2) return Promise.resolve({ data: toB64(staleBytes), enc: "gzip", seq: 20 });
+    return followUp.promise;
+  });
+  let term: XTerm | undefined;
+  let requestReseed: ((trigger: any) => void) | undefined;
+  const props = {
+    conn: conn as any, sessionId: "A", active: true, streaming: true,
+    onReady: (_id: string, value: XTerm) => { term = value; },
+    onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+  };
+  const { rerender } = render(Terminal, { props });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 3, { seed: true }));
+  const write = vi.fn();
+  (term as any).write = write;
+
+  requestReseed?.("resync");
+  await waitFor(() => expect(gunzipControl.decode).toHaveBeenCalledTimes(1));
+  await rerender({ ...props, active: false });
+  await rerender({ ...props, active: true });
+  decode.resolve(staleBytes);
+  await waitFor(() => expect(historyCalls(conn)).toBe(3));
+
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("active roundtrip during failed initial gzip decode cannot fallback attach", async () => {
+  const decode = deferred<Uint8Array>();
+  const retry = deferred<{ data: string; seq: number }>();
+  gunzipControl.decode = vi.fn(() => decode.promise);
+  let call = 0;
+  const bytes = new TextEncoder().encode("stale-initial\n");
+  const conn = stubConn(() => {
+    call++;
+    if (call === 1) return Promise.resolve({ data: toB64(bytes), enc: "gzip", seq: 4 });
+    return retry.promise;
+  });
+  const props = { conn: conn as any, sessionId: "A", active: true, streaming: true };
+  const { rerender } = render(Terminal, { props });
+  await waitFor(() => expect(gunzipControl.decode).toHaveBeenCalledTimes(1));
+
+  await rerender({ ...props, active: false });
+  await rerender({ ...props, active: true });
+  decode.reject(new Error("decode-failed"));
+  await waitFor(() => expect(historyCalls(conn)).toBe(2));
+
+  expect(conn.attach).not.toHaveBeenCalled();
+});
+
+test("resyncs queued during offline recovery drain once after commit and attach", async () => {
+  const offline = deferred<{ data: string; seq: number }>();
+  const online = deferred<{ data: string; seq: number }>();
+  let call = 0;
+  const conn = stubConn(() => {
+    call++;
+    if (call === 1) return Promise.resolve({
+      data: toB64(new TextEncoder().encode("initial\n")), seq: 3,
+    });
+    if (call === 2) return offline.promise;
+    return online.promise;
+  });
+  let term: XTerm | undefined;
+  let requestReseed: ((trigger: any) => void) | undefined;
+  const props = {
+    conn: conn as any, sessionId: "A", active: true, streaming: true,
+    onReady: (_id: string, value: XTerm) => { term = value; },
+    onReseedReady: (_id: string, fn: (trigger: any) => void) => { requestReseed = fn; },
+  };
+  const { rerender } = render(Terminal, { props });
+  await waitFor(() => expect(conn.attach).toHaveBeenCalledWith("A", 3, { seed: true }));
+  await rerender({ ...props, streaming: false });
+  conn.attach.mockClear();
+
+  const commits: Array<() => void> = [];
+  (term as any).write = vi.fn((_data: string | Uint8Array, callback?: () => void) => {
+    if (callback) commits.push(callback);
+  });
+  await rerender({ ...props, streaming: true });
+  expect(historyCalls(conn)).toBe(2);
+  requestReseed?.("resync");
+  requestReseed?.("resync");
+  expect(historyCalls(conn)).toBe(2);
+
+  offline.resolve({ data: toB64(new TextEncoder().encode("offline-fresh\n")), seq: 30 });
+  await waitFor(() => expect(commits).toHaveLength(1));
+  expect(historyCalls(conn)).toBe(2);
+  commits[0]();
+  await waitFor(() => expect(historyCalls(conn)).toBe(3));
+
+  expect(conn.attach).toHaveBeenCalledWith("A", 30, { seed: true });
+  await tick();
+  expect(historyCalls(conn)).toBe(3);
 });
 
 test("rapid stop and resume never overlaps same-terminal history requests", async () => {

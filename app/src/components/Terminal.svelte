@@ -158,7 +158,9 @@
   let startStreaming: () => void = () => {};
   let stopStreaming: () => void = () => {};
   let recoverOnActivate: () => void = () => {};
+  let invalidateActiveRecovery: () => void = () => {};
   let streamingApplied = false;
+  let activeApplied: boolean | null = null;
   // Same lifecycle again: start/pause the classifyPane poll with visibility
   // (A4 — only the active, live session polls tmux).
   let startPoll: () => void = () => {};
@@ -823,6 +825,8 @@
     // 载荷拼装与代际闸门在 lib/term/reseed.ts，那里有完整的实测记录。
     const reseedGate = new ReseedGate();
     let recoveryGeneration = 0;
+    let activeGeneration = 0;
+    invalidateActiveRecovery = () => { activeGeneration++; };
     let needsReseed = false;
 
     /**
@@ -929,8 +933,17 @@
           { expectBytes: historyExpectBytes(wantLines) },
         )) as TermHistoryResult;
         // 期间有更新的重灌发起 —— 这份快照已经过时，整份丢弃。
-        const stale = reseedGate.isStale(gateGeneration) || generation !== recoveryGeneration;
+        // Online recovery intentionally tolerates hide/show while the history
+        // RPC is pending: pendingOut/windowBuf preserve that data. Once decode
+        // begins, however, a lifecycle round-trip must invalidate this payload.
+        const decodeActiveGeneration = activeGeneration;
+        let stale = reseedGate.isStale(gateGeneration) || generation !== recoveryGeneration;
         const data = stale ? "" : await decodeHistoryData(h?.data ?? "", h?.enc);
+        // Decode/decompression is asynchronous. Visibility or delivery intent
+        // can round-trip while it runs, so the pre-decode result is not a safe
+        // commit token.
+        stale = stale || reseedGate.isStale(gateGeneration) || generation !== recoveryGeneration
+          || decodeActiveGeneration !== activeGeneration;
         // 过期的一代不许动窗口：它的旁录已经归给新一代了（windowBuf 早被覆盖）。
         // dirty 表示窗口内涌进的字节超过 2MB 上限、已被 PendingBuffer 丢弃，
         // 此时拿到的是**残缺**的字节流，回灌反而会写出错乱的屏幕 —— 宁可只写快照。
@@ -947,8 +960,10 @@
         //
         // RIS、快照、窗口旁录必须拼进**同一次** write：拆成两次虽然队列里也有序，
         // 但中间会插进实时帧，修复即失效。lib/term/reseed.ts 有断言守着这一点。
-        const canCommit = !stale && !destroyed && active && streaming && currentBuffer === "normal";
-        if (canCommit) {
+        const canCommit = () => !stale && !destroyed && active && streaming
+          && generation === recoveryGeneration && decodeActiveGeneration === activeGeneration
+          && currentBuffer === "normal";
+        if (canCommit()) {
           // 隐藏期攒下的积压里，seq ≤ 快照号的那部分已经体现在这份快照里了。
           // 不在这里丢掉的话，用户切回来时 flushPending 会把它们整份重放到一份
           // 已是终态的 buffer 上 —— 那正是 2026-08-27 teachppt「AI 最后一次的
@@ -960,9 +975,17 @@
             queuedReseedTrigger = trigger;
           }
           await new Promise<void>((resolve) => {
+            // Keep this guard adjacent to the write. No stale snapshot may
+            // enqueue RIS even if lifecycle state changed during preparation.
+            if (!canCommit()) {
+              needsReseed = true;
+              resolve();
+              return;
+            }
             term.write(concatReseedWrite(buildReseedPayload(data), windowBytes), () => {
               const committed = !destroyed && active && streaming
-                && generation === recoveryGeneration && currentBuffer === "normal";
+                && generation === recoveryGeneration && decodeActiveGeneration === activeGeneration
+                && currentBuffer === "normal";
               if (committed && !dirtyWindow) {
                 needsReseed = false;
                 flushPending();
@@ -1012,9 +1035,9 @@
       void runReseed(trigger);
     }
     recoverOnActivate = () => {
-      if (needsReseed && !offlineQueued && historyMode !== "offline") {
-        requestReseed(queuedReseedTrigger);
-      }
+      if (!needsReseed) return;
+      if (offlineQueued) { drainHistoryQueue(); return; }
+      if (historyMode !== "offline") requestReseed(queuedReseedTrigger);
     };
 
     // 首屏 seed：拉一份快照写进空白终端，然后用快照的 seq 订阅之后的增量。
@@ -1052,6 +1075,7 @@
       historyInFlight = true;
       historyMode = "seed";
       const gen = recoveryGeneration;
+      const activeGen = activeGeneration;
       // 重试成功后这三个必须一起归位：只清 seeding 的话，内容出来了却一直盖着
       // 一层「正在重试」的半透明提示。
       seedFailed = false;
@@ -1061,9 +1085,14 @@
       const framesAtStart = probeFrames;
       const bytesAtStart = probeBytes;
       const lenBefore = term.buffer.active.length;
+      const seedIsCurrent = () => !destroyed && streaming && gen === recoveryGeneration
+        && activeGen === activeGeneration;
+      const queueCurrentSeed = () => {
+        if (!destroyed && streaming && !offlineQueued) seedQueuedAttempt = attempt;
+      };
       try {
         const snapshot = await loadHistorySnapshot(historyLines);
-        if (destroyed || !streaming || gen !== recoveryGeneration) return;
+        if (!seedIsCurrent()) { queueCurrentSeed(); return; }
         let text = "";
         if (snapshot.text) {
           // 保持首屏语义不变：**不带 RIS**（终端此刻本就是空的，见上方注释），
@@ -1071,6 +1100,7 @@
           // 载荷，会多一个 RIS 前缀；两者共用 normalizeReseedRows，所以「结尾
           // 那个换行要去掉」（光标停在快照最后一行）对首屏同样成立。
           text = normalizeReseedRows(snapshot.text);
+          if (!seedIsCurrent()) { queueCurrentSeed(); return; }
           term.write(text, () => {
             reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
               term.buffer.active.length, text.length, false);
@@ -1079,11 +1109,12 @@
           reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
             term.buffer.active.length, 0, false);
         }
+        if (!seedIsCurrent()) { queueCurrentSeed(); return; }
         conn.attach(sessionId, snapshot.seq, { seed: true });
         seeding = false;
         needsReseed = false;
       } catch (e) {
-        if (destroyed || !streaming || gen !== recoveryGeneration) return;
+        if (!seedIsCurrent()) { queueCurrentSeed(); return; }
         // 首屏路径此前**零埋点**，而它才是「重进应用」的主路径 —— 首屏空白在日志里
         // 一个直接证据都没有。这条补上后才谈得上验证修复。
         reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
@@ -1117,6 +1148,7 @@
       historyInFlight = true;
       historyMode = "offline";
       const gen = ++recoveryGeneration;
+      const activeGen = activeGeneration;
       const activeAtStart = active;
       const startedAt = Date.now();
       const framesAtStart = probeFrames;
@@ -1125,24 +1157,37 @@
       seedFailed = false;
       seedRetrying = false;
       seeding = true;
+      const queueOfflineRetry = () => {
+        needsReseed = true;
+        if (!destroyed && streaming) offlineQueued = true;
+      };
+      const resumeIsCurrent = () => !destroyed && streaming
+        && gen === recoveryGeneration && activeGen === activeGeneration
+        && active === activeAtStart;
       try {
         const snapshot = await loadHistorySnapshot(historyLines);
-        if (destroyed || !streaming || gen !== recoveryGeneration || active !== activeAtStart) return;
+        if (!resumeIsCurrent()) { queueOfflineRetry(); return; }
         await new Promise<void>((resolve) => {
+          // Snapshot decoding/preparation may yield. Re-check immediately next
+          // to the atomic RIS write, not only when the RPC first resolves.
+          if (!resumeIsCurrent()) {
+            queueOfflineRetry();
+            resolve();
+            return;
+          }
           commitSnapshot(snapshot, null, () => {
-            if (!destroyed && streaming && gen === recoveryGeneration && active === activeAtStart) {
+            if (resumeIsCurrent()) {
               reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
                 term.buffer.active.length, snapshot.text.length, false);
-              needsReseed = false;
-              reseedQueued = false;
+              needsReseed = reseedQueued;
               seeding = false;
               conn.attach(sessionId, snapshot.seq, { seed: true });
-            }
+            } else queueOfflineRetry();
             resolve();
           });
         });
       } catch (e) {
-        if (destroyed || !streaming || gen !== recoveryGeneration) return;
+        if (!resumeIsCurrent()) { queueOfflineRetry(); return; }
         reportReseed("seed", startedAt, framesAtStart, bytesAtStart, lenBefore,
           term.buffer.active.length, 0, false, errLabel(e));
         seeding = false;
@@ -1158,7 +1203,7 @@
 
     drainHistoryQueue = () => {
       if (historyInFlight || destroyed) return;
-      if (offlineQueued && streaming) {
+      if (offlineQueued && active && streaming) {
         offlineQueued = false;
         void resumeFromHistory();
         return;
@@ -1478,7 +1523,14 @@
   // right away (after flush + refit) and restarts the 2s cadence; hiding pauses
   // it, and a tombstone (closed/done) stops it for good.
   $effect(() => {
-    if (mounted && active && !closed && term && fit) {
+    const nowActive = active;
+    if (!mounted) return;
+    if (activeApplied === null) activeApplied = nowActive;
+    else if (nowActive !== activeApplied) {
+      activeApplied = nowActive;
+      invalidateActiveRecovery();
+    }
+    if (nowActive && !closed && term && fit) {
       resumeOutput();
       queueMicrotask(() => {
         activateRefit();
